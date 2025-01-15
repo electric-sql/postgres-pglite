@@ -62,7 +62,7 @@ fi
 -mno-exception-handling"
 
 
-        rm hello_em.*
+        rm hello_em.* || true
 
         cat > /tmp/sdk/hello_em.c <<END
 #include <stdio.h>
