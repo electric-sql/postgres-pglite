@@ -1,3 +1,12 @@
+PGlite PostgreSQL Fork
+======================
+
+This is a fork of PostgreSQL used by PGlite.
+
+For more information, please visit the PGlite website at https://pglite.dev or see the main PGlite repository at https://github.com/electric-sql/pglite.
+
+We use the issues tracker on the main PGlite repository to track issues with this fork.
+
 PostgreSQL Database Management System
 =====================================
 
