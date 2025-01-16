@@ -3,7 +3,7 @@
  * array_userfuncs.c
  *	  Misc user-visible array support functions
  *
- * Copyright (c) 2003-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2003-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/utils/adt/array_userfuncs.c
@@ -685,7 +685,7 @@ array_agg_serialize(PG_FUNCTION_ARGS)
 									&typisvarlena);
 			fmgr_info_cxt(typsend, &iodata->typsend,
 						  fcinfo->flinfo->fn_mcxt);
-			fcinfo->flinfo->fn_extra = (void *) iodata;
+			fcinfo->flinfo->fn_extra = iodata;
 		}
 
 		for (i = 0; i < state->nelems; i++)
@@ -776,7 +776,7 @@ array_agg_deserialize(PG_FUNCTION_ARGS)
 								   &iodata->typioparam);
 			fmgr_info_cxt(typreceive, &iodata->typreceive,
 						  fcinfo->flinfo->fn_mcxt);
-			fcinfo->flinfo->fn_extra = (void *) iodata;
+			fcinfo->flinfo->fn_extra = iodata;
 		}
 
 		for (int i = 0; i < nelems; i++)
@@ -1642,7 +1642,7 @@ array_shuffle(PG_FUNCTION_ARGS)
 	if (typentry == NULL || typentry->type_id != elmtyp)
 	{
 		typentry = lookup_type_cache(elmtyp, 0);
-		fcinfo->flinfo->fn_extra = (void *) typentry;
+		fcinfo->flinfo->fn_extra = typentry;
 	}
 
 	result = array_shuffle_n(array, ARR_DIMS(array)[0], true, elmtyp, typentry);
@@ -1678,7 +1678,7 @@ array_sample(PG_FUNCTION_ARGS)
 	if (typentry == NULL || typentry->type_id != elmtyp)
 	{
 		typentry = lookup_type_cache(elmtyp, 0);
-		fcinfo->flinfo->fn_extra = (void *) typentry;
+		fcinfo->flinfo->fn_extra = typentry;
 	}
 
 	result = array_shuffle_n(array, n, false, elmtyp, typentry);

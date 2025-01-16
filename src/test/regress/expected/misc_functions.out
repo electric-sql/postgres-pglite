@@ -22,7 +22,7 @@ BEGIN
     SET LOCAL jit = 0;
 
     FOR ln IN
-        EXECUTE format('explain (analyze %s, costs on, summary off, timing off) %s',
+        EXECUTE format('explain (analyze %s, costs on, summary off, timing off, buffers off) %s',
             analyze_str, query)
     LOOP
         IF hide_costs = true THEN
@@ -712,6 +712,71 @@ false, true, false, true);
 -- the support function.
 SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '0 day') g(s);
 ERROR:  step size cannot equal zero
+--
+-- Test the SupportRequestRows support function for generate_series_numeric()
+--
+-- Ensure the row estimate matches the actual rows
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0) g(s);$$,
+true, true, false, true);
+                                    explain_mask_costs                                    
+------------------------------------------------------------------------------------------
+ Function Scan on generate_series g  (cost=N..N rows=25 width=N) (actual rows=25 loops=1)
+(1 row)
+
+-- As above but with non-default step
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0, 2.0) g(s);$$,
+true, true, false, true);
+                                    explain_mask_costs                                    
+------------------------------------------------------------------------------------------
+ Function Scan on generate_series g  (cost=N..N rows=13 width=N) (actual rows=13 loops=1)
+(1 row)
+
+-- Ensure the estimates match when step is decreasing
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 1.0, -1.0) g(s);$$,
+true, true, false, true);
+                                    explain_mask_costs                                    
+------------------------------------------------------------------------------------------
+ Function Scan on generate_series g  (cost=N..N rows=25 width=N) (actual rows=25 loops=1)
+(1 row)
+
+-- Ensure an empty range estimates 1 row
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 1.0, 1.0) g(s);$$,
+true, true, false, true);
+                                   explain_mask_costs                                   
+----------------------------------------------------------------------------------------
+ Function Scan on generate_series g  (cost=N..N rows=1 width=N) (actual rows=0 loops=1)
+(1 row)
+
+-- Ensure we get the default row estimate for error cases (infinity/NaN values
+-- and zero step size)
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series('-infinity'::NUMERIC, 'infinity'::NUMERIC, 1.0) g(s);$$,
+false, true, false, true);
+                        explain_mask_costs                         
+-------------------------------------------------------------------
+ Function Scan on generate_series g  (cost=N..N rows=1000 width=N)
+(1 row)
+
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0, 'NaN'::NUMERIC) g(s);$$,
+false, true, false, true);
+                        explain_mask_costs                         
+-------------------------------------------------------------------
+ Function Scan on generate_series g  (cost=N..N rows=1000 width=N)
+(1 row)
+
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 2.0, 0.0) g(s);$$,
+false, true, false, true);
+                        explain_mask_costs                         
+-------------------------------------------------------------------
+ Function Scan on generate_series g  (cost=N..N rows=1000 width=N)
+(1 row)
+
 -- Test functions for control data
 SELECT count(*) > 0 AS ok FROM pg_control_checkpoint();
  ok 
@@ -826,15 +891,15 @@ SELECT pg_column_toast_chunk_id(a) IS NULL,
 DROP TABLE test_chunk_id;
 DROP FUNCTION explain_mask_costs(text, bool, bool, bool, bool);
 -- test stratnum support functions
-SELECT gist_stratnum_identity(3::smallint);
- gist_stratnum_identity 
-------------------------
-                      3
+SELECT gist_stratnum_common(7);
+ gist_stratnum_common 
+----------------------
+                    3
 (1 row)
 
-SELECT gist_stratnum_identity(18::smallint);
- gist_stratnum_identity 
-------------------------
-                     18
+SELECT gist_stratnum_common(3);
+ gist_stratnum_common 
+----------------------
+                   18
 (1 row)
 

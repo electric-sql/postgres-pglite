@@ -4,7 +4,7 @@
  *
  * See src/backend/access/brin/README for details.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -33,7 +33,7 @@
 #include "postmaster/autovacuum.h"
 #include "storage/bufmgr.h"
 #include "storage/freespace.h"
-#include "tcop/tcopprot.h"		/* pgrminclude ignore */
+#include "tcop/tcopprot.h"
 #include "utils/acl.h"
 #include "utils/datum.h"
 #include "utils/fmgrprotos.h"
@@ -567,7 +567,7 @@ bringetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 	BrinOpaque *opaque;
 	BlockNumber nblocks;
 	BlockNumber heapBlk;
-	int			totalpages = 0;
+	int64		totalpages = 0;
 	FmgrInfo   *consistentFn;
 	MemoryContext oldcxt;
 	MemoryContext perRangeCxt;
@@ -1222,7 +1222,7 @@ brinbuild(Relation heap, Relation index, IndexInfo *indexInfo)
 		 * generate summary for the same range twice).
 		 */
 		reltuples = table_index_build_scan(heap, index, indexInfo, false, true,
-										   brinbuildCallback, (void *) state, NULL);
+										   brinbuildCallback, state, NULL);
 
 		/*
 		 * process the final batch
@@ -1808,7 +1808,7 @@ summarize_range(IndexInfo *indexInfo, BrinBuildState *state, Relation heapRel,
 	state->bs_currRangeStart = heapBlk;
 	table_index_build_range_scan(heapRel, state->bs_irel, indexInfo, false, true, false,
 								 heapBlk, scanNumBlks,
-								 brinbuildCallback, (void *) state, NULL);
+								 brinbuildCallback, state, NULL);
 
 	/*
 	 * Now we update the values obtained by the scan with the placeholder

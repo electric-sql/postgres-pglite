@@ -15,7 +15,7 @@
  *
  * Note that this lexer operates within the framework created by psqlscan.l,
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pgbench/exprscan.l
@@ -43,15 +43,6 @@ static const char *expr_command = NULL;
 
 /* indicates whether last yylex() call read a newline */
 static bool last_was_newline = false;
-
-/*
- * Work around a bug in flex 2.5.35: it emits a couple of functions that
- * it forgets to emit declarations for.  Since we use -Wmissing-prototypes,
- * this would cause warnings.  Providing our own declarations should be
- * harmless even when the bug gets fixed.
- */
-extern int	expr_yyget_column(yyscan_t yyscanner);
-extern void expr_yyset_column(int column_no, yyscan_t yyscanner);
 
 /* LCOV_EXCL_START */
 

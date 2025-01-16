@@ -3,7 +3,7 @@
  * nodeHashjoin.c
  *	  Routines to handle hash join nodes
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1511,10 +1511,11 @@ ExecReScanHashJoin(HashJoinState *node)
 			/*
 			 * Okay to reuse the hash table; needn't rescan inner, either.
 			 *
-			 * However, if it's a right/right-anti/full join, we'd better
-			 * reset the inner-tuple match flags contained in the table.
+			 * However, if it's a right/right-anti/right-semi/full join, we'd
+			 * better reset the inner-tuple match flags contained in the
+			 * table.
 			 */
-			if (HJ_FILL_INNER(node))
+			if (HJ_FILL_INNER(node) || node->js.jointype == JOIN_RIGHT_SEMI)
 				ExecHashTableResetMatchFlags(node->hj_HashTable);
 
 			/*

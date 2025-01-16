@@ -3,7 +3,7 @@
  * trigger.c
  *	  PostgreSQL TRIGGERs support code.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -809,6 +809,7 @@ CreateTriggerFiringOn(CreateTrigStmt *stmt, const char *queryString,
 											  CONSTRAINT_TRIGGER,
 											  stmt->deferrable,
 											  stmt->initdeferred,
+											  true, /* Is Enforced */
 											  true,
 											  InvalidOid,	/* no parent */
 											  RelationGetRelid(rel),

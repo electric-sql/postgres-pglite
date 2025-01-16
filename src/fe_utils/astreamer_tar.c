@@ -12,10 +12,10 @@
  * just adds two blocks of NUL bytes to the end of the file, since older
  * server versions produce files with this terminator omitted.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		  src/bin/pg_basebackup/astreamer_tar.c
+ *		  src/fe_utils/astreamer_tar.c
  *-------------------------------------------------------------------------
  */
 

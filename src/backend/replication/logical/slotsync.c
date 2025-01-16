@@ -3,7 +3,7 @@
  *	   Functionality for synchronizing slots to a standby server from the
  *         primary server.
  *
- * Copyright (c) 2024, PostgreSQL Global Development Group
+ * Copyright (c) 2024-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/replication/logical/slotsync.c
@@ -1515,7 +1515,7 @@ update_synced_slots_inactive_since(void)
 	 * correctly interpret the inactive_since if the standby gets promoted
 	 * without a restart. We don't want the slots to appear inactive for a
 	 * long time after promotion if they haven't been synchronized recently.
-	 * Whoever acquires the slot i.e.makes the slot active will reset it.
+	 * Whoever acquires the slot, i.e., makes the slot active, will reset it.
 	 */
 	if (!StandbyMode)
 		return;

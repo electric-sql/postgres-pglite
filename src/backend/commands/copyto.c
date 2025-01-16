@@ -3,7 +3,7 @@
  * copyto.c
  *		COPY <table> TO file/program/client
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -880,7 +880,7 @@ DoCopyTo(CopyToState cstate)
 	else
 	{
 		/* run the plan --- the dest receiver will send tuples */
-		ExecutorRun(cstate->queryDesc, ForwardScanDirection, 0, true);
+		ExecutorRun(cstate->queryDesc, ForwardScanDirection, 0);
 		processed = ((DR_copy *) cstate->queryDesc->dest)->processed;
 	}
 

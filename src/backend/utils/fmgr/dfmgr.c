@@ -3,7 +3,7 @@
  * dfmgr.c
  *	  Dynamic function manager code.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -18,16 +18,6 @@
 
 #ifndef WIN32
 #include <dlfcn.h>
-
-/*
- * On macOS, <dlfcn.h> insists on including <stdbool.h>.  If we're not
- * using stdbool, undef bool to undo the damage.
- */
-#ifndef PG_USE_STDBOOL
-#ifdef bool
-#undef bool
-#endif
-#endif
 #endif							/* !WIN32 */
 
 #include "fmgr.h"
@@ -135,7 +125,7 @@ load_external_function(const char *filename, const char *funcname,
 /*
  * This function loads a shlib file without looking up any particular
  * function in it.  If the same shlib has previously been loaded,
- * unload and reload it.
+ * we do not load it again.
  *
  * When 'restricted' is true, only libraries in the presumed-secure
  * directory $libdir/plugins may be referenced.
@@ -152,7 +142,7 @@ load_file(const char *filename, bool restricted)
 	/* Expand the possibly-abbreviated filename to an exact path name */
 	fullname = expand_dynamic_library_name(filename);
 
-	/* Load the shared library */
+	/* Load the shared library, unless we already did */
 	(void) internal_load_library(fullname);
 
 	pfree(fullname);

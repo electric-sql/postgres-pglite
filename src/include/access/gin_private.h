@@ -2,7 +2,7 @@
  * gin_private.h
  *	  header file for postgres inverted index access method implementation.
  *
- *	Copyright (c) 2006-2024, PostgreSQL Global Development Group
+ *	Copyright (c) 2006-2025, PostgreSQL Global Development Group
  *
  *	src/include/access/gin_private.h
  *--------------------------------------------------------------------------
@@ -352,7 +352,7 @@ typedef struct GinScanEntryData
 
 	/* for a partial-match or full-scan query, we accumulate all TIDs here */
 	TIDBitmap  *matchBitmap;
-	TBMIterator *matchIterator;
+	TBMPrivateIterator *matchIterator;
 	TBMIterateResult *matchResult;
 
 	/* used for Posting list and one page in Posting tree */

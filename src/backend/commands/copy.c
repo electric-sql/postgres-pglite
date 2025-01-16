@@ -3,7 +3,7 @@
  * copy.c
  *		Implements the COPY utility command
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -420,11 +420,25 @@ defGetCopyOnErrorChoice(DefElem *def, ParseState *pstate, bool is_from)
 
 /*
  * Extract REJECT_LIMIT value from a DefElem.
+ *
+ * REJECT_LIMIT can be specified in two ways: as an int64 for the COPY command
+ * option or as a single-quoted string for the foreign table option using
+ * file_fdw. Therefore this function needs to handle both formats.
  */
 static int64
 defGetCopyRejectLimitOption(DefElem *def)
 {
-	int64		reject_limit = defGetInt64(def);
+	int64		reject_limit;
+
+	if (def->arg == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("%s requires a numeric value",
+						def->defname)));
+	else if (nodeTag(def->arg) == T_String)
+		reject_limit = pg_strtoint64(strVal(def->arg));
+	else
+		reject_limit = defGetInt64(def);
 
 	if (reject_limit <= 0)
 		ereport(ERROR,
@@ -940,9 +954,9 @@ CopyGetAttnums(TupleDesc tupDesc, Relation rel, List *attnamelist)
 
 		for (i = 0; i < attr_count; i++)
 		{
-			if (TupleDescAttr(tupDesc, i)->attisdropped)
-				continue;
-			if (TupleDescAttr(tupDesc, i)->attgenerated)
+			CompactAttribute *attr = TupleDescCompactAttr(tupDesc, i);
+
+			if (attr->attisdropped || attr->attgenerated)
 				continue;
 			attnums = lappend_int(attnums, i + 1);
 		}

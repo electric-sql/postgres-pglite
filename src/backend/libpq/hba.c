@@ -5,7 +5,7 @@
  *	  wherein you authenticate a user by seeing what IP address the system
  *	  says he comes from and choosing authentication method based on it).
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -702,7 +702,7 @@ tokenize_auth_file(const char *filename, FILE *file, List **tok_lines,
 	callback_arg.linenum = line_number;
 
 	tokenerrcontext.callback = tokenize_error_callback;
-	tokenerrcontext.arg = (void *) &callback_arg;
+	tokenerrcontext.arg = &callback_arg;
 	tokenerrcontext.previous = error_context_stack;
 	error_context_stack = &tokenerrcontext;
 

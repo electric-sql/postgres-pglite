@@ -5,7 +5,7 @@
 # This makefile generates a static library, libpgfeutils.a,
 # for use by client applications
 #
-# Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
 # IDENTIFICATION
@@ -51,7 +51,6 @@ libpgfeutils.a: $(OBJS)
 
 psqlscan.c: FLEXFLAGS = -Cfe -p -p
 psqlscan.c: FLEX_NO_BACKUP=yes
-psqlscan.c: FLEX_FIX_WARNING=yes
 
 # libpgfeutils could be useful to contrib, so install it
 install: all installdirs

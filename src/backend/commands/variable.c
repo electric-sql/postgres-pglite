@@ -4,7 +4,7 @@
  *		Routines for handling specialized SET variables.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -232,7 +232,7 @@ check_datestyle(char **newval, void **extra, GucSource source)
 		return false;
 	myextra[0] = newDateStyle;
 	myextra[1] = newDateOrder;
-	*extra = (void *) myextra;
+	*extra = myextra;
 
 	return true;
 }
@@ -479,7 +479,7 @@ show_log_timezone(void)
  */
 
 /*
- * GUC check_hook for assign_timezone_abbreviations
+ * GUC check_hook for timezone_abbreviations
  */
 bool
 check_timezone_abbreviations(char **newval, void **extra, GucSource source)
@@ -511,7 +511,7 @@ check_timezone_abbreviations(char **newval, void **extra, GucSource source)
 }
 
 /*
- * GUC assign_hook for assign_timezone_abbreviations
+ * GUC assign_hook for timezone_abbreviations
  */
 void
 assign_timezone_abbreviations(const char *newval, void *extra)
@@ -901,7 +901,7 @@ check_session_authorization(char **newval, void **extra, GucSource source)
 		return false;
 	myextra->roleid = roleid;
 	myextra->is_superuser = is_superuser;
-	*extra = (void *) myextra;
+	*extra = myextra;
 
 	return true;
 }
@@ -1015,7 +1015,7 @@ check_role(char **newval, void **extra, GucSource source)
 		return false;
 	myextra->roleid = roleid;
 	myextra->is_superuser = is_superuser;
-	*extra = (void *) myextra;
+	*extra = myextra;
 
 	return true;
 }
@@ -1092,6 +1092,8 @@ check_application_name(char **newval, void **extra, GucSource source)
 		return false;
 	}
 
+	guc_free(*newval);
+
 	pfree(clean);
 	*newval = ret;
 	return true;
@@ -1127,6 +1129,8 @@ check_cluster_name(char **newval, void **extra, GucSource source)
 		pfree(clean);
 		return false;
 	}
+
+	guc_free(*newval);
 
 	pfree(clean);
 	*newval = ret;

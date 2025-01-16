@@ -5,7 +5,7 @@
  * only be needed by files implementing statistics support (rather than ones
  * reporting / querying stats).
  *
- * Copyright (c) 2001-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2001-2025, PostgreSQL Global Development Group
  *
  * src/include/utils/pgstat_internal.h
  * ----------
@@ -212,6 +212,9 @@ typedef struct PgStat_KindInfo
 	 * whether a stats object gets included in stats snapshots.
 	 */
 	bool		accessed_across_databases:1;
+
+	/* Should stats be written to the on-disk stats file? */
+	bool		write_to_file:1;
 
 	/*
 	 * The size of an entry in the shared stats hash table (pointed to by
@@ -447,6 +450,11 @@ typedef struct PgStatShared_ReplSlot
 	PgStat_StatReplSlotEntry stats;
 } PgStatShared_ReplSlot;
 
+typedef struct PgStatShared_Backend
+{
+	PgStatShared_Common header;
+	PgStat_Backend stats;
+} PgStatShared_Backend;
 
 /*
  * Central shared memory entry for the cumulative stats system.
@@ -601,6 +609,18 @@ extern void pgstat_archiver_init_shmem_cb(void *stats);
 extern void pgstat_archiver_reset_all_cb(TimestampTz ts);
 extern void pgstat_archiver_snapshot_cb(void);
 
+/*
+ * Functions in pgstat_backend.c
+ */
+
+/* flags for pgstat_flush_backend() */
+#define PGSTAT_BACKEND_FLUSH_IO		(1 << 0)	/* Flush I/O statistics */
+#define PGSTAT_BACKEND_FLUSH_ALL	(PGSTAT_BACKEND_FLUSH_IO)
+
+extern void pgstat_flush_backend(bool nowait, bits32 flags);
+extern PgStat_BackendPending *pgstat_prep_backend_pending(ProcNumber procnum);
+extern bool pgstat_backend_flush_cb(PgStat_EntryRef *entry_ref, bool nowait);
+extern void pgstat_backend_reset_timestamp_cb(PgStatShared_Common *header, TimestampTz ts);
 
 /*
  * Functions in pgstat_bgwriter.c

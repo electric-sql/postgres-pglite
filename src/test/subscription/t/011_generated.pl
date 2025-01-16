@@ -1,5 +1,5 @@
 
-# Copyright (c) 2021-2024, PostgreSQL Global Development Group
+# Copyright (c) 2021-2025, PostgreSQL Global Development Group
 
 # Test generated columns
 use strict;
@@ -321,6 +321,48 @@ is( $result, qq(|2|
 |6|
 |8|),
 	'tab3 incremental replication, when publish_generated_columns=true');
+
+# cleanup
+$node_subscriber->safe_psql('postgres', "DROP SUBSCRIPTION sub1");
+$node_publisher->safe_psql('postgres', "DROP PUBLICATION pub1");
+
+# =============================================================================
+# The following test verifies the expected error when replicating to a
+# generated subscriber column. Test the following combinations:
+# - regular -> generated
+# - generated -> generated
+# =============================================================================
+
+# --------------------------------------------------
+# A "regular -> generated" or "generated -> generated" replication fails,
+# reporting an error that the generated column on the subscriber side cannot
+# be replicated.
+#
+# Test Case: regular -> generated and generated -> generated
+# Publisher table has regular column 'c2' and generated column 'c3'.
+# Subscriber table has generated columns 'c2' and 'c3'.
+# --------------------------------------------------
+
+# Create table and publication. Insert data into the table.
+$node_publisher->safe_psql(
+	'postgres', qq(
+	CREATE TABLE t1(c1 int, c2 int, c3 int GENERATED ALWAYS AS (c1 * 2) STORED);
+	CREATE PUBLICATION pub1 for table t1(c1, c2, c3);
+	INSERT INTO t1 VALUES (1);
+));
+
+# Create table and subscription.
+$node_subscriber->safe_psql(
+	'postgres', qq(
+	CREATE TABLE t1(c1 int, c2 int GENERATED ALWAYS AS (c1 + 2) STORED, c3 int GENERATED ALWAYS AS (c1 + 2) STORED);
+	CREATE SUBSCRIPTION sub1 CONNECTION '$publisher_connstr' PUBLICATION pub1;
+));
+
+# Verify that an error occurs.
+my $offset = -s $node_subscriber->logfile;
+$node_subscriber->wait_for_log(
+	qr/ERROR: ( [A-Z0-9]+:)? logical replication target relation "public.t1" has incompatible generated columns: "c2", "c3"/,
+	$offset);
 
 # cleanup
 $node_subscriber->safe_psql('postgres', "DROP SUBSCRIPTION sub1");

@@ -6,10 +6,10 @@
  * astreamer_lz4_compressor applies lz4 compression to the input stream,
  * and astreamer_lz4_decompressor does the reverse.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		  src/bin/pg_basebackup/astreamer_lz4.c
+ *		  src/fe_utils/astreamer_lz4.c
  *-------------------------------------------------------------------------
  */
 

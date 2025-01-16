@@ -31,7 +31,7 @@
  * constraint changes are also tracked properly.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -1407,7 +1407,7 @@ InitDomainConstraintRef(Oid type_id, DomainConstraintRef *ref,
 	ref->refctx = refctx;
 	ref->dcc = NULL;
 	ref->callback.func = dccref_deletion_callback;
-	ref->callback.arg = (void *) ref;
+	ref->callback.arg = ref;
 	MemoryContextRegisterResetCallback(refctx, &ref->callback);
 	/* Acquire refcount if there are constraints, and set up exported list */
 	if (ref->tcache->domainData)

@@ -4,7 +4,7 @@
  *	  routines to support running postgres in 'bootstrap' mode
  *	bootstrap mode is used to create the initial template database
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -202,6 +202,7 @@ BootstrapModeMain(int argc, char *argv[], bool check_only)
 	int			flag;
 	char	   *userDoption = NULL;
 	uint32		bootstrap_data_checksum_version = 0;	/* No checksum */
+	yyscan_t	scanner;
 
 	Assert(!IsUnderPostmaster);
 
@@ -224,8 +225,21 @@ BootstrapModeMain(int argc, char *argv[], bool check_only)
 			case 'B':
 				SetConfigOption("shared_buffers", optarg, PGC_POSTMASTER, PGC_S_ARGV);
 				break;
-			case 'c':
 			case '-':
+
+				/*
+				 * Error if the user misplaced a special must-be-first option
+				 * for dispatching to a subprogram.  parse_dispatch_option()
+				 * returns DISPATCH_POSTMASTER if it doesn't find a match, so
+				 * error for anything else.
+				 */
+				if (parse_dispatch_option(optarg) != DISPATCH_POSTMASTER)
+					ereport(ERROR,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							 errmsg("--%s must be first argument", optarg)));
+
+				/* FALLTHROUGH */
+			case 'c':
 				{
 					char	   *name,
 							   *value;
@@ -322,6 +336,12 @@ BootstrapModeMain(int argc, char *argv[], bool check_only)
 	CreateSharedMemoryAndSemaphores();
 
 	/*
+	 * Estimate number of openable files.  This is essential too in --check
+	 * mode, because on some platforms semaphores count as open files.
+	 */
+	set_max_safe_fds();
+
+	/*
 	 * XXX: It might make sense to move this into its own function at some
 	 * point. Right now it seems like it'd cause more code duplication than
 	 * it's worth.
@@ -359,11 +379,14 @@ BootstrapModeMain(int argc, char *argv[], bool check_only)
 		Nulls[i] = false;
 	}
 
+	if (boot_yylex_init(&scanner) != 0)
+		elog(ERROR, "yylex_init() failed: %m");
+
 	/*
 	 * Process bootstrap input.
 	 */
 	StartTransactionCommand();
-	boot_yyparse();
+	boot_yyparse(scanner);
 	CommitTransactionCommand();
 
 	/*
@@ -557,7 +580,6 @@ DefineAttr(char *name, char *type, int attnum, int nullness)
 	if (OidIsValid(attrtypes[attnum]->attcollation))
 		attrtypes[attnum]->attcollation = C_COLLATION_OID;
 
-	attrtypes[attnum]->attcacheoff = -1;
 	attrtypes[attnum]->atttypmod = -1;
 	attrtypes[attnum]->attislocal = true;
 

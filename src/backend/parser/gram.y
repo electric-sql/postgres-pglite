@@ -6,7 +6,7 @@
  * gram.y
  *	  POSTGRESQL BISON rules/actions
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -143,6 +143,8 @@ typedef struct KeyActions
 #define CAS_INITIALLY_DEFERRED		0x08
 #define CAS_NOT_VALID				0x10
 #define CAS_NO_INHERIT				0x20
+#define CAS_NOT_ENFORCED			0x40
+#define CAS_ENFORCED				0x80
 
 
 #define parser_yyerror(msg)  scanner_yyerror(msg, yyscanner)
@@ -196,8 +198,8 @@ static void SplitColQualList(List *qualList,
 							 List **constraintList, CollateClause **collClause,
 							 core_yyscan_t yyscanner);
 static void processCASbits(int cas_bits, int location, const char *constrType,
-			   bool *deferrable, bool *initdeferred, bool *not_valid,
-			   bool *no_inherit, core_yyscan_t yyscanner);
+			   bool *deferrable, bool *initdeferred, bool *is_enforced,
+			   bool *not_valid, bool *no_inherit, core_yyscan_t yyscanner);
 static PartitionStrategy parsePartitionStrategy(char *strategy, int location,
 												core_yyscan_t yyscanner);
 static void preprocess_pubobj_list(List *pubobjspec_list,
@@ -711,9 +713,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	DETACH DICTIONARY DISABLE_P DISCARD DISTINCT DO DOCUMENT_P DOMAIN_P
 	DOUBLE_P DROP
 
-	EACH ELSE EMPTY_P ENABLE_P ENCODING ENCRYPTED END_P ENUM_P ERROR_P ESCAPE
-	EVENT EXCEPT EXCLUDE EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPLAIN EXPRESSION
-	EXTENSION EXTERNAL EXTRACT
+	EACH ELSE EMPTY_P ENABLE_P ENCODING ENCRYPTED END_P ENFORCED ENUM_P ERROR_P
+	ESCAPE EVENT EXCEPT EXCLUDE EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPLAIN
+	EXPRESSION EXTENSION EXTERNAL EXTRACT
 
 	FALSE_P FAMILY FETCH FILTER FINALIZE FIRST_P FLOAT_P FOLLOWING FOR
 	FORCE FOREIGN FORMAT FORWARD FREEZE FROM FULL FUNCTION FUNCTIONS
@@ -2658,7 +2660,7 @@ alter_table_cmd:
 					processCASbits($4, @4, "ALTER CONSTRAINT statement",
 									&c->deferrable,
 									&c->initdeferred,
-									NULL, NULL, yyscanner);
+									NULL, NULL, NULL, yyscanner);
 					$$ = (Node *) n;
 				}
 			/* ALTER TABLE <name> VALIDATE CONSTRAINT ... */
@@ -3915,6 +3917,7 @@ ColConstraintElem:
 					n->contype = CONSTR_NOTNULL;
 					n->location = @1;
 					n->is_no_inherit = $3;
+					n->is_enforced = true;
 					n->skip_validation = false;
 					n->initially_valid = true;
 					$$ = (Node *) n;
@@ -3961,6 +3964,7 @@ ColConstraintElem:
 					n->is_no_inherit = $5;
 					n->raw_expr = $3;
 					n->cooked_expr = NULL;
+					n->is_enforced = true;
 					n->skip_validation = false;
 					n->initially_valid = true;
 					$$ = (Node *) n;
@@ -4022,6 +4026,7 @@ ColConstraintElem:
 					n->fk_upd_action = ($5)->updateAction->action;
 					n->fk_del_action = ($5)->deleteAction->action;
 					n->fk_del_set_cols = ($5)->deleteAction->cols;
+					n->is_enforced = true;
 					n->skip_validation = false;
 					n->initially_valid = true;
 					$$ = (Node *) n;
@@ -4087,6 +4092,22 @@ ConstraintAttr:
 					n->location = @1;
 					$$ = (Node *) n;
 				}
+			| ENFORCED
+				{
+					Constraint *n = makeNode(Constraint);
+
+					n->contype = CONSTR_ATTR_ENFORCED;
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| NOT ENFORCED
+				{
+					Constraint *n = makeNode(Constraint);
+
+					n->contype = CONSTR_ATTR_NOT_ENFORCED;
+					n->location = @1;
+					$$ = (Node *) n;
+				}
 		;
 
 
@@ -4148,7 +4169,7 @@ ConstraintElem:
 					n->raw_expr = $3;
 					n->cooked_expr = NULL;
 					processCASbits($5, @5, "CHECK",
-								   NULL, NULL, &n->skip_validation,
+								   NULL, NULL, &n->is_enforced, &n->skip_validation,
 								   &n->is_no_inherit, yyscanner);
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *) n;
@@ -4162,7 +4183,7 @@ ConstraintElem:
 					n->keys = list_make1(makeString($3));
 					/* no NOT VALID support yet */
 					processCASbits($4, @4, "NOT NULL",
-								   NULL, NULL, NULL,
+								   NULL, NULL, NULL, NULL,
 								   &n->is_no_inherit, yyscanner);
 					n->initially_valid = true;
 					$$ = (Node *) n;
@@ -4183,7 +4204,7 @@ ConstraintElem:
 					n->indexspace = $9;
 					processCASbits($10, @10, "UNIQUE",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   NULL, yyscanner);
+								   NULL, NULL, yyscanner);
 					$$ = (Node *) n;
 				}
 			| UNIQUE ExistingIndex ConstraintAttributeSpec
@@ -4199,7 +4220,7 @@ ConstraintElem:
 					n->indexspace = NULL;
 					processCASbits($3, @3, "UNIQUE",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   NULL, yyscanner);
+								   NULL, NULL, yyscanner);
 					$$ = (Node *) n;
 				}
 			| PRIMARY KEY '(' columnList opt_without_overlaps ')' opt_c_include opt_definition OptConsTableSpace
@@ -4217,7 +4238,7 @@ ConstraintElem:
 					n->indexspace = $9;
 					processCASbits($10, @10, "PRIMARY KEY",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   NULL, yyscanner);
+								   NULL, NULL, yyscanner);
 					$$ = (Node *) n;
 				}
 			| PRIMARY KEY ExistingIndex ConstraintAttributeSpec
@@ -4233,7 +4254,7 @@ ConstraintElem:
 					n->indexspace = NULL;
 					processCASbits($4, @4, "PRIMARY KEY",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   NULL, yyscanner);
+								   NULL, NULL, yyscanner);
 					$$ = (Node *) n;
 				}
 			| EXCLUDE access_method_clause '(' ExclusionConstraintList ')'
@@ -4253,7 +4274,7 @@ ConstraintElem:
 					n->where_clause = $9;
 					processCASbits($10, @10, "EXCLUDE",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   NULL, yyscanner);
+								   NULL, NULL, yyscanner);
 					$$ = (Node *) n;
 				}
 			| FOREIGN KEY '(' columnList optionalPeriodName ')' REFERENCES qualified_name
@@ -4282,7 +4303,7 @@ ConstraintElem:
 					n->fk_del_set_cols = ($11)->deleteAction->cols;
 					processCASbits($12, @12, "FOREIGN KEY",
 								   &n->deferrable, &n->initdeferred,
-								   &n->skip_validation, NULL,
+								   NULL, &n->skip_validation, NULL,
 								   yyscanner);
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *) n;
@@ -4322,8 +4343,9 @@ DomainConstraintElem:
 					n->raw_expr = $3;
 					n->cooked_expr = NULL;
 					processCASbits($5, @5, "CHECK",
-								   NULL, NULL, &n->skip_validation,
+								   NULL, NULL, NULL, &n->skip_validation,
 								   &n->is_no_inherit, yyscanner);
+					n->is_enforced = true;
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *) n;
 				}
@@ -4337,7 +4359,7 @@ DomainConstraintElem:
 					/* no NOT VALID, NO INHERIT support */
 					processCASbits($3, @3, "NOT NULL",
 								   NULL, NULL, NULL,
-								   NULL, yyscanner);
+								   NULL, NULL, yyscanner);
 					n->initially_valid = true;
 					$$ = (Node *) n;
 				}
@@ -6000,7 +6022,7 @@ CreateTrigStmt:
 					n->transitionRels = NIL;
 					processCASbits($11, @11, "TRIGGER",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   NULL, yyscanner);
+								   NULL, NULL, yyscanner);
 					n->constrrel = $10;
 					$$ = (Node *) n;
 				}
@@ -6169,7 +6191,8 @@ ConstraintAttributeSpec:
 								 parser_errposition(@2)));
 					/* generic message for other conflicts */
 					if ((newspec & (CAS_NOT_DEFERRABLE | CAS_DEFERRABLE)) == (CAS_NOT_DEFERRABLE | CAS_DEFERRABLE) ||
-						(newspec & (CAS_INITIALLY_IMMEDIATE | CAS_INITIALLY_DEFERRED)) == (CAS_INITIALLY_IMMEDIATE | CAS_INITIALLY_DEFERRED))
+						(newspec & (CAS_INITIALLY_IMMEDIATE | CAS_INITIALLY_DEFERRED)) == (CAS_INITIALLY_IMMEDIATE | CAS_INITIALLY_DEFERRED) ||
+						(newspec & (CAS_NOT_ENFORCED | CAS_ENFORCED)) == (CAS_NOT_ENFORCED | CAS_ENFORCED))
 						ereport(ERROR,
 								(errcode(ERRCODE_SYNTAX_ERROR),
 								 errmsg("conflicting constraint properties"),
@@ -6185,6 +6208,8 @@ ConstraintAttributeElem:
 			| INITIALLY DEFERRED			{ $$ = CAS_INITIALLY_DEFERRED; }
 			| NOT VALID						{ $$ = CAS_NOT_VALID; }
 			| NO INHERIT					{ $$ = CAS_NO_INHERIT; }
+			| NOT ENFORCED					{ $$ = CAS_NOT_ENFORCED; }
+			| ENFORCED						{ $$ = CAS_ENFORCED; }
 		;
 
 
@@ -17688,6 +17713,7 @@ unreserved_keyword:
 			| ENABLE_P
 			| ENCODING
 			| ENCRYPTED
+			| ENFORCED
 			| ENUM_P
 			| ERROR_P
 			| ESCAPE
@@ -18265,6 +18291,7 @@ bare_label_keyword:
 			| ENCODING
 			| ENCRYPTED
 			| END_P
+			| ENFORCED
 			| ENUM_P
 			| ERROR_P
 			| ESCAPE
@@ -18646,31 +18673,31 @@ updatePreparableStmtEnd(Node *n, int end_location)
 {
 	if (IsA(n, SelectStmt))
 	{
-		SelectStmt *stmt = (SelectStmt *)n;
+		SelectStmt *stmt = (SelectStmt *) n;
 
 		stmt->stmt_len = end_location - stmt->stmt_location;
 	}
 	else if (IsA(n, InsertStmt))
 	{
-		InsertStmt *stmt = (InsertStmt *)n;
+		InsertStmt *stmt = (InsertStmt *) n;
 
 		stmt->stmt_len = end_location - stmt->stmt_location;
 	}
 	else if (IsA(n, UpdateStmt))
 	{
-		UpdateStmt *stmt = (UpdateStmt *)n;
+		UpdateStmt *stmt = (UpdateStmt *) n;
 
 		stmt->stmt_len = end_location - stmt->stmt_location;
 	}
 	else if (IsA(n, DeleteStmt))
 	{
-		DeleteStmt *stmt = (DeleteStmt *)n;
+		DeleteStmt *stmt = (DeleteStmt *) n;
 
 		stmt->stmt_len = end_location - stmt->stmt_location;
 	}
 	else if (IsA(n, MergeStmt))
 	{
-		MergeStmt *stmt = (MergeStmt *)n;
+		MergeStmt  *stmt = (MergeStmt *) n;
 
 		stmt->stmt_len = end_location - stmt->stmt_location;
 	}
@@ -18683,10 +18710,10 @@ makeColumnRef(char *colname, List *indirection,
 			  int location, core_yyscan_t yyscanner)
 {
 	/*
-	 * Generate a ColumnRef node, with an A_Indirection node added if there
-	 * is any subscripting in the specified indirection list.  However,
-	 * any field selection at the start of the indirection list must be
-	 * transposed into the "fields" part of the ColumnRef node.
+	 * Generate a ColumnRef node, with an A_Indirection node added if there is
+	 * any subscripting in the specified indirection list.  However, any field
+	 * selection at the start of the indirection list must be transposed into
+	 * the "fields" part of the ColumnRef node.
 	 */
 	ColumnRef  *c = makeNode(ColumnRef);
 	int			nfields = 0;
@@ -18752,55 +18779,55 @@ makeStringConstCast(char *str, int location, TypeName *typename)
 static Node *
 makeIntConst(int val, int location)
 {
-	A_Const	   *n = makeNode(A_Const);
+	A_Const    *n = makeNode(A_Const);
 
 	n->val.ival.type = T_Integer;
 	n->val.ival.ival = val;
 	n->location = location;
 
-   return (Node *) n;
+	return (Node *) n;
 }
 
 static Node *
 makeFloatConst(char *str, int location)
 {
-	A_Const	   *n = makeNode(A_Const);
+	A_Const    *n = makeNode(A_Const);
 
 	n->val.fval.type = T_Float;
 	n->val.fval.fval = str;
 	n->location = location;
 
-   return (Node *) n;
+	return (Node *) n;
 }
 
 static Node *
 makeBoolAConst(bool state, int location)
 {
-	A_Const	   *n = makeNode(A_Const);
+	A_Const    *n = makeNode(A_Const);
 
 	n->val.boolval.type = T_Boolean;
 	n->val.boolval.boolval = state;
 	n->location = location;
 
-   return (Node *) n;
+	return (Node *) n;
 }
 
 static Node *
 makeBitStringConst(char *str, int location)
 {
-	A_Const	   *n = makeNode(A_Const);
+	A_Const    *n = makeNode(A_Const);
 
 	n->val.bsval.type = T_BitString;
 	n->val.bsval.bsval = str;
 	n->location = location;
 
-   return (Node *) n;
+	return (Node *) n;
 }
 
 static Node *
 makeNullAConst(int location)
 {
-	A_Const	   *n = makeNode(A_Const);
+	A_Const    *n = makeNode(A_Const);
 
 	n->isnull = true;
 	n->location = location;
@@ -18889,7 +18916,7 @@ check_func_name(List *names, core_yyscan_t yyscanner)
 static List *
 check_indirection(List *indirection, core_yyscan_t yyscanner)
 {
-	ListCell *l;
+	ListCell   *l;
 
 	foreach(l, indirection)
 	{
@@ -18944,7 +18971,7 @@ makeOrderedSetArgs(List *directargs, List *orderedargs,
 				   core_yyscan_t yyscanner)
 {
 	FunctionParameter *lastd = (FunctionParameter *) llast(directargs);
-	Integer	   *ndirectargs;
+	Integer    *ndirectargs;
 
 	/* No restriction unless last direct arg is VARIADIC */
 	if (lastd->mode == FUNC_PARAM_VARIADIC)
@@ -18952,8 +18979,8 @@ makeOrderedSetArgs(List *directargs, List *orderedargs,
 		FunctionParameter *firsto = (FunctionParameter *) linitial(orderedargs);
 
 		/*
-		 * We ignore the names, though the aggr_arg production allows them;
-		 * it doesn't allow default values, so those need not be checked.
+		 * We ignore the names, though the aggr_arg production allows them; it
+		 * doesn't allow default values, so those need not be checked.
 		 */
 		if (list_length(orderedargs) != 1 ||
 			firsto->mode != FUNC_PARAM_VARIADIC ||
@@ -19115,7 +19142,7 @@ doNegate(Node *n, int location)
 {
 	if (IsA(n, A_Const))
 	{
-		A_Const	   *con = (A_Const *) n;
+		A_Const    *con = (A_Const *) n;
 
 		/* report the constant's location as that of the '-' sign */
 		con->location = location;
@@ -19143,7 +19170,7 @@ doNegateFloat(Float *v)
 	if (*oldval == '+')
 		oldval++;
 	if (*oldval == '-')
-		v->fval = oldval+1;	/* just strip the '-' */
+		v->fval = oldval + 1;	/* just strip the '-' */
 	else
 		v->fval = psprintf("-%s", oldval);
 }
@@ -19214,10 +19241,11 @@ static Node *
 makeXmlExpr(XmlExprOp op, char *name, List *named_args, List *args,
 			int location)
 {
-	XmlExpr		*x = makeNode(XmlExpr);
+	XmlExpr    *x = makeNode(XmlExpr);
 
 	x->op = op;
 	x->name = name;
+
 	/*
 	 * named_args is a list of ResTarget; it'll be split apart into separate
 	 * expression and name lists in transformXmlExpr().
@@ -19227,7 +19255,7 @@ makeXmlExpr(XmlExprOp op, char *name, List *named_args, List *args,
 	x->args = args;
 	/* xmloption, if relevant, must be filled in by caller */
 	/* type and typmod will be filled in during parse analysis */
-	x->type = InvalidOid;			/* marks the node as not analyzed */
+	x->type = InvalidOid;		/* marks the node as not analyzed */
 	x->location = location;
 	return (Node *) x;
 }
@@ -19352,7 +19380,7 @@ makeRangeVarFromQualifiedName(char *name, List *namelist, int location,
 					errcode(ERRCODE_SYNTAX_ERROR),
 					errmsg("improper qualified name (too many dotted names): %s",
 						   NameListToString(lcons(makeString(name), namelist))),
-						   parser_errposition(location));
+					parser_errposition(location));
 			break;
 	}
 
@@ -19403,8 +19431,8 @@ SplitColQualList(List *qualList,
  */
 static void
 processCASbits(int cas_bits, int location, const char *constrType,
-			   bool *deferrable, bool *initdeferred, bool *not_valid,
-			   bool *no_inherit, core_yyscan_t yyscanner)
+			   bool *deferrable, bool *initdeferred, bool *is_enforced,
+			   bool *not_valid, bool *no_inherit, core_yyscan_t yyscanner)
 {
 	/* defaults */
 	if (deferrable)
@@ -19413,6 +19441,8 @@ processCASbits(int cas_bits, int location, const char *constrType,
 		*initdeferred = false;
 	if (not_valid)
 		*not_valid = false;
+	if (is_enforced)
+		*is_enforced = true;
 
 	if (cas_bits & (CAS_DEFERRABLE | CAS_INITIALLY_DEFERRED))
 	{
@@ -19421,7 +19451,7 @@ processCASbits(int cas_bits, int location, const char *constrType,
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 /* translator: %s is CHECK, UNIQUE, or similar */
+			/* translator: %s is CHECK, UNIQUE, or similar */
 					 errmsg("%s constraints cannot be marked DEFERRABLE",
 							constrType),
 					 parser_errposition(location)));
@@ -19434,7 +19464,7 @@ processCASbits(int cas_bits, int location, const char *constrType,
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 /* translator: %s is CHECK, UNIQUE, or similar */
+			/* translator: %s is CHECK, UNIQUE, or similar */
 					 errmsg("%s constraints cannot be marked DEFERRABLE",
 							constrType),
 					 parser_errposition(location)));
@@ -19447,7 +19477,7 @@ processCASbits(int cas_bits, int location, const char *constrType,
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 /* translator: %s is CHECK, UNIQUE, or similar */
+			/* translator: %s is CHECK, UNIQUE, or similar */
 					 errmsg("%s constraints cannot be marked NOT VALID",
 							constrType),
 					 parser_errposition(location)));
@@ -19460,8 +19490,43 @@ processCASbits(int cas_bits, int location, const char *constrType,
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 /* translator: %s is CHECK, UNIQUE, or similar */
+			/* translator: %s is CHECK, UNIQUE, or similar */
 					 errmsg("%s constraints cannot be marked NO INHERIT",
+							constrType),
+					 parser_errposition(location)));
+	}
+
+	if (cas_bits & CAS_NOT_ENFORCED)
+	{
+		if (is_enforced)
+			*is_enforced = false;
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 /* translator: %s is CHECK, UNIQUE, or similar */
+					 errmsg("%s constraints cannot be marked NOT ENFORCED",
+							constrType),
+					 parser_errposition(location)));
+
+		/*
+		 * NB: The validated status is irrelevant when the constraint is set to
+		 * NOT ENFORCED, but for consistency, it should be set accordingly.
+		 * This ensures that if the constraint is later changed to ENFORCED, it
+		 * will automatically be in the correct NOT VALIDATED state.
+		 */
+		if (not_valid)
+			*not_valid = true;
+	}
+
+	if (cas_bits & CAS_ENFORCED)
+	{
+		if (is_enforced)
+			*is_enforced = true;
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 /* translator: %s is CHECK, UNIQUE, or similar */
+					 errmsg("%s constraints cannot be marked ENFORCED",
 							constrType),
 					 parser_errposition(location)));
 	}
@@ -19485,7 +19550,7 @@ parsePartitionStrategy(char *strategy, int location, core_yyscan_t yyscanner)
 			(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 			 errmsg("unrecognized partitioning strategy \"%s\"", strategy),
 			 parser_errposition(location)));
-	return PARTITION_STRATEGY_LIST;		/* keep compiler quiet */
+	return PARTITION_STRATEGY_LIST; /* keep compiler quiet */
 
 }
 
@@ -19556,8 +19621,8 @@ preprocess_pubobj_list(List *pubobjspec_list, core_yyscan_t yyscanner)
 						parser_errposition(pubobj->location));
 
 			/*
-			 * We can distinguish between the different type of schema
-			 * objects based on whether name and pubtable is set.
+			 * We can distinguish between the different type of schema objects
+			 * based on whether name and pubtable is set.
 			 */
 			if (pubobj->name)
 				pubobj->pubobjtype = PUBLICATIONOBJ_TABLES_IN_SCHEMA;
@@ -19612,11 +19677,13 @@ makeRecursiveViewSelect(char *relname, List *aliases, Node *query)
 	w->ctes = list_make1(cte);
 	w->location = -1;
 
-	/* create target list for the new SELECT from the alias list of the
-	 * recursive view specification */
-	foreach (lc, aliases)
+	/*
+	 * create target list for the new SELECT from the alias list of the
+	 * recursive view specification
+	 */
+	foreach(lc, aliases)
 	{
-		ResTarget *rt = makeNode(ResTarget);
+		ResTarget  *rt = makeNode(ResTarget);
 
 		rt->name = NULL;
 		rt->indirection = NIL;
@@ -19626,8 +19693,10 @@ makeRecursiveViewSelect(char *relname, List *aliases, Node *query)
 		tl = lappend(tl, rt);
 	}
 
-	/* create new SELECT combining WITH clause, target list, and fake FROM
-	 * clause */
+	/*
+	 * create new SELECT combining WITH clause, target list, and fake FROM
+	 * clause
+	 */
 	s->withClause = w;
 	s->targetList = tl;
 	s->fromClause = list_make1(makeRangeVar(NULL, relname, -1));

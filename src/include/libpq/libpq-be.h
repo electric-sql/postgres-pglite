@@ -8,7 +8,7 @@
  *	  Structs that need to be client-visible are in pqcomm.h.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/libpq/libpq-be.h
@@ -17,6 +17,8 @@
  */
 #ifndef LIBPQ_BE_H
 #define LIBPQ_BE_H
+
+#include "common/scram-common.h"
 
 #include <sys/time.h>
 #ifdef USE_OPENSSL
@@ -182,6 +184,13 @@ typedef struct Port
 	int			tcp_user_timeout;
 
 	/*
+	 * SCRAM structures.
+	 */
+	uint8		scram_ClientKey[SCRAM_MAX_KEY_LEN];
+	uint8		scram_ServerKey[SCRAM_MAX_KEY_LEN];
+	bool		has_scram_keys; /* true if the above two are valid */
+
+	/*
 	 * GSSAPI structures.
 	 */
 #if defined(ENABLE_GSS) || defined(ENABLE_SSPI)
@@ -207,12 +216,17 @@ typedef struct Port
 	bool		last_read_was_eof;
 
 	/*
-	 * OpenSSL structures. (Keep these last so that the locations of other
-	 * fields are the same whether or not you build with SSL enabled.)
+	 * OpenSSL structures.  As with GSSAPI above, to keep struct offsets
+	 * constant, NULL pointers are stored when SSL support is not enabled.
+	 * (Although extensions should have no business accessing the raw_buf
+	 * fields anyway.)
 	 */
 #ifdef USE_OPENSSL
 	SSL		   *ssl;
 	X509	   *peer;
+#else
+	void	   *ssl;
+	void	   *peer;
 #endif
 
 	/*

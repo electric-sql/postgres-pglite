@@ -3,7 +3,7 @@
  * acl.c
  *	  Basic access control list data structures manipulation routines.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1808,7 +1808,7 @@ aclexplode(PG_FUNCTION_ARGS)
 		idx = (int *) palloc(sizeof(int[2]));
 		idx[0] = 0;				/* ACL array item index */
 		idx[1] = -1;			/* privilege type counter */
-		funcctx->user_fctx = (void *) idx;
+		funcctx->user_fctx = idx;
 
 		MemoryContextSwitchTo(oldcontext);
 	}

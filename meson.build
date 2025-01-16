@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2024, PostgreSQL Global Development Group
+# Copyright (c) 2022-2025, PostgreSQL Global Development Group
 
 # Entry point for building PostgreSQL with meson
 #
@@ -261,7 +261,13 @@ elif host_system == 'openbsd'
 elif host_system == 'sunos'
   portname = 'solaris'
   export_fmt = '-Wl,-M@0@'
-  cppflags += '-D_POSIX_PTHREAD_SEMANTICS'
+  # We need these #defines to get POSIX-conforming versions
+  # of many interfaces (sigwait, getpwuid_r, shmdt, ...).
+  cppflags += [
+    '-D_POSIX_C_SOURCE=200112L',
+    '-D__EXTENSIONS__',
+    '-D_POSIX_PTHREAD_SEMANTICS',
+  ]
 
 elif host_system == 'windows'
   portname = 'win32'
@@ -1588,21 +1594,6 @@ if not cc.compiles(c99_test, name: 'c99', args: test_c_args)
   endif
 endif
 
-sizeof_long = cc.sizeof('long', args: test_c_args)
-cdata.set('SIZEOF_LONG', sizeof_long)
-if sizeof_long == 8
-  cdata.set('HAVE_LONG_INT_64', 1)
-  pg_int64_type = 'long int'
-  cdata.set_quoted('INT64_MODIFIER', 'l')
-elif sizeof_long == 4 and cc.sizeof('long long', args: test_c_args) == 8
-  cdata.set('HAVE_LONG_LONG_INT_64', 1)
-  pg_int64_type = 'long long int'
-  cdata.set_quoted('INT64_MODIFIER', 'll')
-else
-  error('do not know how to get a 64bit int')
-endif
-cdata.set('PG_INT64_TYPE', pg_int64_type)
-
 if host_machine.endian() == 'big'
   cdata.set('WORDS_BIGENDIAN', 1)
 endif
@@ -1626,16 +1617,18 @@ endforeach
 # of MAXIMUM_ALIGNOF to avoid that, but we no longer support any platforms
 # where TYPALIGN_DOUBLE != MAXIMUM_ALIGNOF.
 #
-# We assume without checking that int64's alignment is at least as strong
+# We assume without checking that int64_t's alignment is at least as strong
 # as long, char, short, or int.  Note that we intentionally do not consider
 # any types wider than 64 bits, as allowing MAXIMUM_ALIGNOF to exceed 8
 # would be too much of a penalty for disk and memory space.
 alignof_double = cdata.get('ALIGNOF_DOUBLE')
-if cc.alignment(pg_int64_type, args: test_c_args) > alignof_double
-  error('alignment of int64 is greater than the alignment of double')
+if cc.alignment('int64_t', args: test_c_args, prefix: '#include <stdint.h>') > alignof_double
+  error('alignment of int64_t is greater than the alignment of double')
 endif
 cdata.set('MAXIMUM_ALIGNOF', alignof_double)
 
+cdata.set('SIZEOF_LONG', cc.sizeof('long', args: test_c_args))
+cdata.set('SIZEOF_LONG_LONG', cc.sizeof('long long', args: test_c_args))
 cdata.set('SIZEOF_VOID_P', cc.sizeof('void *', args: test_c_args))
 cdata.set('SIZEOF_SIZE_T', cc.sizeof('size_t', args: test_c_args))
 
@@ -1734,6 +1727,7 @@ if cc.compiles('''
       my_label:
       return 1;
     }''',
+    name: 'computed goto',
     args: test_c_args)
   cdata.set('HAVE_COMPUTED_GOTO', 1)
 endif
@@ -1750,18 +1744,9 @@ if cc.compiles('''
         ({ _Static_assert(1, "foo"); });
     }
     ''',
+    name: '_Static_assert',
     args: test_c_args)
   cdata.set('HAVE__STATIC_ASSERT', 1)
-endif
-
-
-# We use <stdbool.h> if we have it and it declares type bool as having
-# size 1.  Otherwise, c.h will fall back to declaring bool as unsigned char.
-if cc.has_type('_Bool', args: test_c_args) \
-    and cc.has_type('bool', prefix: '#include <stdbool.h>', args: test_c_args) \
-    and cc.sizeof('bool', prefix: '#include <stdbool.h>', args: test_c_args) == 1
-  cdata.set('HAVE__BOOL', 1)
-  cdata.set('PG_USE_STDBOOL', 1)
 endif
 
 
@@ -1844,17 +1829,17 @@ endif
 # compile, and store the results in global variables so the compiler doesn't
 # optimize away the call.
 if cc.links('''
-    INT64 a = 1;
-    INT64 b = 1;
-    INT64 result;
+    #include <stdint.h>
+    int64_t a = 1;
+    int64_t b = 1;
+    int64_t result;
 
     int main(void)
     {
         return __builtin_mul_overflow(a, b, &result);
     }''',
     name: '__builtin_mul_overflow',
-    args: test_c_args + ['-DINT64=@0@'.format(cdata.get('PG_INT64_TYPE'))],
-    )
+    args: test_c_args)
   cdata.set('HAVE__BUILTIN_OP_OVERFLOW', 1)
 endif
 
@@ -2116,7 +2101,7 @@ __sync_val_compare_and_swap(&val, 0, 37);'''},
   {'name': 'HAVE_GCC__SYNC_INT64_CAS',
    'desc': '__sync_val_compare_and_swap(int64)',
    'test': '''
-INT64 val = 0;
+int64_t val = 0;
 __sync_val_compare_and_swap(&val, 0, 37);'''},
 
   {'name': 'HAVE_GCC__ATOMIC_INT32_CAS',
@@ -2129,13 +2114,14 @@ __atomic_compare_exchange_n(&val, &expect, 37, 0, __ATOMIC_SEQ_CST, __ATOMIC_REL
   {'name': 'HAVE_GCC__ATOMIC_INT64_CAS',
    'desc': ' __atomic_compare_exchange_n(int64)',
    'test': '''
-INT64 val = 0;
-INT64 expect = 0;
+int64_t val = 0;
+int64_t expect = 0;
 __atomic_compare_exchange_n(&val, &expect, 37, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);'''},
 ]
 
 foreach check : atomic_checks
   test = '''
+#include <stdint.h>
 int main(void)
 {
 @0@
@@ -2144,7 +2130,7 @@ int main(void)
   cdata.set(check['name'],
     cc.links(test,
       name: check['desc'],
-      args: test_c_args + ['-DINT64=@0@'.format(cdata.get('PG_INT64_TYPE'))]) ? 1 : false
+      args: test_c_args) ? 1 : false
   )
 endforeach
 
@@ -2182,6 +2168,7 @@ if host_cpu == 'x86_64'
 
   prog = '''
 #include <immintrin.h>
+#include <stdint.h>
 
 #if defined(__has_attribute) && __has_attribute (target)
 __attribute__((target("avx512vpopcntdq,avx512bw")))
@@ -2189,7 +2176,7 @@ __attribute__((target("avx512vpopcntdq,avx512bw")))
 int main(void)
 {
     const char buf[sizeof(__m512i)];
-    INT64 popcnt = 0;
+    int64_t popcnt = 0;
     __m512i accum = _mm512_setzero_si512();
     const __m512i val = _mm512_maskz_loadu_epi8((__mmask64) 0xf0f0f0f0f0f0f0f0, (const __m512i *) buf);
     const __m512i cnt = _mm512_popcnt_epi64(val);
@@ -2200,8 +2187,7 @@ int main(void)
 }
 '''
 
-  if cc.links(prog, name: 'AVX-512 popcount',
-        args: test_c_args + ['-DINT64=@0@'.format(cdata.get('PG_INT64_TYPE'))])
+  if cc.links(prog, name: 'AVX-512 popcount', args: test_c_args)
     cdata.set('USE_AVX512_POPCNT_WITH_RUNTIME_CHECK', 1)
   endif
 
@@ -2214,14 +2200,19 @@ endif
 # If we are targeting a processor that has Intel SSE 4.2 instructions, we can
 # use the special CRC instructions for calculating CRC-32C. If we're not
 # targeting such a processor, but we can nevertheless produce code that uses
-# the SSE intrinsics, perhaps with some extra CFLAGS, compile both
-# implementations and select which one to use at runtime, depending on whether
-# SSE 4.2 is supported by the processor we're running on.
+# the SSE intrinsics, compile both implementations and select which one to use
+# at runtime, depending on whether SSE 4.2 is supported by the processor we're
+# running on.
 #
 # Similarly, if we are targeting an ARM processor that has the CRC
 # instructions that are part of the ARMv8 CRC Extension, use them. And if
 # we're not targeting such a processor, but can nevertheless produce code that
 # uses the CRC instructions, compile both, and select at runtime.
+#
+# Note that we do not use __attribute__((target("..."))) for the ARM CRC
+# instructions because until clang 16, using the ARM intrinsics still requires
+# special -march flags.  Perhaps we can re-evaluate this decision after some
+# time has passed.
 ###############################################################
 
 have_optimized_crc = false
@@ -2237,6 +2228,9 @@ if host_cpu == 'x86' or host_cpu == 'x86_64'
     prog = '''
 #include <nmmintrin.h>
 
+#if defined(__has_attribute) && __has_attribute (target)
+__attribute__((target("sse4.2")))
+#endif
 int main(void)
 {
     unsigned int crc = 0;
@@ -2247,16 +2241,16 @@ int main(void)
 }
 '''
 
-    if cc.links(prog, name: '_mm_crc32_u8 and _mm_crc32_u32 without -msse4.2',
+    if not cc.links(prog, name: '_mm_crc32_u8 and _mm_crc32_u32',
           args: test_c_args)
+      # Do not use Intel SSE 4.2
+    elif (cc.get_define('__SSE4_2__') != '')
       # Use Intel SSE 4.2 unconditionally.
       cdata.set('USE_SSE42_CRC32C', 1)
       have_optimized_crc = true
-    elif cc.links(prog, name: '_mm_crc32_u8 and _mm_crc32_u32 with -msse4.2',
-          args: test_c_args + ['-msse4.2'])
+    else
       # Use Intel SSE 4.2, with runtime check. The CPUID instruction is needed for
       # the runtime check.
-      cflags_crc += '-msse4.2'
       cdata.set('USE_SSE42_CRC32C', false)
       cdata.set('USE_SSE42_CRC32C_WITH_RUNTIME_CHECK', 1)
       have_optimized_crc = true
@@ -2286,6 +2280,13 @@ int main(void)
       args: test_c_args)
     # Use ARM CRC Extension unconditionally
     cdata.set('USE_ARMV8_CRC32C', 1)
+    have_optimized_crc = true
+  elif cc.links(prog, name: '__crc32cb, __crc32ch, __crc32cw, and __crc32cd with -march=armv8-a+crc+simd',
+      args: test_c_args + ['-march=armv8-a+crc+simd'])
+    # Use ARM CRC Extension, with runtime check
+    cflags_crc += '-march=armv8-a+crc+simd'
+    cdata.set('USE_ARMV8_CRC32C', false)
+    cdata.set('USE_ARMV8_CRC32C_WITH_RUNTIME_CHECK', 1)
     have_optimized_crc = true
   elif cc.links(prog, name: '__crc32cb, __crc32ch, __crc32cw, and __crc32cd with -march=armv8-a+crc',
       args: test_c_args + ['-march=armv8-a+crc'])
@@ -2361,6 +2362,7 @@ elif host_cpu == 'ppc' or host_cpu == 'ppc64'
       }
       int test_adds(int x) { return addi(3, x) + addi(x, 5); }
       ''',
+      name: '@0@: "i"(x) when __builtin_constant_p(x)'.format(host_cpu),
       args: test_c_args)
       cdata.set('HAVE_I_CONSTRAINT__BUILTIN_CONSTANT_P', 1)
     endif
@@ -2383,7 +2385,6 @@ header_checks = [
   'getopt.h',
   'ifaddrs.h',
   'mbarrier.h',
-  'stdbool.h',
   'strings.h',
   'sys/epoll.h',
   'sys/event.h',
@@ -2540,7 +2541,7 @@ endif
 
 # Check if the C compiler understands typeof or a variant.  Define
 # HAVE_TYPEOF if so, and define 'typeof' to the actual key word.
-foreach kw : ['typeof', '__typeof__', 'decltype']
+foreach kw : ['typeof', '__typeof__']
   if cc.compiles('''
 int main(void)
 {
@@ -2550,7 +2551,7 @@ int main(void)
     return y;
 }
 '''.format(kw),
-    name: 'typeof()',
+    name: kw,
     args: test_c_args, include_directories: postgres_inc)
 
     cdata.set('HAVE_TYPEOF', 1)
@@ -2614,7 +2615,6 @@ endif
 # XXX: Might be worth conditioning some checks on the OS, to avoid doing
 # unnecessary checks over and over, particularly on windows.
 func_checks = [
-  ['_configthreadlocale', {'skip': host_system != 'windows'}],
   ['backtrace_symbols', {'dependencies': [execinfo_dep]}],
   ['clock_gettime', {'dependencies': [rt_dep], 'define': false}],
   ['copyfile'],
@@ -2623,7 +2623,9 @@ func_checks = [
   # when enabling asan the dlopen check doesn't notice that -ldl is actually
   # required. Just checking for dlsym() ought to suffice.
   ['dlsym', {'dependencies': [dl_dep], 'define': false}],
+  ['elf_aux_info'],
   ['explicit_bzero'],
+  ['getauxval'],
   ['getifaddrs'],
   ['getopt', {'dependencies': [getopt_dep, gnugetopt_dep], 'skip': always_replace_getopt}],
   ['getopt_long', {'dependencies': [getopt_dep, gnugetopt_dep], 'skip': always_replace_getopt_long}],

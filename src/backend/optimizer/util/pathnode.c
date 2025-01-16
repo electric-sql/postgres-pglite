@@ -3,7 +3,7 @@
  * pathnode.c
  *	  Routines to manipulate pathlists and create path nodes
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -3634,25 +3634,26 @@ create_windowagg_path(PlannerInfo *root,
  *	  Creates a pathnode that represents computation of INTERSECT or EXCEPT
  *
  * 'rel' is the parent relation associated with the result
- * 'subpath' is the path representing the source of data
+ * 'leftpath' is the path representing the left-hand source of data
+ * 'rightpath' is the path representing the right-hand source of data
  * 'cmd' is the specific semantics (INTERSECT or EXCEPT, with/without ALL)
  * 'strategy' is the implementation strategy (sorted or hashed)
- * 'distinctList' is a list of SortGroupClause's representing the grouping
- * 'flagColIdx' is the column number where the flag column will be, if any
- * 'firstFlag' is the flag value for the first input relation when hashing;
- *		or -1 when sorting
- * 'numGroups' is the estimated number of distinct groups
+ * 'groupList' is a list of SortGroupClause's representing the grouping
+ * 'numGroups' is the estimated number of distinct groups in left-hand input
  * 'outputRows' is the estimated number of output rows
+ *
+ * leftpath and rightpath must produce the same columns.  Moreover, if
+ * strategy is SETOP_SORTED, leftpath and rightpath must both be sorted
+ * by all the grouping columns.
  */
 SetOpPath *
 create_setop_path(PlannerInfo *root,
 				  RelOptInfo *rel,
-				  Path *subpath,
+				  Path *leftpath,
+				  Path *rightpath,
 				  SetOpCmd cmd,
 				  SetOpStrategy strategy,
-				  List *distinctList,
-				  AttrNumber flagColIdx,
-				  int firstFlag,
+				  List *groupList,
 				  double numGroups,
 				  double outputRows)
 {
@@ -3660,34 +3661,90 @@ create_setop_path(PlannerInfo *root,
 
 	pathnode->path.pathtype = T_SetOp;
 	pathnode->path.parent = rel;
-	/* SetOp doesn't project, so use source path's pathtarget */
-	pathnode->path.pathtarget = subpath->pathtarget;
+	pathnode->path.pathtarget = rel->reltarget;
 	/* For now, assume we are above any joins, so no parameterization */
 	pathnode->path.param_info = NULL;
 	pathnode->path.parallel_aware = false;
 	pathnode->path.parallel_safe = rel->consider_parallel &&
-		subpath->parallel_safe;
-	pathnode->path.parallel_workers = subpath->parallel_workers;
+		leftpath->parallel_safe && rightpath->parallel_safe;
+	pathnode->path.parallel_workers =
+		leftpath->parallel_workers + rightpath->parallel_workers;
 	/* SetOp preserves the input sort order if in sort mode */
 	pathnode->path.pathkeys =
-		(strategy == SETOP_SORTED) ? subpath->pathkeys : NIL;
+		(strategy == SETOP_SORTED) ? leftpath->pathkeys : NIL;
 
-	pathnode->subpath = subpath;
+	pathnode->leftpath = leftpath;
+	pathnode->rightpath = rightpath;
 	pathnode->cmd = cmd;
 	pathnode->strategy = strategy;
-	pathnode->distinctList = distinctList;
-	pathnode->flagColIdx = flagColIdx;
-	pathnode->firstFlag = firstFlag;
+	pathnode->groupList = groupList;
 	pathnode->numGroups = numGroups;
 
 	/*
-	 * Charge one cpu_operator_cost per comparison per input tuple. We assume
-	 * all columns get compared at most of the tuples.
+	 * Compute cost estimates.  As things stand, we end up with the same total
+	 * cost in this node for sort and hash methods, but different startup
+	 * costs.  This could be refined perhaps, but it'll do for now.
 	 */
-	pathnode->path.disabled_nodes = subpath->disabled_nodes;
-	pathnode->path.startup_cost = subpath->startup_cost;
-	pathnode->path.total_cost = subpath->total_cost +
-		cpu_operator_cost * subpath->rows * list_length(distinctList);
+	pathnode->path.disabled_nodes =
+		leftpath->disabled_nodes + rightpath->disabled_nodes;
+	if (strategy == SETOP_SORTED)
+	{
+		/*
+		 * In sorted mode, we can emit output incrementally.  Charge one
+		 * cpu_operator_cost per comparison per input tuple.  Like cost_group,
+		 * we assume all columns get compared at most of the tuples.
+		 */
+		pathnode->path.startup_cost =
+			leftpath->startup_cost + rightpath->startup_cost;
+		pathnode->path.total_cost =
+			leftpath->total_cost + rightpath->total_cost +
+			cpu_operator_cost * (leftpath->rows + rightpath->rows) * list_length(groupList);
+
+		/*
+		 * Also charge a small amount per extracted tuple.  Like cost_sort,
+		 * charge only operator cost not cpu_tuple_cost, since SetOp does no
+		 * qual-checking or projection.
+		 */
+		pathnode->path.total_cost += cpu_operator_cost * outputRows;
+	}
+	else
+	{
+		Size		hashentrysize;
+
+		/*
+		 * In hashed mode, we must read all the input before we can emit
+		 * anything.  Also charge comparison costs to represent the cost of
+		 * hash table lookups.
+		 */
+		pathnode->path.startup_cost =
+			leftpath->total_cost + rightpath->total_cost +
+			cpu_operator_cost * (leftpath->rows + rightpath->rows) * list_length(groupList);
+		pathnode->path.total_cost = pathnode->path.startup_cost;
+
+		/*
+		 * Also charge a small amount per extracted tuple.  Like cost_sort,
+		 * charge only operator cost not cpu_tuple_cost, since SetOp does no
+		 * qual-checking or projection.
+		 */
+		pathnode->path.total_cost += cpu_operator_cost * outputRows;
+
+		/*
+		 * Mark the path as disabled if enable_hashagg is off.  While this
+		 * isn't exactly a HashAgg node, it seems close enough to justify
+		 * letting that switch control it.
+		 */
+		if (!enable_hashagg)
+			pathnode->path.disabled_nodes++;
+
+		/*
+		 * Also disable if it doesn't look like the hashtable will fit into
+		 * hash_mem.
+		 */
+		hashentrysize = MAXALIGN(leftpath->pathtarget->width) +
+			MAXALIGN(SizeofMinimalTupleHeader);
+		if (hashentrysize * numGroups > get_hash_memory_limit())
+			pathnode->path.disabled_nodes++;
+	}
 	pathnode->path.rows = outputRows;
 
 	return pathnode;

@@ -12,7 +12,8 @@
  * Statistics are loaded from the filesystem during startup (by the startup
  * process), unless preceded by a crash, in which case all stats are
  * discarded. They are written out by the checkpointer process just before
- * shutting down, except when shutting down in immediate mode.
+ * shutting down (if the stats kind allows it), except when shutting down in
+ * immediate mode.
  *
  * Fixed-numbered stats are stored in plain (non-dynamic) shared memory.
  *
@@ -76,6 +77,7 @@
  *
  * Each statistics kind is handled in a dedicated file:
  * - pgstat_archiver.c
+ * - pgstat_backend.c
  * - pgstat_bgwriter.c
  * - pgstat_checkpointer.c
  * - pgstat_database.c
@@ -91,7 +93,7 @@
  * specific kinds of stats.
  *
  *
- * Copyright (c) 2001-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2001-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/utils/activity/pgstat.c
@@ -281,6 +283,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "database",
 
 		.fixed_amount = false,
+		.write_to_file = true,
 		/* so pg_stat_database entries can be seen in all databases */
 		.accessed_across_databases = true,
 
@@ -297,6 +300,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "relation",
 
 		.fixed_amount = false,
+		.write_to_file = true,
 
 		.shared_size = sizeof(PgStatShared_Relation),
 		.shared_data_off = offsetof(PgStatShared_Relation, stats),
@@ -311,6 +315,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "function",
 
 		.fixed_amount = false,
+		.write_to_file = true,
 
 		.shared_size = sizeof(PgStatShared_Function),
 		.shared_data_off = offsetof(PgStatShared_Function, stats),
@@ -324,6 +329,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "replslot",
 
 		.fixed_amount = false,
+		.write_to_file = true,
 
 		.accessed_across_databases = true,
 
@@ -340,6 +346,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "subscription",
 
 		.fixed_amount = false,
+		.write_to_file = true,
 		/* so pg_stat_subscription_stats entries can be seen in all databases */
 		.accessed_across_databases = true,
 
@@ -352,6 +359,22 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.reset_timestamp_cb = pgstat_subscription_reset_timestamp_cb,
 	},
 
+	[PGSTAT_KIND_BACKEND] = {
+		.name = "backend",
+
+		.fixed_amount = false,
+		.write_to_file = false,
+
+		.accessed_across_databases = true,
+
+		.shared_size = sizeof(PgStatShared_Backend),
+		.shared_data_off = offsetof(PgStatShared_Backend, stats),
+		.shared_data_len = sizeof(((PgStatShared_Backend *) 0)->stats),
+		.pending_size = sizeof(PgStat_BackendPending),
+
+		.flush_pending_cb = pgstat_backend_flush_cb,
+		.reset_timestamp_cb = pgstat_backend_reset_timestamp_cb,
+	},
 
 	/* stats for fixed-numbered (mostly 1) objects */
 
@@ -359,6 +382,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "archiver",
 
 		.fixed_amount = true,
+		.write_to_file = true,
 
 		.snapshot_ctl_off = offsetof(PgStat_Snapshot, archiver),
 		.shared_ctl_off = offsetof(PgStat_ShmemControl, archiver),
@@ -374,6 +398,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "bgwriter",
 
 		.fixed_amount = true,
+		.write_to_file = true,
 
 		.snapshot_ctl_off = offsetof(PgStat_Snapshot, bgwriter),
 		.shared_ctl_off = offsetof(PgStat_ShmemControl, bgwriter),
@@ -389,6 +414,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "checkpointer",
 
 		.fixed_amount = true,
+		.write_to_file = true,
 
 		.snapshot_ctl_off = offsetof(PgStat_Snapshot, checkpointer),
 		.shared_ctl_off = offsetof(PgStat_ShmemControl, checkpointer),
@@ -404,6 +430,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "io",
 
 		.fixed_amount = true,
+		.write_to_file = true,
 
 		.snapshot_ctl_off = offsetof(PgStat_Snapshot, io),
 		.shared_ctl_off = offsetof(PgStat_ShmemControl, io),
@@ -421,6 +448,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "slru",
 
 		.fixed_amount = true,
+		.write_to_file = true,
 
 		.snapshot_ctl_off = offsetof(PgStat_Snapshot, slru),
 		.shared_ctl_off = offsetof(PgStat_ShmemControl, slru),
@@ -438,6 +466,7 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.name = "wal",
 
 		.fixed_amount = true,
+		.write_to_file = true,
 
 		.snapshot_ctl_off = offsetof(PgStat_Snapshot, wal),
 		.shared_ctl_off = offsetof(PgStat_ShmemControl, wal),
@@ -589,6 +618,10 @@ pgstat_shutdown_hook(int code, Datum arg)
 	/* there shouldn't be any pending changes left */
 	Assert(dlist_is_empty(&pgStatPending));
 	dlist_init(&pgStatPending);
+
+	/* drop the backend stats entry */
+	if (!pgstat_drop_entry(PGSTAT_KIND_BACKEND, InvalidOid, MyProcNumber))
+		pgstat_request_entry_refs_gc();
 
 	pgstat_detach_shmem();
 
@@ -756,7 +789,7 @@ pgstat_report_stat(bool force)
 
 	partial_flush = false;
 
-	/* flush database / relation / function / ... stats */
+	/* flush of variable-numbered stats */
 	partial_flush |= pgstat_flush_pending_entries(nowait);
 
 	/* flush of fixed-numbered stats */
@@ -1330,8 +1363,7 @@ pgstat_delete_pending_entry(PgStat_EntryRef *entry_ref)
 }
 
 /*
- * Flush out pending stats for database objects (databases, relations,
- * functions).
+ * Flush out pending variable-numbered stats.
  */
 static bool
 pgstat_flush_pending_entries(bool nowait)
@@ -1617,6 +1649,10 @@ pgstat_write_statsfile(XLogRecPtr redo)
 		if (pgstat_is_kind_builtin(kind))
 			Assert(info->snapshot_ctl_off != 0);
 
+		/* skip if no need to write to file */
+		if (!info->write_to_file)
+			continue;
+
 		pgstat_build_snapshot_fixed(kind);
 		if (pgstat_is_kind_builtin(kind))
 			ptr = ((char *) &pgStatLocal.snapshot) + info->snapshot_ctl_off;
@@ -1639,7 +1675,15 @@ pgstat_write_statsfile(XLogRecPtr redo)
 
 		CHECK_FOR_INTERRUPTS();
 
-		/* we may have some "dropped" entries not yet removed, skip them */
+		/*
+		 * We should not see any "dropped" entries when writing the stats
+		 * file, as all backends and auxiliary processes should have cleaned
+		 * up their references before they terminated.
+		 *
+		 * However, since we are already shutting down, it is not worth
+		 * crashing the server over any potential cleanup issues, so we simply
+		 * skip such entries if encountered.
+		 */
 		Assert(!ps->dropped);
 		if (ps->dropped)
 			continue;
@@ -1662,6 +1706,10 @@ pgstat_write_statsfile(XLogRecPtr redo)
 
 		/* if not dropped the valid-entry refcount should exist */
 		Assert(pg_atomic_read_u32(&ps->refcount) > 0);
+
+		/* skip if no need to write to file */
+		if (!kind_info->write_to_file)
+			continue;
 
 		if (!kind_info->to_serialized_name)
 		{

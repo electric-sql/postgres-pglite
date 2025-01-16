@@ -7,7 +7,7 @@
  * already seen.  The hash key is computed from the grouping columns.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -37,19 +37,25 @@ build_hash_table(RecursiveUnionState *rustate)
 	Assert(node->numCols > 0);
 	Assert(node->numGroups > 0);
 
-	rustate->hashtable = BuildTupleHashTableExt(&rustate->ps,
-												desc,
-												node->numCols,
-												node->dupColIdx,
-												rustate->eqfuncoids,
-												rustate->hashfunctions,
-												node->dupCollations,
-												node->numGroups,
-												0,
-												rustate->ps.state->es_query_cxt,
-												rustate->tableContext,
-												rustate->tempContext,
-												false);
+	/*
+	 * If both child plans deliver the same fixed tuple slot type, we can tell
+	 * BuildTupleHashTable to expect that slot type as input.  Otherwise,
+	 * we'll pass NULL denoting that any slot type is possible.
+	 */
+	rustate->hashtable = BuildTupleHashTable(&rustate->ps,
+											 desc,
+											 ExecGetCommonChildSlotOps(&rustate->ps),
+											 node->numCols,
+											 node->dupColIdx,
+											 rustate->eqfuncoids,
+											 rustate->hashfunctions,
+											 node->dupCollations,
+											 node->numGroups,
+											 0,
+											 rustate->ps.state->es_query_cxt,
+											 rustate->tableContext,
+											 rustate->tempContext,
+											 false);
 }
 
 

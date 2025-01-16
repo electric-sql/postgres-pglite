@@ -1,7 +1,7 @@
 /*
  * psql - the PostgreSQL interactive terminal
  *
- * Copyright (c) 2000-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2025, PostgreSQL Global Development Group
  *
  * src/bin/psql/startup.c
  */
@@ -399,7 +399,7 @@ main(int argc, char *argv[])
 								cell->val, strlen(cell->val),
 								pset.encoding, standard_strings());
 				cond_stack = conditional_stack_create();
-				psql_scan_set_passthrough(scan_state, (void *) cond_stack);
+				psql_scan_set_passthrough(scan_state, cond_stack);
 
 				successResult = HandleSlashCmds(scan_state,
 												cond_stack,

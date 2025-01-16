@@ -4,7 +4,7 @@
  *	  prototypes for pathnode.c, relnode.c.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/optimizer/pathnode.h
@@ -260,12 +260,11 @@ extern WindowAggPath *create_windowagg_path(PlannerInfo *root,
 											bool topwindow);
 extern SetOpPath *create_setop_path(PlannerInfo *root,
 									RelOptInfo *rel,
-									Path *subpath,
+									Path *leftpath,
+									Path *rightpath,
 									SetOpCmd cmd,
 									SetOpStrategy strategy,
-									List *distinctList,
-									AttrNumber flagColIdx,
-									int firstFlag,
+									List *groupList,
 									double numGroups,
 									double outputRows);
 extern RecursiveUnionPath *create_recursiveunion_path(PlannerInfo *root,

@@ -2162,9 +2162,20 @@ CREATE VIEW phone_number WITH (security_barrier) AS
     <literal>LEAKPROOF</literal> to be pushed down, as they never receive data
     from the view.  In contrast, a function that might throw an error depending
     on the values received as arguments (such as one that throws an error in the
-    event of overflow or division by zero) is not leak-proof, and could provide
+    event of overflow or division by zero) is not leakproof, and could provide
     significant information about the unseen rows if applied before the security
     view's row filters.
+</para>
+
+<para>
+    For example, an index scan cannot be selected for queries on security
+    barrier views (or tables with row-level security policies) if an
+    operator used in the <literal>WHERE</literal> clause is associated with the
+    operator family of the index, but its underlying function is not marked
+    <literal>LEAKPROOF</literal>. The <xref linkend="app-psql"/> program's
+    <command><link linkend="app-psql-meta-command-dao">\dAo+</link></command>
+    meta-command is useful to list operator families and determine which of
+    their operators are marked as leakproof.
 </para>
 
 <para>

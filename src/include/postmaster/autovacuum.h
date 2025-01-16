@@ -4,7 +4,7 @@
  *	  header file for integrated autovacuum daemon
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/postmaster/autovacuum.h
@@ -28,6 +28,7 @@ typedef enum
 
 /* GUC variables */
 extern PGDLLIMPORT bool autovacuum_start_daemon;
+extern PGDLLIMPORT int autovacuum_worker_slots;
 extern PGDLLIMPORT int autovacuum_max_workers;
 extern PGDLLIMPORT int autovacuum_work_mem;
 extern PGDLLIMPORT int autovacuum_naptime;

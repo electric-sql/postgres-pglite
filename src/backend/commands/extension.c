@@ -12,7 +12,7 @@
  * postgresql.conf.  An extension also has an installation script file,
  * containing SQL commands to create the extension's objects.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -912,7 +912,7 @@ execute_sql_string(const char *sql, const char *filename)
 										dest, NULL, NULL, 0);
 
 				ExecutorStart(qdesc, 0);
-				ExecutorRun(qdesc, ForwardScanDirection, 0, true);
+				ExecutorRun(qdesc, ForwardScanDirection, 0);
 				ExecutorFinish(qdesc);
 				ExecutorEnd(qdesc);
 

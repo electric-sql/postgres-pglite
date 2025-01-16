@@ -4,7 +4,7 @@
  *	  interface routines for the postgres GiST index access method.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -173,7 +173,7 @@ gistinsert(Relation r, Datum *values, bool *isnull,
 		oldCxt = MemoryContextSwitchTo(indexInfo->ii_Context);
 		giststate = initGISTstate(r);
 		giststate->tempCxt = createTempGistContext();
-		indexInfo->ii_AmCache = (void *) giststate;
+		indexInfo->ii_AmCache = giststate;
 		MemoryContextSwitchTo(oldCxt);
 	}
 
@@ -1557,9 +1557,8 @@ initGISTstate(Relation index)
 	 * tuples during page split.  Also, B-tree is not adjusting tuples on
 	 * internal pages the way GiST does.
 	 */
-	giststate->nonLeafTupdesc = CreateTupleDescCopyConstr(index->rd_att);
-	giststate->nonLeafTupdesc->natts =
-		IndexRelationGetNumberOfKeyAttributes(index);
+	giststate->nonLeafTupdesc = CreateTupleDescTruncatedCopy(index->rd_att,
+															 IndexRelationGetNumberOfKeyAttributes(index));
 
 	for (i = 0; i < IndexRelationGetNumberOfKeyAttributes(index); i++)
 	{

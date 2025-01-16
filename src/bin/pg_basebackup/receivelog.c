@@ -5,7 +5,7 @@
  *
  * Author: Magnus Hagander <magnus@hagander.net>
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/bin/pg_basebackup/receivelog.c
@@ -191,7 +191,7 @@ static bool
 close_walfile(StreamCtl *stream, XLogRecPtr pos)
 {
 	char	   *fn;
-	off_t		currpos;
+	pgoff_t		currpos;
 	int			r;
 	char		walfile_name[MAXPGPATH];
 

@@ -7,7 +7,7 @@
  * from pgstat.c to enforce the line between the statistics access / storage
  * implementation and the details about individual types of statistics.
  *
- * Copyright (c) 2021-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2021-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/utils/activity/pgstat_io.c
@@ -20,17 +20,16 @@
 #include "storage/bufmgr.h"
 #include "utils/pgstat_internal.h"
 
-
-typedef struct PgStat_PendingIO
-{
-	PgStat_Counter counts[IOOBJECT_NUM_TYPES][IOCONTEXT_NUM_TYPES][IOOP_NUM_TYPES];
-	instr_time	pending_times[IOOBJECT_NUM_TYPES][IOCONTEXT_NUM_TYPES][IOOP_NUM_TYPES];
-} PgStat_PendingIO;
-
-
 static PgStat_PendingIO PendingIOStats;
 static bool have_iostats = false;
 
+/*
+ * Check if an IOOp is tracked in bytes.  This relies on the ordering of IOOp
+ * defined in pgstat.h, so make sure to update this check when changing its
+ * elements.
+ */
+#define pgstat_is_ioop_tracked_in_bytes(io_op) \
+	((io_op) < IOOP_NUM_TYPES && (io_op) >= IOOP_EXTEND)
 
 /*
  * Check that stats have not been counted for any combination of IOObject,
@@ -74,20 +73,25 @@ pgstat_bktype_io_stats_valid(PgStat_BktypeIO *backend_io,
 }
 
 void
-pgstat_count_io_op(IOObject io_object, IOContext io_context, IOOp io_op)
-{
-	pgstat_count_io_op_n(io_object, io_context, io_op, 1);
-}
-
-void
-pgstat_count_io_op_n(IOObject io_object, IOContext io_context, IOOp io_op, uint32 cnt)
+pgstat_count_io_op(IOObject io_object, IOContext io_context, IOOp io_op,
+				   uint32 cnt, uint64 bytes)
 {
 	Assert((unsigned int) io_object < IOOBJECT_NUM_TYPES);
 	Assert((unsigned int) io_context < IOCONTEXT_NUM_TYPES);
-	Assert((unsigned int) io_op < IOOP_NUM_TYPES);
+	Assert(pgstat_is_ioop_tracked_in_bytes(io_op) || bytes == 0);
 	Assert(pgstat_tracks_io_op(MyBackendType, io_object, io_context, io_op));
 
+	if (pgstat_tracks_backend_bktype(MyBackendType))
+	{
+		PgStat_BackendPending *entry_ref;
+
+		entry_ref = pgstat_prep_backend_pending(MyProcNumber);
+		entry_ref->pending_io.counts[io_object][io_context][io_op] += cnt;
+		entry_ref->pending_io.bytes[io_object][io_context][io_op] += bytes;
+	}
+
 	PendingIOStats.counts[io_object][io_context][io_op] += cnt;
+	PendingIOStats.bytes[io_object][io_context][io_op] += bytes;
 
 	have_iostats = true;
 }
@@ -116,11 +120,11 @@ pgstat_prepare_io_time(bool track_io_guc)
 }
 
 /*
- * Like pgstat_count_io_op_n() except it also accumulates time.
+ * Like pgstat_count_io_op() except it also accumulates time.
  */
 void
 pgstat_count_io_op_time(IOObject io_object, IOContext io_context, IOOp io_op,
-						instr_time start_time, uint32 cnt)
+						instr_time start_time, uint32 cnt, uint64 bytes)
 {
 	if (track_io_timing)
 	{
@@ -148,9 +152,18 @@ pgstat_count_io_op_time(IOObject io_object, IOContext io_context, IOOp io_op,
 
 		INSTR_TIME_ADD(PendingIOStats.pending_times[io_object][io_context][io_op],
 					   io_time);
+
+		if (pgstat_tracks_backend_bktype(MyBackendType))
+		{
+			PgStat_BackendPending *entry_ref;
+
+			entry_ref = pgstat_prep_backend_pending(MyProcNumber);
+			INSTR_TIME_ADD(entry_ref->pending_io.pending_times[io_object][io_context][io_op],
+						   io_time);
+		}
 	}
 
-	pgstat_count_io_op_n(io_object, io_context, io_op, cnt);
+	pgstat_count_io_op(io_object, io_context, io_op, cnt, bytes);
 }
 
 PgStat_IO *
@@ -215,6 +228,9 @@ pgstat_io_flush_cb(bool nowait)
 
 				bktype_shstats->counts[io_object][io_context][io_op] +=
 					PendingIOStats.counts[io_object][io_context][io_op];
+
+				bktype_shstats->bytes[io_object][io_context][io_op] +=
+					PendingIOStats.bytes[io_object][io_context][io_op];
 
 				time = PendingIOStats.pending_times[io_object][io_context][io_op];
 

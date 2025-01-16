@@ -3,7 +3,7 @@
  * relcache.c
  *	  POSTGRES relation descriptor cache code
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -585,6 +585,8 @@ RelationBuildTupleDesc(Relation relation)
 			   attp,
 			   ATTRIBUTE_FIXED_PART_SIZE);
 
+		populate_compact_attribute(relation->rd_att, attnum - 1);
+
 		/* Update constraint/default info */
 		if (attp->attnotnull)
 			constr->has_not_null = true;
@@ -660,26 +662,12 @@ RelationBuildTupleDesc(Relation relation)
 			 need, RelationGetRelid(relation));
 
 	/*
-	 * The attcacheoff values we read from pg_attribute should all be -1
-	 * ("unknown").  Verify this if assert checking is on.  They will be
-	 * computed when and if needed during tuple access.
-	 */
-#ifdef USE_ASSERT_CHECKING
-	{
-		int			i;
-
-		for (i = 0; i < RelationGetNumberOfAttributes(relation); i++)
-			Assert(TupleDescAttr(relation->rd_att, i)->attcacheoff == -1);
-	}
-#endif
-
-	/*
-	 * However, we can easily set the attcacheoff value for the first
-	 * attribute: it must be zero.  This eliminates the need for special cases
-	 * for attnum=1 that used to exist in fastgetattr() and index_getattr().
+	 * We can easily set the attcacheoff value for the first attribute: it
+	 * must be zero.  This eliminates the need for special cases for attnum=1
+	 * that used to exist in fastgetattr() and index_getattr().
 	 */
 	if (RelationGetNumberOfAttributes(relation) > 0)
-		TupleDescAttr(relation->rd_att, 0)->attcacheoff = 0;
+		TupleDescCompactAttr(relation->rd_att, 0)->attcacheoff = 0;
 
 	/*
 	 * Set up constraint/default info
@@ -1939,7 +1927,6 @@ formrdesc(const char *relationName, Oid relationReltype,
 	relation->rd_rel->relallvisible = 0;
 	relation->rd_rel->relkind = RELKIND_RELATION;
 	relation->rd_rel->relnatts = (int16) natts;
-	relation->rd_rel->relam = HEAP_TABLE_AM_OID;
 
 	/*
 	 * initialize attribute tuple form
@@ -1964,12 +1951,12 @@ formrdesc(const char *relationName, Oid relationReltype,
 			   &attrs[i],
 			   ATTRIBUTE_FIXED_PART_SIZE);
 		has_not_null |= attrs[i].attnotnull;
-		/* make sure attcacheoff is valid */
-		TupleDescAttr(relation->rd_att, i)->attcacheoff = -1;
+
+		populate_compact_attribute(relation->rd_att, i);
 	}
 
 	/* initialize first attribute's attcacheoff, cf RelationBuildTupleDesc */
-	TupleDescAttr(relation->rd_att, 0)->attcacheoff = 0;
+	TupleDescCompactAttr(relation->rd_att, 0)->attcacheoff = 0;
 
 	/* mark not-null status */
 	if (has_not_null)
@@ -3580,6 +3567,7 @@ RelationBuildLocalRelation(const char *relname,
 		datt->attgenerated = satt->attgenerated;
 		datt->attnotnull = satt->attnotnull;
 		has_not_null |= satt->attnotnull;
+		populate_compact_attribute(rel->rd_att, i);
 	}
 
 	if (has_not_null)
@@ -4398,12 +4386,12 @@ BuildHardcodedDescriptor(int natts, const FormData_pg_attribute *attrs)
 	for (i = 0; i < natts; i++)
 	{
 		memcpy(TupleDescAttr(result, i), &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
-		/* make sure attcacheoff is valid */
-		TupleDescAttr(result, i)->attcacheoff = -1;
+
+		populate_compact_attribute(result, i);
 	}
 
 	/* initialize first attribute's attcacheoff, cf RelationBuildTupleDesc */
-	TupleDescAttr(result, 0)->attcacheoff = 0;
+	TupleDescCompactAttr(result, 0)->attcacheoff = 0;
 
 	/* Note: we don't bother to set up a TupleConstr entry */
 
@@ -4586,6 +4574,7 @@ CheckConstraintFetch(Relation relation)
 			break;
 		}
 
+		check[found].ccenforced = conform->conenforced;
 		check[found].ccvalid = conform->convalidated;
 		check[found].ccnoinherit = conform->connoinherit;
 		check[found].ccname = MemoryContextStrdup(CacheMemoryContext,
@@ -5643,8 +5632,7 @@ RelationGetExclusionInfo(Relation indexRelation,
 
 		/* We want the exclusion constraint owning the index */
 		if ((conform->contype != CONSTRAINT_EXCLUSION &&
-			 !(conform->conperiod && (
-									  conform->contype == CONSTRAINT_PRIMARY
+			 !(conform->conperiod && (conform->contype == CONSTRAINT_PRIMARY
 									  || conform->contype == CONSTRAINT_UNIQUE))) ||
 			conform->conindid != RelationGetRelid(indexRelation))
 			continue;
@@ -5708,12 +5696,19 @@ RelationGetExclusionInfo(Relation indexRelation,
  * Get the publication information for the given relation.
  *
  * Traverse all the publications which the relation is in to get the
- * publication actions and validate the row filter expressions for such
- * publications if any. We consider the row filter expression as invalid if it
- * references any column which is not part of REPLICA IDENTITY.
+ * publication actions and validate:
+ * 1. The row filter expressions for such publications if any. We consider the
+ *    row filter expression as invalid if it references any column which is not
+ *    part of REPLICA IDENTITY.
+ * 2. The column list for such publication if any. We consider the column list
+ * 	  invalid if REPLICA IDENTITY contains any column that is not part of it.
+ * 3. The generated columns of the relation for such publications. We consider
+ *    any reference of an unpublished generated column in REPLICA IDENTITY as
+ *    invalid.
  *
  * To avoid fetching the publication information repeatedly, we cache the
- * publication actions and row filter validation information.
+ * publication actions, row filter validation information, column list
+ * validation information, and generated column validation information.
  */
 void
 RelationBuildPublicationDesc(Relation relation, PublicationDesc *pubdesc)
@@ -5736,6 +5731,8 @@ RelationBuildPublicationDesc(Relation relation, PublicationDesc *pubdesc)
 		pubdesc->rf_valid_for_delete = true;
 		pubdesc->cols_valid_for_update = true;
 		pubdesc->cols_valid_for_delete = true;
+		pubdesc->gencols_valid_for_update = true;
+		pubdesc->gencols_valid_for_delete = true;
 		return;
 	}
 
@@ -5750,6 +5747,8 @@ RelationBuildPublicationDesc(Relation relation, PublicationDesc *pubdesc)
 	pubdesc->rf_valid_for_delete = true;
 	pubdesc->cols_valid_for_update = true;
 	pubdesc->cols_valid_for_delete = true;
+	pubdesc->gencols_valid_for_update = true;
+	pubdesc->gencols_valid_for_delete = true;
 
 	/* Fetch the publication membership info. */
 	puboids = GetRelationPublications(relid);
@@ -5779,6 +5778,8 @@ RelationBuildPublicationDesc(Relation relation, PublicationDesc *pubdesc)
 		Oid			pubid = lfirst_oid(lc);
 		HeapTuple	tup;
 		Form_pg_publication pubform;
+		bool		invalid_column_list;
+		bool		invalid_gen_col;
 
 		tup = SearchSysCache1(PUBLICATIONOID, ObjectIdGetDatum(pubid));
 
@@ -5813,18 +5814,27 @@ RelationBuildPublicationDesc(Relation relation, PublicationDesc *pubdesc)
 		/*
 		 * Check if all columns are part of the REPLICA IDENTITY index or not.
 		 *
-		 * If the publication is FOR ALL TABLES then it means the table has no
-		 * column list and we can skip the validation.
+		 * Check if all generated columns included in the REPLICA IDENTITY are
+		 * published.
 		 */
-		if (!pubform->puballtables &&
-			(pubform->pubupdate || pubform->pubdelete) &&
-			pub_collist_contains_invalid_column(pubid, relation, ancestors,
-												pubform->pubviaroot))
+		if ((pubform->pubupdate || pubform->pubdelete) &&
+			pub_contains_invalid_column(pubid, relation, ancestors,
+										pubform->pubviaroot,
+										pubform->pubgencols,
+										&invalid_column_list,
+										&invalid_gen_col))
 		{
 			if (pubform->pubupdate)
-				pubdesc->cols_valid_for_update = false;
+			{
+				pubdesc->cols_valid_for_update = !invalid_column_list;
+				pubdesc->gencols_valid_for_update = !invalid_gen_col;
+			}
+
 			if (pubform->pubdelete)
-				pubdesc->cols_valid_for_delete = false;
+			{
+				pubdesc->cols_valid_for_delete = !invalid_column_list;
+				pubdesc->gencols_valid_for_delete = !invalid_gen_col;
+			}
 		}
 
 		ReleaseSysCache(tup);
@@ -5847,6 +5857,17 @@ RelationBuildPublicationDesc(Relation relation, PublicationDesc *pubdesc)
 		if (pubdesc->pubactions.pubinsert && pubdesc->pubactions.pubupdate &&
 			pubdesc->pubactions.pubdelete && pubdesc->pubactions.pubtruncate &&
 			!pubdesc->cols_valid_for_update && !pubdesc->cols_valid_for_delete)
+			break;
+
+		/*
+		 * If we know everything is replicated and replica identity has an
+		 * unpublished generated column, there is no point to check for other
+		 * publications.
+		 */
+		if (pubdesc->pubactions.pubinsert && pubdesc->pubactions.pubupdate &&
+			pubdesc->pubactions.pubdelete && pubdesc->pubactions.pubtruncate &&
+			!pubdesc->gencols_valid_for_update &&
+			!pubdesc->gencols_valid_for_delete)
 			break;
 	}
 
@@ -6168,6 +6189,8 @@ load_relcache_init_file(bool shared)
 				goto read_failed;
 
 			has_not_null |= attr->attnotnull;
+
+			populate_compact_attribute(rel->rd_att, i);
 		}
 
 		/* next read the access method specific field */

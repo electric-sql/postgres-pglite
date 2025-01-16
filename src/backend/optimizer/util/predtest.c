@@ -4,7 +4,7 @@
  *	  Routines to attempt to prove logical implications between predicate
  *	  expressions.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -908,7 +908,7 @@ static void
 list_startup_fn(Node *clause, PredIterInfo info)
 {
 	info->state_list = (List *) clause;
-	info->state = (void *) list_head(info->state_list);
+	info->state = list_head(info->state_list);
 }
 
 static Node *
@@ -920,7 +920,7 @@ list_next_fn(PredIterInfo info)
 	if (l == NULL)
 		return NULL;
 	n = lfirst(l);
-	info->state = (void *) lnext(info->state_list, l);
+	info->state = lnext(info->state_list, l);
 	return n;
 }
 
@@ -938,7 +938,7 @@ static void
 boolexpr_startup_fn(Node *clause, PredIterInfo info)
 {
 	info->state_list = ((BoolExpr *) clause)->args;
-	info->state = (void *) list_head(info->state_list);
+	info->state = list_head(info->state_list);
 }
 
 /*
@@ -968,7 +968,7 @@ arrayconst_startup_fn(Node *clause, PredIterInfo info)
 
 	/* Create working state struct */
 	state = (ArrayConstIterState *) palloc(sizeof(ArrayConstIterState));
-	info->state = (void *) state;
+	info->state = state;
 
 	/* Deconstruct the array literal */
 	arrayconst = (Const *) lsecond(saop->args);
@@ -1047,7 +1047,7 @@ arrayexpr_startup_fn(Node *clause, PredIterInfo info)
 
 	/* Create working state struct */
 	state = (ArrayExprIterState *) palloc(sizeof(ArrayExprIterState));
-	info->state = (void *) state;
+	info->state = state;
 
 	/* Set up a dummy OpExpr to return as the per-item node */
 	state->opexpr.xpr.type = T_OpExpr;
@@ -1664,7 +1664,7 @@ clause_is_strict_for(Node *clause, Node *subexpr, bool allow_false)
 #define BTEQ BTEqualStrategyNumber
 #define BTGE BTGreaterEqualStrategyNumber
 #define BTGT BTGreaterStrategyNumber
-#define BTNE ROWCOMPARE_NE
+#define BTNE COMPARE_NE
 
 /* We use "none" for 0/false to make the tables align nicely */
 #define none 0

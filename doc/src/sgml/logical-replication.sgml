@@ -24,10 +24,11 @@
  </para>
 
  <para>
-  Logical replication of a table typically starts with taking a snapshot
-  of the data on the publisher database and copying that to the subscriber.
-  Once that is done, the changes on the publisher are sent to the subscriber
-  as they occur in real-time.  The subscriber applies the data in the same
+  When logical replication of a table typically starts, PostgreSQL takes
+  a snapshot of the table's data on the publisher database and copies it
+  to the subscriber.  Once complete, changes on the publisher since the
+  initial copy are sent continually to the subscriber.  The subscriber
+  applies the data in the same
   order as the publisher so that transactional consistency is guaranteed for
   publications within a single subscription.  This method of data replication
   is sometimes referred to as transactional replication.
@@ -124,35 +125,6 @@
   </para>
 
   <para>
-   A published table must have a <firstterm>replica identity</firstterm> configured in
-   order to be able to replicate <command>UPDATE</command>
-   and <command>DELETE</command> operations, so that appropriate rows to
-   update or delete can be identified on the subscriber side.  By default,
-   this is the primary key, if there is one.  Another unique index (with
-   certain additional requirements) can also be set to be the replica
-   identity.  If the table does not have any suitable key, then it can be set
-   to replica identity <literal>FULL</literal>, which means the entire row becomes
-   the key.  When replica identity <literal>FULL</literal> is specified,
-   indexes can be used on the subscriber side for searching the rows.  Candidate
-   indexes must be btree or hash, non-partial, and the leftmost index field must
-   be a column (not an expression) that references the published table column.
-   These restrictions on the non-unique index properties adhere to some of the
-   restrictions that are enforced for primary keys.  If there are no such
-   suitable indexes, the search on the subscriber side can be very inefficient,
-   therefore replica identity <literal>FULL</literal> should only be used as a
-   fallback if no other solution is possible.  If a replica identity other
-   than <literal>FULL</literal> is set on the publisher side, a replica identity
-   comprising the same or fewer columns must also be set on the subscriber
-   side.  See <xref linkend="sql-altertable-replica-identity"/> for details on
-   how to set the replica identity.  If a table without a replica identity is
-   added to a publication that replicates <command>UPDATE</command>
-   or <command>DELETE</command> operations then
-   subsequent <command>UPDATE</command> or <command>DELETE</command>
-   operations will cause an error on the publisher.  <command>INSERT</command>
-   operations can proceed regardless of any replica identity.
-  </para>
-
-  <para>
    Every publication can have multiple subscribers.
   </para>
 
@@ -165,9 +137,62 @@
    The individual tables can be added and removed dynamically using
    <link linkend="sql-alterpublication"><command>ALTER PUBLICATION</command></link>.  Both the <literal>ADD
    TABLE</literal> and <literal>DROP TABLE</literal> operations are
-   transactional; so the table will start or stop replicating at the correct
+   transactional, so the table will start or stop replicating at the correct
    snapshot once the transaction has committed.
   </para>
+
+  <sect2 id="logical-replication-publication-replica-identity">
+   <title>Replica Identity</title>
+
+   <para>
+    A published table must have a <firstterm>replica identity</firstterm>
+    configured in order to be able to replicate <command>UPDATE</command>
+    and <command>DELETE</command> operations, so that appropriate rows to
+    update or delete can be identified on the subscriber side.
+   </para>
+
+   <para>
+    By default, this is the primary key, if there is one. Another unique index
+    (with certain additional requirements) can also be set to be the replica
+    identity.  If the table does not have any suitable key, then it can be set
+    to replica identity <literal>FULL</literal>, which means the entire row
+    becomes the key.  When replica identity <literal>FULL</literal> is
+    specified, indexes can be used on the subscriber side for searching the
+    rows.  Candidate indexes must be btree or hash, non-partial, and the
+    leftmost index field must be a column (not an expression) that references
+    the published table column.  These restrictions on the non-unique index
+    properties adhere to some of the restrictions that are enforced for
+    primary keys.  If there are no such suitable indexes, the search on the
+    subscriber side can be very inefficient, therefore replica identity
+    <literal>FULL</literal> should only be used as a fallback if no other
+    solution is possible.
+   </para>
+
+   <para>
+    If a replica identity other than <literal>FULL</literal> is set on the
+    publisher side, a replica identity comprising the same or fewer columns
+    must also be set on the subscriber side.
+   </para>
+
+   <para>
+    Tables with a replica identity defined as <literal>NOTHING</literal>,
+    <literal>DEFAULT</literal> without a primary key, or <literal>USING
+    INDEX</literal> with a dropped index, cannot support
+    <command>UPDATE</command> or <command>DELETE</command> operations when
+    included in a publication replicating these actions. Attempting such
+    operations will result in an error on the publisher.
+   </para>
+
+   <para>
+    <command>INSERT</command> operations can proceed regardless of any replica identity.
+   </para>
+
+   <para>
+    See <link linkend="sql-altertable-replica-identity"><literal>ALTER TABLE...REPLICA IDENTITY</literal></link>
+    for details on how to set the replica identity.
+   </para>
+  </sect2>
+
  </sect1>
 
  <sect1 id="logical-replication-subscription">
@@ -1953,15 +1978,6 @@ CONTEXT:  processing remote data for replication origin "pg_16395" during "INSER
 
  <sect1 id="logical-replication-architecture">
   <title>Architecture</title>
-
-  <para>
-   Logical replication starts by copying a snapshot of the data on the
-   publisher database.  Once that is done, changes on the publisher are sent
-   to the subscriber as they occur in real time.  The subscriber applies data
-   in the order in which commits were made on the publisher so that
-   transactional consistency is guaranteed for the publications within any
-   single subscription.
-  </para>
 
   <para>
    Logical replication is built with an architecture similar to physical

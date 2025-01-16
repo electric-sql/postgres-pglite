@@ -3,7 +3,7 @@
  * option.c
  *		  FDW and GUC option handling for postgres_fdw
  *
- * Portions Copyright (c) 2012-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2012-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  contrib/postgres_fdw/option.c
@@ -279,6 +279,9 @@ InitPgFdwOptions(void)
 		{"analyze_sampling", ForeignServerRelationId, false},
 		{"analyze_sampling", ForeignTableRelationId, false},
 
+		{"use_scram_passthrough", ForeignServerRelationId, false},
+		{"use_scram_passthrough", UserMappingRelationId, false},
+
 		/*
 		 * sslcert and sslkey are in fact libpq options, but we repeat them
 		 * here to allow them to appear in both foreign server context (when
@@ -521,7 +524,7 @@ process_pgfdw_appname(const char *appname)
 				appendStringInfoString(&buf, application_name);
 				break;
 			case 'c':
-				appendStringInfo(&buf, "%" INT64_MODIFIER "x.%x", MyStartTime, MyProcPid);
+				appendStringInfo(&buf, INT64_HEX_FORMAT ".%x", MyStartTime, MyProcPid);
 				break;
 			case 'C':
 				appendStringInfoString(&buf, cluster_name);

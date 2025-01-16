@@ -71,7 +71,7 @@
  * values.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -5029,8 +5029,7 @@ cost_qual_eval_walker(Node *node, cost_qual_eval_context *context)
 	}
 
 	/* recurse into children */
-	return expression_tree_walker(node, cost_qual_eval_walker,
-								  (void *) context);
+	return expression_tree_walker(node, cost_qual_eval_walker, context);
 }
 
 /*

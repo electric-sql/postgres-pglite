@@ -3,7 +3,7 @@
  * relpath.h
  *		Declarations for GetRelationPath() and friends
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/common/relpath.h
@@ -14,10 +14,10 @@
 #define RELPATH_H
 
 /*
- *	'pgrminclude ignore' needed here because CppAsString2() does not throw
- *	an error if the symbol is not defined.
+ *	Required here; note that CppAsString2() does not throw an error if the
+ *	symbol is not defined.
  */
-#include "catalog/catversion.h" /* pgrminclude ignore */
+#include "catalog/catversion.h"
 
 /*
  * RelFileNumber data type identifies the specific relation file name.

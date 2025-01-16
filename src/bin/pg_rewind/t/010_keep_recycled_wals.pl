@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2024, PostgreSQL Global Development Group
+# Copyright (c) 2021-2025, PostgreSQL Global Development Group
 #
 # Test situation where a target data directory contains
 # WAL files that were already recycled by the new primary.
@@ -23,9 +23,9 @@ $node_standby->reload();
 
 RewindTest::primary_psql("CHECKPOINT");    # last common checkpoint
 
-# We use "perl -e 'exit(1)'" as an alternative to "false", because the latter
+# We use `perl -e "exit(1)"` as an alternative to "false", because the latter
 # might not be available on Windows.
-my $false = "$^X -e 'exit(1)'";
+my $false = "$^X -e \"exit(1)\"";
 $node_primary->append_conf(
 	'postgresql.conf', qq(
 archive_command = '$false'

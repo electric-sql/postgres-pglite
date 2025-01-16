@@ -105,6 +105,47 @@ WHERE oid = 'stats_import.test'::regclass;
        18 |       401 |             5
 (1 row)
 
+-- test MVCC behavior: changes do not persist after abort (in contrast
+-- to pg_restore_relation_stats(), which uses in-place updates).
+BEGIN;
+SELECT
+    pg_catalog.pg_set_relation_stats(
+        relation => 'stats_import.test'::regclass,
+        relpages => NULL::integer,
+        reltuples => 4000.0::real,
+        relallvisible => 4::integer);
+ pg_set_relation_stats 
+-----------------------
+ 
+(1 row)
+
+ABORT;
+SELECT relpages, reltuples, relallvisible
+FROM pg_class
+WHERE oid = 'stats_import.test'::regclass;
+ relpages | reltuples | relallvisible 
+----------+-----------+---------------
+       18 |       401 |             5
+(1 row)
+
+BEGIN;
+SELECT
+    pg_catalog.pg_clear_relation_stats(
+        'stats_import.test'::regclass);
+ pg_clear_relation_stats 
+-------------------------
+ 
+(1 row)
+
+ABORT;
+SELECT relpages, reltuples, relallvisible
+FROM pg_class
+WHERE oid = 'stats_import.test'::regclass;
+ relpages | reltuples | relallvisible 
+----------+-----------+---------------
+       18 |       401 |             5
+(1 row)
+
 -- clear
 SELECT
     pg_catalog.pg_clear_relation_stats(
@@ -195,6 +236,15 @@ SELECT pg_catalog.pg_set_attribute_stats(
     avg_width => 2::integer,
     n_distinct => 0.3::real);
 ERROR:  "relation" cannot be NULL
+-- error: attribute is system column
+SELECT pg_catalog.pg_set_attribute_stats(
+    relation => 'stats_import.test'::regclass,
+    attname => 'xmin'::name,
+    inherited => false::boolean,
+    null_frac => 0.1::real,
+    avg_width => 2::integer,
+    n_distinct => 0.3::real);
+ERROR:  cannot modify statistics on system column "xmin"
 -- error: attname doesn't exist
 SELECT pg_catalog.pg_set_attribute_stats(
     relation => 'stats_import.test'::regclass,
@@ -204,6 +254,12 @@ SELECT pg_catalog.pg_set_attribute_stats(
     avg_width => 2::integer,
     n_distinct => 0.3::real);
 ERROR:  column "nope" of relation "test" does not exist
+-- error: attribute is system column
+SELECT pg_catalog.pg_clear_attribute_stats(
+    relation => 'stats_import.test'::regclass,
+    attname => 'ctid'::name,
+    inherited => false::boolean);
+ERROR:  cannot clear statistics on system column "ctid"
 -- error: attname doesn't exist
 SELECT pg_catalog.pg_clear_attribute_stats(
     relation => 'stats_import.test'::regclass,
@@ -693,12 +749,32 @@ WHERE oid = 'stats_import.test'::regclass;
 SELECT pg_restore_relation_stats(
         'relation', 'stats_import.test'::regclass,
         'version', 150000::integer,
+        'relpages', '15'::integer);
+ pg_restore_relation_stats 
+---------------------------
+ t
+(1 row)
+
+SELECT relpages, reltuples, relallvisible
+FROM pg_class
+WHERE oid = 'stats_import.test'::regclass;
+ relpages | reltuples | relallvisible 
+----------+-----------+---------------
+       15 |       400 |             4
+(1 row)
+
+-- test non-MVCC behavior: new value should persist after abort
+BEGIN;
+SELECT pg_restore_relation_stats(
+        'relation', 'stats_import.test'::regclass,
+        'version', 150000::integer,
         'relpages', '16'::integer);
  pg_restore_relation_stats 
 ---------------------------
  t
 (1 row)
 
+ABORT;
 SELECT relpages, reltuples, relallvisible
 FROM pg_class
 WHERE oid = 'stats_import.test'::regclass;

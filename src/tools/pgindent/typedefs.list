@@ -47,6 +47,7 @@ AggSplit
 AggState
 AggStatePerAgg
 AggStatePerGroup
+AggStatePerGroupData
 AggStatePerHash
 AggStatePerPhase
 AggStatePerTrans
@@ -383,6 +384,7 @@ CaseTestExpr
 CaseWhen
 Cash
 CastInfo
+CatCInProgress
 CatCList
 CatCTup
 CatCache
@@ -454,7 +456,9 @@ CommitTimestampEntry
 CommitTimestampShared
 CommonEntry
 CommonTableExpr
+CompactAttribute
 CompareScalarsContext
+CompareType
 CompiledExprState
 CompositeIOData
 CompositeTypeStmt
@@ -619,6 +623,7 @@ DirectoryMethodFile
 DisableTimeoutParams
 DiscardMode
 DiscardStmt
+DispatchOption
 DistanceValue
 DistinctExpr
 DoState
@@ -1767,6 +1772,7 @@ OprCacheKey
 OprInfo
 OprProofCacheEntry
 OprProofCacheKey
+OrArgIndexMatch
 OuterJoinClauseInfo
 OutputPluginCallbacks
 OutputPluginOptions
@@ -2119,6 +2125,7 @@ PgFdwSamplingMethod
 PgFdwScanState
 PgIfAddrCallback
 PgStatShared_Archiver
+PgStatShared_Backend
 PgStatShared_BgWriter
 PgStatShared_Checkpointer
 PgStatShared_Common
@@ -2134,6 +2141,8 @@ PgStatShared_SLRU
 PgStatShared_Subscription
 PgStatShared_Wal
 PgStat_ArchiverStats
+PgStat_Backend
+PgStat_BackendPending
 PgStat_BackendSubEntry
 PgStat_BgWriterStats
 PgStat_BktypeIO
@@ -2486,7 +2495,6 @@ RoleSpecType
 RoleStmtType
 RollupData
 RowCompareExpr
-RowCompareType
 RowExpr
 RowIdentityVarInfo
 RowMarkClause
@@ -2610,6 +2618,8 @@ SetOpCmd
 SetOpPath
 SetOpState
 SetOpStatePerGroup
+SetOpStatePerGroupData
+SetOpStatePerInput
 SetOpStrategy
 SetOperation
 SetOperationStmt
@@ -2810,6 +2820,7 @@ TAR_MEMBER
 TBMIterateResult
 TBMIteratingState
 TBMIterator
+TBMPrivateIterator
 TBMSharedIterator
 TBMSharedIteratorState
 TBMStatus
@@ -3664,6 +3675,7 @@ nodeitem
 normal_rand_fctx
 nsphash_hash
 ntile_context
+nullingrel_info
 numeric
 object_access_hook_type
 object_access_hook_type_str

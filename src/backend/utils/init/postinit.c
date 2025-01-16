@@ -3,7 +3,7 @@
  * postinit.c
  *	  postgres initialization utilities
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -22,7 +22,6 @@
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
-#include "access/parallel.h"
 #include "access/session.h"
 #include "access/tableam.h"
 #include "access/xact.h"
@@ -341,13 +340,13 @@ CheckMyDatabase(const char *name, bool am_superuser, bool override_allow_connect
 	 * These checks are not enforced when in standalone mode, so that there is
 	 * a way to recover from disabling all access to all databases, for
 	 * example "UPDATE pg_database SET datallowconn = false;".
-	 *
-	 * We do not enforce them for autovacuum worker processes either.
 	 */
-	if (IsUnderPostmaster && !AmAutoVacuumWorkerProcess())
+	if (IsUnderPostmaster)
 	{
 		/*
 		 * Check that the database is currently allowing connections.
+		 * (Background processes can override this test and the next one by
+		 * setting override_allow_connections.)
 		 */
 		if (!dbform->datallowconn && !override_allow_connections)
 			ereport(FATAL,
@@ -360,7 +359,7 @@ CheckMyDatabase(const char *name, bool am_superuser, bool override_allow_connect
 		 * is redundant, but since we have the flag, might as well check it
 		 * and save a few cycles.)
 		 */
-		if (!am_superuser &&
+		if (!am_superuser && !override_allow_connections &&
 			object_aclcheck(DatabaseRelationId, MyDatabaseId, GetUserId(),
 							ACL_CONNECT) != ACLCHECK_OK)
 			ereport(FATAL,
@@ -369,7 +368,9 @@ CheckMyDatabase(const char *name, bool am_superuser, bool override_allow_connect
 					 errdetail("User does not have CONNECT privilege.")));
 
 		/*
-		 * Check connection limit for this database.
+		 * Check connection limit for this database.  We enforce the limit
+		 * only for regular backends, since other process types have their own
+		 * PGPROC pools.
 		 *
 		 * There is a race condition here --- we create our PGPROC before
 		 * checking for other PGPROCs.  If two backends did this at about the
@@ -379,6 +380,7 @@ CheckMyDatabase(const char *name, bool am_superuser, bool override_allow_connect
 		 * just document that the connection limit is approximate.
 		 */
 		if (dbform->datconnlimit >= 0 &&
+			AmRegularBackendProcess() &&
 			!am_superuser &&
 			CountDBConnections(MyDatabaseId) > dbform->datconnlimit)
 			ereport(FATAL,
@@ -544,18 +546,18 @@ InitializeMaxBackends(void)
 {
 	Assert(MaxBackends == 0);
 
-	/* the extra unit accounts for the autovacuum launcher */
-	MaxBackends = MaxConnections + autovacuum_max_workers + 1 +
-		max_worker_processes + max_wal_senders;
+	/* Note that this does not include "auxiliary" processes */
+	MaxBackends = MaxConnections + autovacuum_worker_slots +
+		max_worker_processes + max_wal_senders + NUM_SPECIAL_WORKER_PROCS;
 
 	if (MaxBackends > MAX_BACKENDS)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("too many server processes configured"),
-				 errdetail("\"max_connections\" (%d) plus \"autovacuum_max_workers\" (%d) plus \"max_worker_processes\" (%d) plus \"max_wal_senders\" (%d) must be less than %d.",
-						   MaxConnections, autovacuum_max_workers,
+				 errdetail("\"max_connections\" (%d) plus \"autovacuum_worker_slots\" (%d) plus \"max_worker_processes\" (%d) plus \"max_wal_senders\" (%d) must be less than %d.",
+						   MaxConnections, autovacuum_worker_slots,
 						   max_worker_processes, max_wal_senders,
-						   MAX_BACKENDS)));
+						   MAX_BACKENDS - (NUM_SPECIAL_WORKER_PROCS - 1))));
 }
 
 /*
@@ -813,16 +815,7 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	}
 
 	/*
-	 * Start a new transaction here before first access to db, and get a
-	 * snapshot.  We don't have a use for the snapshot itself, but we're
-	 * interested in the secondary effect that it sets RecentGlobalXmin. (This
-	 * is critical for anything that reads heap pages, because HOT may decide
-	 * to prune them even if the process doesn't attempt to modify any
-	 * tuples.)
-	 *
-	 * FIXME: This comment is inaccurate / the code buggy. A snapshot that is
-	 * not pushed/active does not reliably prevent HOT pruning (->xmin could
-	 * e.g. be cleared when cache invalidations are processed).
+	 * Start a new transaction here before first access to db.
 	 */
 	if (!bootstrap)
 	{
@@ -837,8 +830,6 @@ InitPostgres(const char *in_dbname, Oid dboid,
 		 * Fortunately, "read committed" is plenty good enough.
 		 */
 		XactIsoLevel = XACT_READ_COMMITTED;
-
-		(void) GetTransactionSnapshot();
 	}
 
 	/*
@@ -876,23 +867,7 @@ InitPostgres(const char *in_dbname, Oid dboid,
 		{
 			InitializeSessionUserId(username, useroid,
 									(flags & INIT_PG_OVERRIDE_ROLE_LOGIN) != 0);
-
-			/*
-			 * In a parallel worker, set am_superuser based on the
-			 * authenticated user ID, not the current role.  This is pretty
-			 * dubious but it matches our historical behavior.  Note that this
-			 * value of am_superuser is used only for connection-privilege
-			 * checks here and in CheckMyDatabase (we won't reach
-			 * process_startup_options in a background worker).
-			 *
-			 * In other cases, there's been no opportunity for the current
-			 * role to diverge from the authenticated user ID yet, so we can
-			 * just rely on superuser() and avoid an extra catalog lookup.
-			 */
-			if (InitializingParallelWorker)
-				am_superuser = superuser_arg(GetAuthenticatedUserId());
-			else
-				am_superuser = superuser();
+			am_superuser = superuser();
 		}
 	}
 	else
@@ -919,17 +894,16 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	}
 
 	/*
-	 * The last few connection slots are reserved for superusers and roles
-	 * with privileges of pg_use_reserved_connections.  Replication
-	 * connections are drawn from slots reserved with max_wal_senders and are
-	 * not limited by max_connections, superuser_reserved_connections, or
-	 * reserved_connections.
+	 * The last few regular connection slots are reserved for superusers and
+	 * roles with privileges of pg_use_reserved_connections.  We do not apply
+	 * these limits to background processes, since they all have their own
+	 * pools of PGPROC slots.
 	 *
 	 * Note: At this point, the new backend has already claimed a proc struct,
 	 * so we must check whether the number of free slots is strictly less than
 	 * the reserved connection limits.
 	 */
-	if (!am_superuser && !am_walsender &&
+	if (AmRegularBackendProcess() && !am_superuser &&
 		(SuperuserReservedConnections + ReservedConnections) > 0 &&
 		!HaveNFreeProcs(SuperuserReservedConnections + ReservedConnections, &nfree))
 	{

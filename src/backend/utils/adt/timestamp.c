@@ -3,7 +3,7 @@
  * timestamp.c
  *	  Functions for the built-in SQL types "timestamp" and "interval".
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -27,9 +27,9 @@
 #include "funcapi.h"
 #include "libpq/pqformat.h"
 #include "miscadmin.h"
-#include "optimizer/optimizer.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/supportnodes.h"
+#include "optimizer/optimizer.h"
 #include "parser/scansup.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -4620,9 +4620,6 @@ timestamp_trunc(PG_FUNCTION_ARGS)
 	struct pg_tm tt,
 			   *tm = &tt;
 
-	if (TIMESTAMP_NOT_FINITE(timestamp))
-		PG_RETURN_TIMESTAMP(timestamp);
-
 	lowunits = downcase_truncate_identifier(VARDATA_ANY(units),
 											VARSIZE_ANY_EXHDR(units),
 											false);
@@ -4631,6 +4628,39 @@ timestamp_trunc(PG_FUNCTION_ARGS)
 
 	if (type == UNITS)
 	{
+		if (TIMESTAMP_NOT_FINITE(timestamp))
+		{
+			/*
+			 * Errors thrown here for invalid units should exactly match those
+			 * below, else there will be unexpected discrepancies between
+			 * finite- and infinite-input cases.
+			 */
+			switch (val)
+			{
+				case DTK_WEEK:
+				case DTK_MILLENNIUM:
+				case DTK_CENTURY:
+				case DTK_DECADE:
+				case DTK_YEAR:
+				case DTK_QUARTER:
+				case DTK_MONTH:
+				case DTK_DAY:
+				case DTK_HOUR:
+				case DTK_MINUTE:
+				case DTK_SECOND:
+				case DTK_MILLISEC:
+				case DTK_MICROSEC:
+					PG_RETURN_TIMESTAMP(timestamp);
+					break;
+				default:
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("unit \"%s\" not supported for type %s",
+									lowunits, format_type_be(TIMESTAMPOID))));
+					result = 0;
+			}
+		}
+
 		if (timestamp2tm(timestamp, NULL, tm, &fsec, NULL, NULL) != 0)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
@@ -4836,6 +4866,40 @@ timestamptz_trunc_internal(text *units, TimestampTz timestamp, pg_tz *tzp)
 
 	if (type == UNITS)
 	{
+		if (TIMESTAMP_NOT_FINITE(timestamp))
+		{
+			/*
+			 * Errors thrown here for invalid units should exactly match those
+			 * below, else there will be unexpected discrepancies between
+			 * finite- and infinite-input cases.
+			 */
+			switch (val)
+			{
+				case DTK_WEEK:
+				case DTK_MILLENNIUM:
+				case DTK_CENTURY:
+				case DTK_DECADE:
+				case DTK_YEAR:
+				case DTK_QUARTER:
+				case DTK_MONTH:
+				case DTK_DAY:
+				case DTK_HOUR:
+				case DTK_MINUTE:
+				case DTK_SECOND:
+				case DTK_MILLISEC:
+				case DTK_MICROSEC:
+					PG_RETURN_TIMESTAMPTZ(timestamp);
+					break;
+
+				default:
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("unit \"%s\" not supported for type %s",
+									lowunits, format_type_be(TIMESTAMPTZOID))));
+					result = 0;
+			}
+		}
+
 		if (timestamp2tm(timestamp, &tz, tm, &fsec, NULL, tzp) != 0)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
@@ -4966,9 +5030,6 @@ timestamptz_trunc(PG_FUNCTION_ARGS)
 	TimestampTz timestamp = PG_GETARG_TIMESTAMPTZ(1);
 	TimestampTz result;
 
-	if (TIMESTAMP_NOT_FINITE(timestamp))
-		PG_RETURN_TIMESTAMPTZ(timestamp);
-
 	result = timestamptz_trunc_internal(units, timestamp, session_timezone);
 
 	PG_RETURN_TIMESTAMPTZ(result);
@@ -4985,13 +5046,6 @@ timestamptz_trunc_zone(PG_FUNCTION_ARGS)
 	text	   *zone = PG_GETARG_TEXT_PP(2);
 	TimestampTz result;
 	pg_tz	   *tzp;
-
-	/*
-	 * timestamptz_zone() doesn't look up the zone for infinite inputs, so we
-	 * don't do so here either.
-	 */
-	if (TIMESTAMP_NOT_FINITE(timestamp))
-		PG_RETURN_TIMESTAMP(timestamp);
 
 	/*
 	 * Look up the requested timezone.
@@ -5020,12 +5074,6 @@ interval_trunc(PG_FUNCTION_ARGS)
 
 	result = (Interval *) palloc(sizeof(Interval));
 
-	if (INTERVAL_NOT_FINITE(interval))
-	{
-		memcpy(result, interval, sizeof(Interval));
-		PG_RETURN_INTERVAL_P(result);
-	}
-
 	lowunits = downcase_truncate_identifier(VARDATA_ANY(units),
 											VARSIZE_ANY_EXHDR(units),
 											false);
@@ -5034,6 +5082,41 @@ interval_trunc(PG_FUNCTION_ARGS)
 
 	if (type == UNITS)
 	{
+		if (INTERVAL_NOT_FINITE(interval))
+		{
+			/*
+			 * Errors thrown here for invalid units should exactly match those
+			 * below, else there will be unexpected discrepancies between
+			 * finite- and infinite-input cases.
+			 */
+			switch (val)
+			{
+				case DTK_MILLENNIUM:
+				case DTK_CENTURY:
+				case DTK_DECADE:
+				case DTK_YEAR:
+				case DTK_QUARTER:
+				case DTK_MONTH:
+				case DTK_DAY:
+				case DTK_HOUR:
+				case DTK_MINUTE:
+				case DTK_SECOND:
+				case DTK_MILLISEC:
+				case DTK_MICROSEC:
+					memcpy(result, interval, sizeof(Interval));
+					PG_RETURN_INTERVAL_P(result);
+					break;
+
+				default:
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("unit \"%s\" not supported for type %s",
+									lowunits, format_type_be(INTERVALOID)),
+							 (val == DTK_WEEK) ? errdetail("Months usually have fractional weeks.") : 0));
+					result = 0;
+			}
+		}
+
 		interval2itm(*interval, tm);
 		switch (val)
 		{
@@ -5104,6 +5187,10 @@ interval_trunc(PG_FUNCTION_ARGS)
  *
  *	Return the Julian day which corresponds to the first day (Monday) of the given ISO 8601 year and week.
  *	Julian days are used to convert between ISO week dates and Gregorian dates.
+ *
+ *	XXX: This function has integer overflow hazards, but restructuring it to
+ *	work with the soft-error handling that its callers do is likely more
+ *	trouble than it's worth.
  */
 int
 isoweek2j(int year, int week)

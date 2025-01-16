@@ -9,7 +9,7 @@
  * shorn of features like subselects, inheritance, aggregates, grouping,
  * and so on.  (Those are the things planner.c deals with.)
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -168,6 +168,9 @@ query_planner(PlannerInfo *root,
 	 * want to make RelOptInfos for them.
 	 */
 	add_base_rels_to_query(root, (Node *) parse->jointree);
+
+	/* Remove any redundant GROUP BY columns */
+	remove_useless_groupby_columns(root);
 
 	/*
 	 * Examine the targetlist and join tree, adding entries to baserel

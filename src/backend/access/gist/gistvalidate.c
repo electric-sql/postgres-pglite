@@ -3,7 +3,7 @@
  * gistvalidate.c
  *	  Opclass validator for GiST.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -148,7 +148,7 @@ gistvalidate(Oid opclassoid)
 				break;
 			case GIST_STRATNUM_PROC:
 				ok = check_amproc_signature(procform->amproc, INT2OID, true,
-											1, 1, INT2OID);
+											1, 1, INT4OID);
 				break;
 			default:
 				ereport(INFO,

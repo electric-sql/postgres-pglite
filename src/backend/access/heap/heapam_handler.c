@@ -3,7 +3,7 @@
  * heapam_handler.c
  *	  heap table access method code
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -2135,10 +2135,7 @@ heapam_scan_bitmap_next_block(TableScanDesc scan,
 	{
 		CHECK_FOR_INTERRUPTS();
 
-		if (scan->st.bitmap.rs_shared_iterator)
-			tbmres = tbm_shared_iterate(scan->st.bitmap.rs_shared_iterator);
-		else
-			tbmres = tbm_iterate(scan->st.bitmap.rs_iterator);
+		tbmres = tbm_iterate(&scan->st.rs_tbmiterator);
 
 		if (tbmres == NULL)
 			return false;
@@ -2303,7 +2300,7 @@ heapam_scan_bitmap_next_tuple(TableScanDesc scan,
 	/*
 	 * Out of range?  If so, nothing more to look at on this page
 	 */
-	if (hscan->rs_cindex < 0 || hscan->rs_cindex >= hscan->rs_ntuples)
+	if (hscan->rs_cindex >= hscan->rs_ntuples)
 		return false;
 
 	targoffset = hscan->rs_vistuples[hscan->rs_cindex];
@@ -2553,7 +2550,7 @@ reform_and_rewrite_tuple(HeapTuple tuple,
 	/* Be sure to null out any dropped columns */
 	for (i = 0; i < newTupDesc->natts; i++)
 	{
-		if (TupleDescAttr(newTupDesc, i)->attisdropped)
+		if (TupleDescCompactAttr(newTupDesc, i)->attisdropped)
 			isnull[i] = true;
 	}
 
@@ -2577,6 +2574,9 @@ SampleHeapTupleVisible(TableScanDesc scan, Buffer buffer,
 
 	if (scan->rs_flags & SO_ALLOW_PAGEMODE)
 	{
+		uint32		start = 0,
+					end = hscan->rs_ntuples;
+
 		/*
 		 * In pageatatime mode, heap_prepare_pagescan() already did visibility
 		 * checks, so just look at the info it left in rs_vistuples[].
@@ -2586,18 +2586,15 @@ SampleHeapTupleVisible(TableScanDesc scan, Buffer buffer,
 		 * in increasing order, but it's not clear that there would be enough
 		 * gain to justify the restriction.
 		 */
-		int			start = 0,
-					end = hscan->rs_ntuples - 1;
-
-		while (start <= end)
+		while (start < end)
 		{
-			int			mid = (start + end) / 2;
+			uint32		mid = start + (end - start) / 2;
 			OffsetNumber curoffset = hscan->rs_vistuples[mid];
 
 			if (tupoffset == curoffset)
 				return true;
 			else if (tupoffset < curoffset)
-				end = mid - 1;
+				end = mid;
 			else
 				start = mid + 1;
 		}

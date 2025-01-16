@@ -16,7 +16,7 @@
  *		contents of records in here except turning them into a more usable
  *		format.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -519,8 +519,8 @@ heap_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			 * tuples, we're not interested in the record's contents.
 			 *
 			 * WAL contains likely-unnecessary commit-time invals from the
-			 * CacheInvalidateHeapTuple() call in heap_inplace_update().
-			 * Excess invalidation is safe.
+			 * CacheInvalidateHeapTuple() call in
+			 * heap_inplace_update_and_unlock(). Excess invalidation is safe.
 			 */
 			break;
 

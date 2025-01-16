@@ -3,7 +3,7 @@
  * objectaddress.c
  *	  functions for working with ObjectAddresses
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -2785,13 +2785,34 @@ get_object_property_data(Oid class_id)
 HeapTuple
 get_catalog_object_by_oid(Relation catalog, AttrNumber oidcol, Oid objectId)
 {
+	return
+		get_catalog_object_by_oid_extended(catalog, oidcol, objectId, false);
+}
+
+/*
+ * Same as get_catalog_object_by_oid(), but with an additional "locktup"
+ * argument controlling whether to acquire a LOCKTAG_TUPLE at mode
+ * InplaceUpdateTupleLock.  See README.tuplock section "Locking to write
+ * inplace-updated tables".
+ */
+HeapTuple
+get_catalog_object_by_oid_extended(Relation catalog,
+								   AttrNumber oidcol,
+								   Oid objectId,
+								   bool locktup)
+{
 	HeapTuple	tuple;
 	Oid			classId = RelationGetRelid(catalog);
 	int			oidCacheId = get_object_catcache_oid(classId);
 
 	if (oidCacheId > 0)
 	{
-		tuple = SearchSysCacheCopy1(oidCacheId, ObjectIdGetDatum(objectId));
+		if (locktup)
+			tuple = SearchSysCacheLockedCopy1(oidCacheId,
+											  ObjectIdGetDatum(objectId));
+		else
+			tuple = SearchSysCacheCopy1(oidCacheId,
+										ObjectIdGetDatum(objectId));
 		if (!HeapTupleIsValid(tuple))	/* should not happen */
 			return NULL;
 	}
@@ -2816,6 +2837,10 @@ get_catalog_object_by_oid(Relation catalog, AttrNumber oidcol, Oid objectId)
 			systable_endscan(scan);
 			return NULL;
 		}
+
+		if (locktup)
+			LockTuple(catalog, &tuple->t_self, InplaceUpdateTupleLock);
+
 		tuple = heap_copytuple(tuple);
 
 		systable_endscan(scan);
@@ -3235,6 +3260,12 @@ getObjectDescription(const ObjectAddress *object, bool missing_ok)
 				initStringInfo(&opfam);
 				getOpFamilyDescription(&opfam, amopForm->amopfamily, false);
 
+				/*
+				 * We use FORMAT_TYPE_ALLOW_INVALID here so as not to fail
+				 * completely if the type links are dangling, which is a form
+				 * of catalog corruption that could occur due to old bugs.
+				 */
+
 				/*------
 				   translator: %d is the operator strategy (a number), the
 				   first two %s's are data type names, the third %s is the
@@ -3242,8 +3273,10 @@ getObjectDescription(const ObjectAddress *object, bool missing_ok)
 				   textual form of the operator with arguments.  */
 				appendStringInfo(&buffer, _("operator %d (%s, %s) of %s: %s"),
 								 amopForm->amopstrategy,
-								 format_type_be(amopForm->amoplefttype),
-								 format_type_be(amopForm->amoprighttype),
+								 format_type_extended(amopForm->amoplefttype,
+													  -1, FORMAT_TYPE_ALLOW_INVALID),
+								 format_type_extended(amopForm->amoprighttype,
+													  -1, FORMAT_TYPE_ALLOW_INVALID),
 								 opfam.data,
 								 format_operator(amopForm->amopopr));
 
@@ -3292,6 +3325,12 @@ getObjectDescription(const ObjectAddress *object, bool missing_ok)
 				initStringInfo(&opfam);
 				getOpFamilyDescription(&opfam, amprocForm->amprocfamily, false);
 
+				/*
+				 * We use FORMAT_TYPE_ALLOW_INVALID here so as not to fail
+				 * completely if the type links are dangling, which is a form
+				 * of catalog corruption that could occur due to old bugs.
+				 */
+
 				/*------
 				   translator: %d is the function number, the first two %s's
 				   are data type names, the third %s is the description of the
@@ -3299,8 +3338,10 @@ getObjectDescription(const ObjectAddress *object, bool missing_ok)
 				   function with arguments.  */
 				appendStringInfo(&buffer, _("function %d (%s, %s) of %s: %s"),
 								 amprocForm->amprocnum,
-								 format_type_be(amprocForm->amproclefttype),
-								 format_type_be(amprocForm->amprocrighttype),
+								 format_type_extended(amprocForm->amproclefttype,
+													  -1, FORMAT_TYPE_ALLOW_INVALID),
+								 format_type_extended(amprocForm->amprocrighttype,
+													  -1, FORMAT_TYPE_ALLOW_INVALID),
 								 opfam.data,
 								 format_procedure(amprocForm->amproc));
 

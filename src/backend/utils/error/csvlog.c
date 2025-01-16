@@ -3,7 +3,7 @@
  * csvlog.c
  *	  CSV logging
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -120,7 +120,7 @@ write_csvlog(ErrorData *edata)
 	appendStringInfoChar(&buf, ',');
 
 	/* session id */
-	appendStringInfo(&buf, "%" INT64_MODIFIER "x.%x", MyStartTime, MyProcPid);
+	appendStringInfo(&buf, INT64_HEX_FORMAT ".%x", MyStartTime, MyProcPid);
 	appendStringInfoChar(&buf, ',');
 
 	/* Line number */

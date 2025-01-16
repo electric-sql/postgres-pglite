@@ -4,7 +4,7 @@
  *	  Internal definitions for COPY FROM command.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/copyfrom_internal.h
@@ -95,7 +95,7 @@ typedef struct CopyFromStateData
 								 * default value */
 	FmgrInfo   *in_functions;	/* array of input functions for each attrs */
 	Oid		   *typioparams;	/* array of element types for in_functions */
-	ErrorSaveContext *escontext;	/* soft error trapper during in_functions
+	ErrorSaveContext *escontext;	/* soft error trapped during in_functions
 									 * execution */
 	uint64		num_errors;		/* total number of rows which contained soft
 								 * errors */

@@ -3,7 +3,7 @@
  * spell.c
  *		Normalizing word with ISpell
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  *
  * Ispell dictionary
  * -----------------
@@ -66,6 +66,7 @@
 #include "miscadmin.h"
 #include "tsearch/dicts/spell.h"
 #include "tsearch/ts_locale.h"
+#include "utils/formatting.h"
 #include "utils/memutils.h"
 
 
@@ -148,7 +149,7 @@ compact_palloc0(IspellDict *Conf, size_t size)
 		Conf->avail = COMPACT_ALLOC_CHUNK;
 	}
 
-	result = (void *) Conf->firstfree;
+	result = Conf->firstfree;
 	Conf->firstfree += size;
 	Conf->avail -= size;
 
@@ -169,7 +170,7 @@ cpstrdup(IspellDict *Conf, const char *str)
 
 
 /*
- * Apply lowerstr(), producing a temporary result (in the buildCxt).
+ * Apply str_tolower(), producing a temporary result (in the buildCxt).
  */
 static char *
 lowerstr_ctx(IspellDict *Conf, const char *src)
@@ -178,7 +179,7 @@ lowerstr_ctx(IspellDict *Conf, const char *src)
 	char	   *dst;
 
 	saveCtx = MemoryContextSwitchTo(Conf->buildCxt);
-	dst = lowerstr(src);
+	dst = str_tolower(src, strlen(src), DEFAULT_COLLATION_OID);
 	MemoryContextSwitchTo(saveCtx);
 
 	return dst;
@@ -390,7 +391,7 @@ getNextFlagFromString(IspellDict *Conf, const char **sflagset, char *sflag)
 				*sflagset = next;
 				while (**sflagset)
 				{
-					if (t_isdigit(*sflagset))
+					if (isdigit((unsigned char) **sflagset))
 					{
 						if (!met_comma)
 							ereport(ERROR,
@@ -408,7 +409,7 @@ getNextFlagFromString(IspellDict *Conf, const char **sflagset, char *sflag)
 											*sflagset)));
 						met_comma = true;
 					}
-					else if (!t_isspace(*sflagset))
+					else if (!isspace((unsigned char) **sflagset))
 					{
 						ereport(ERROR,
 								(errcode(ERRCODE_CONFIG_FILE_ERROR),
@@ -542,7 +543,7 @@ NIImportDictionary(IspellDict *Conf, const char *filename)
 			while (*s)
 			{
 				/* we allow only single encoded flags for faster works */
-				if (pg_mblen(s) == 1 && t_isprint(s) && !t_isspace(s))
+				if (pg_mblen(s) == 1 && isprint((unsigned char) *s) && !isspace((unsigned char) *s))
 					s++;
 				else
 				{
@@ -558,7 +559,7 @@ NIImportDictionary(IspellDict *Conf, const char *filename)
 		s = line;
 		while (*s)
 		{
-			if (t_isspace(s))
+			if (isspace((unsigned char) *s))
 			{
 				*s = '\0';
 				break;
@@ -799,7 +800,7 @@ get_nextfield(char **str, char *next)
 		{
 			if (t_iseq(*str, '#'))
 				return false;
-			else if (!t_isspace(*str))
+			else if (!isspace((unsigned char) **str))
 			{
 				int			clen = pg_mblen(*str);
 
@@ -814,7 +815,7 @@ get_nextfield(char **str, char *next)
 		}
 		else					/* state == PAE_INMASK */
 		{
-			if (t_isspace(*str))
+			if (isspace((unsigned char) **str))
 			{
 				*next = '\0';
 				return true;
@@ -925,7 +926,7 @@ parse_affentry(char *str, char *mask, char *find, char *repl)
 		{
 			if (t_iseq(str, '#'))
 				return false;
-			else if (!t_isspace(str))
+			else if (!isspace((unsigned char) *str))
 			{
 				COPYCHAR(pmask, str);
 				pmask += pg_mblen(str);
@@ -939,7 +940,7 @@ parse_affentry(char *str, char *mask, char *find, char *repl)
 				*pmask = '\0';
 				state = PAE_WAIT_FIND;
 			}
-			else if (!t_isspace(str))
+			else if (!isspace((unsigned char) *str))
 			{
 				COPYCHAR(pmask, str);
 				pmask += pg_mblen(str);
@@ -957,7 +958,7 @@ parse_affentry(char *str, char *mask, char *find, char *repl)
 				prepl += pg_mblen(str);
 				state = PAE_INREPL;
 			}
-			else if (!t_isspace(str))
+			else if (!isspace((unsigned char) *str))
 				ereport(ERROR,
 						(errcode(ERRCODE_CONFIG_FILE_ERROR),
 						 errmsg("syntax error")));
@@ -974,7 +975,7 @@ parse_affentry(char *str, char *mask, char *find, char *repl)
 				COPYCHAR(pfind, str);
 				pfind += pg_mblen(str);
 			}
-			else if (!t_isspace(str))
+			else if (!isspace((unsigned char) *str))
 				ereport(ERROR,
 						(errcode(ERRCODE_CONFIG_FILE_ERROR),
 						 errmsg("syntax error")));
@@ -991,7 +992,7 @@ parse_affentry(char *str, char *mask, char *find, char *repl)
 				prepl += pg_mblen(str);
 				state = PAE_INREPL;
 			}
-			else if (!t_isspace(str))
+			else if (!isspace((unsigned char) *str))
 				ereport(ERROR,
 						(errcode(ERRCODE_CONFIG_FILE_ERROR),
 						 errmsg("syntax error")));
@@ -1008,7 +1009,7 @@ parse_affentry(char *str, char *mask, char *find, char *repl)
 				COPYCHAR(prepl, str);
 				prepl += pg_mblen(str);
 			}
-			else if (!t_isspace(str))
+			else if (!isspace((unsigned char) *str))
 				ereport(ERROR,
 						(errcode(ERRCODE_CONFIG_FILE_ERROR),
 						 errmsg("syntax error")));
@@ -1070,7 +1071,7 @@ addCompoundAffixFlagValue(IspellDict *Conf, char *s, uint32 val)
 	char	   *sflag;
 	int			clen;
 
-	while (*s && t_isspace(s))
+	while (*s && isspace((unsigned char) *s))
 		s += pg_mblen(s);
 
 	if (!*s)
@@ -1080,7 +1081,7 @@ addCompoundAffixFlagValue(IspellDict *Conf, char *s, uint32 val)
 
 	/* Get flag without \n */
 	sflag = sbuf;
-	while (*s && !t_isspace(s) && *s != '\n')
+	while (*s && !isspace((unsigned char) *s) && *s != '\n')
 	{
 		clen = pg_mblen(s);
 		COPYCHAR(sflag, s);
@@ -1225,7 +1226,7 @@ NIImportOOAffixes(IspellDict *Conf, const char *filename)
 
 	while ((recoded = tsearch_readline(&trst)) != NULL)
 	{
-		if (*recoded == '\0' || t_isspace(recoded) || t_iseq(recoded, '#'))
+		if (*recoded == '\0' || isspace((unsigned char) *recoded) || t_iseq(recoded, '#'))
 		{
 			pfree(recoded);
 			continue;
@@ -1262,7 +1263,7 @@ NIImportOOAffixes(IspellDict *Conf, const char *filename)
 		{
 			char	   *s = recoded + strlen("FLAG");
 
-			while (*s && t_isspace(s))
+			while (*s && isspace((unsigned char) *s))
 				s += pg_mblen(s);
 
 			if (*s)
@@ -1298,7 +1299,7 @@ NIImportOOAffixes(IspellDict *Conf, const char *filename)
 	{
 		int			fields_read;
 
-		if (*recoded == '\0' || t_isspace(recoded) || t_iseq(recoded, '#'))
+		if (*recoded == '\0' || isspace((unsigned char) *recoded) || t_iseq(recoded, '#'))
 			goto nextline;
 
 		fields_read = parse_ooaffentry(recoded, type, sflag, find, repl, mask);
@@ -1449,7 +1450,7 @@ NIImportAffixes(IspellDict *Conf, const char *filename)
 
 	while ((recoded = tsearch_readline(&trst)) != NULL)
 	{
-		pstr = lowerstr(recoded);
+		pstr = str_tolower(recoded, strlen(recoded), DEFAULT_COLLATION_OID);
 
 		/* Skip comments and empty lines */
 		if (*pstr == '#' || *pstr == '\n')
@@ -1461,9 +1462,9 @@ NIImportAffixes(IspellDict *Conf, const char *filename)
 			s = findchar2(recoded, 'l', 'L');
 			if (s)
 			{
-				while (*s && !t_isspace(s))
+				while (*s && !isspace((unsigned char) *s))
 					s += pg_mblen(s);
-				while (*s && t_isspace(s))
+				while (*s && isspace((unsigned char) *s))
 					s += pg_mblen(s);
 
 				if (*s && pg_mblen(s) == 1)
@@ -1494,7 +1495,7 @@ NIImportAffixes(IspellDict *Conf, const char *filename)
 			s = recoded + 4;	/* we need non-lowercased string */
 			flagflags = 0;
 
-			while (*s && t_isspace(s))
+			while (*s && isspace((unsigned char) *s))
 				s += pg_mblen(s);
 
 			if (*s == '*')
@@ -1523,7 +1524,7 @@ NIImportAffixes(IspellDict *Conf, const char *filename)
 
 				s++;
 				if (*s == '\0' || *s == '#' || *s == '\n' || *s == ':' ||
-					t_isspace(s))
+					isspace((unsigned char) *s))
 				{
 					oldformat = true;
 					goto nextline;
@@ -1750,7 +1751,7 @@ NISortDictionary(IspellDict *Conf)
 							(errcode(ERRCODE_CONFIG_FILE_ERROR),
 							 errmsg("invalid affix alias \"%s\"",
 									Conf->Spell[i]->p.flag)));
-				if (*end != '\0' && !t_isdigit(end) && !t_isspace(end))
+				if (*end != '\0' && !isdigit((unsigned char) *end) && !isspace((unsigned char) *end))
 					ereport(ERROR,
 							(errcode(ERRCODE_CONFIG_FILE_ERROR),
 							 errmsg("invalid affix alias \"%s\"",

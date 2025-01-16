@@ -3,7 +3,7 @@
  * pruneheap.c
  *	  heap page pruning and HOT-chain management code
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1906,7 +1906,7 @@ heap_log_freeze_eq(xlhp_freeze_plan *plan, HeapTupleFreeze *frz)
 }
 
 /*
- * Comparator used to deduplicate XLOG_HEAP2_FREEZE_PAGE freeze plans
+ * Comparator used to deduplicate the freeze plans used in WAL records.
  */
 static int
 heap_log_freeze_cmp(const void *arg1, const void *arg2)
@@ -1966,7 +1966,7 @@ heap_log_freeze_new_plan(xlhp_freeze_plan *plan, HeapTupleFreeze *frz)
 
 /*
  * Deduplicate tuple-based freeze plans so that each distinct set of
- * processing steps is only stored once in XLOG_HEAP2_FREEZE_PAGE records.
+ * processing steps is only stored once in the WAL record.
  * Called during original execution of freezing (for logged relations).
  *
  * Return value is number of plans set in *plans_out for caller.  Also writes
@@ -2133,7 +2133,7 @@ log_heap_prune_and_freeze(Relation relation, Buffer buffer,
 							sizeof(OffsetNumber) * nfrozen);
 
 	/*
-	 * Prepare the main xl_heap_prune record.  We already set the XLPH_HAS_*
+	 * Prepare the main xl_heap_prune record.  We already set the XLHP_HAS_*
 	 * flag above.
 	 */
 	if (RelationIsAccessibleInLogicalDecoding(relation))

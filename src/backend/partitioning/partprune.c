@@ -25,7 +25,7 @@
  *
  * See gen_partprune_steps_internal() for more details on step generation.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -3365,8 +3365,7 @@ pull_exec_paramids_walker(Node *node, Bitmapset **context)
 			*context = bms_add_member(*context, param->paramid);
 		return false;
 	}
-	return expression_tree_walker(node, pull_exec_paramids_walker,
-								  (void *) context);
+	return expression_tree_walker(node, pull_exec_paramids_walker, context);
 }
 
 /*

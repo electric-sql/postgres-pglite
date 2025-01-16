@@ -28,7 +28,7 @@
  * the current system state, and for starting/stopping backups.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/access/transam/xlog.c
@@ -554,7 +554,7 @@ typedef struct XLogCtlData
 } XLogCtlData;
 
 /*
- * Classification of XLogRecordInsert operations.
+ * Classification of XLogInsertRecord operations.
  */
 typedef enum
 {
@@ -5403,7 +5403,7 @@ CheckRequiredParameterValues(void)
 	 */
 	if (ArchiveRecoveryRequested && EnableHotStandby)
 	{
-		/* We ignore autovacuum_max_workers when we make this test. */
+		/* We ignore autovacuum_worker_slots when we make this test. */
 		RecoveryRequiresIntParameter("max_connections",
 									 MaxConnections,
 									 ControlFile->MaxConnections);

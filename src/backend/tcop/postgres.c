@@ -3,7 +3,7 @@
  * postgres.c
  *	  POSTGRES C Backend Interface
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -94,9 +94,6 @@ bool		Log_disconnections = false;
 
 int			log_statement = LOGSTMT_NONE;
 
-/* GUC variable for maximum stack depth (measured in kilobytes) */
-int			max_stack_depth = 100;
-
 /* wait N seconds to allow attach from a debugger */
 int			PostAuthDelay = 0;
 
@@ -123,15 +120,6 @@ typedef struct BindParamCbData
  *		private variables
  * ----------------
  */
-
-/* max_stack_depth converted to bytes for speed of checking */
-static long max_stack_depth_bytes = 100 * 1024L;
-
-/*
- * Stack base pointer -- initialized by PostmasterMain and inherited by
- * subprocesses (but see also InitPostmasterChild).
- */
-static char *stack_base_ptr = NULL;
 
 /*
  * Flag to keep track of whether we have started a transaction.
@@ -322,7 +310,7 @@ InteractiveBackend(StringInfo inBuf)
 		printf("statement: %s\n", inBuf->data);
 	fflush(stdout);
 
-	return 'Q';
+	return PqMsg_Query;
 }
 
 /*
@@ -1283,7 +1271,6 @@ exec_simple_query(const char *query_string)
 		(void) PortalRun(portal,
 						 FETCH_ALL,
 						 true,	/* always top level */
-						 true,
 						 receiver,
 						 receiver,
 						 &qc);
@@ -1816,7 +1803,7 @@ exec_bind_message(StringInfo input_message)
 		one_param_data.paramval = NULL;
 		params_errcxt.previous = error_context_stack;
 		params_errcxt.callback = bind_param_error_callback;
-		params_errcxt.arg = (void *) &one_param_data;
+		params_errcxt.arg = &one_param_data;
 		error_context_stack = &params_errcxt;
 
 		params = makeParamList(numParams);
@@ -2006,7 +1993,7 @@ exec_bind_message(StringInfo input_message)
 	params_data.params = params;
 	params_errcxt.previous = error_context_stack;
 	params_errcxt.callback = ParamsErrorCallback;
-	params_errcxt.arg = (void *) &params_data;
+	params_errcxt.arg = &params_data;
 	error_context_stack = &params_errcxt;
 
 	/* Get the result format codes */
@@ -2251,7 +2238,7 @@ exec_execute_message(const char *portal_name, long max_rows)
 	params_data.params = portalParams;
 	params_errcxt.previous = error_context_stack;
 	params_errcxt.callback = ParamsErrorCallback;
-	params_errcxt.arg = (void *) &params_data;
+	params_errcxt.arg = &params_data;
 	error_context_stack = &params_errcxt;
 
 	if (max_rows <= 0)
@@ -2260,7 +2247,6 @@ exec_execute_message(const char *portal_name, long max_rows)
 	completed = PortalRun(portal,
 						  max_rows,
 						  true, /* always top level */
-						  !execute_is_fetch && max_rows == FETCH_ALL,
 						  receiver,
 						  receiver,
 						  &qc);
@@ -2779,6 +2765,17 @@ start_xact_command(void)
 		StartTransactionCommand();
 
 		xact_started = true;
+	}
+	else if (MyXactFlags & XACT_FLAGS_PIPELINING)
+	{
+		/*
+		 * When the first Execute message is completed, following commands
+		 * will be done in an implicit transaction block created via
+		 * pipelining. The transaction state needs to be updated to an
+		 * implicit block if we're not already in a transaction block (like
+		 * one started by an explicit BEGIN).
+		 */
+		BeginImplicitTransactionBlock();
 	}
 
 	/*
@@ -3505,133 +3502,6 @@ ProcessInterrupts(void)
 }
 
 /*
- * set_stack_base: set up reference point for stack depth checking
- *
- * Returns the old reference point, if any.
- */
-pg_stack_base_t
-set_stack_base(void)
-{
-#ifndef HAVE__BUILTIN_FRAME_ADDRESS
-	char		stack_base;
-#endif
-	pg_stack_base_t old;
-
-	old = stack_base_ptr;
-
-	/*
-	 * Set up reference point for stack depth checking.  On recent gcc we use
-	 * __builtin_frame_address() to avoid a warning about storing a local
-	 * variable's address in a long-lived variable.
-	 */
-#ifdef HAVE__BUILTIN_FRAME_ADDRESS
-	stack_base_ptr = __builtin_frame_address(0);
-#else
-	stack_base_ptr = &stack_base;
-#endif
-
-	return old;
-}
-
-/*
- * restore_stack_base: restore reference point for stack depth checking
- *
- * This can be used after set_stack_base() to restore the old value. This
- * is currently only used in PL/Java. When PL/Java calls a backend function
- * from different thread, the thread's stack is at a different location than
- * the main thread's stack, so it sets the base pointer before the call, and
- * restores it afterwards.
- */
-void
-restore_stack_base(pg_stack_base_t base)
-{
-	stack_base_ptr = base;
-}
-
-/*
- * check_stack_depth/stack_is_too_deep: check for excessively deep recursion
- *
- * This should be called someplace in any recursive routine that might possibly
- * recurse deep enough to overflow the stack.  Most Unixen treat stack
- * overflow as an unrecoverable SIGSEGV, so we want to error out ourselves
- * before hitting the hardware limit.
- *
- * check_stack_depth() just throws an error summarily.  stack_is_too_deep()
- * can be used by code that wants to handle the error condition itself.
- */
-void
-check_stack_depth(void)
-{
-	if (stack_is_too_deep())
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_STATEMENT_TOO_COMPLEX),
-				 errmsg("stack depth limit exceeded"),
-				 errhint("Increase the configuration parameter \"max_stack_depth\" (currently %dkB), "
-						 "after ensuring the platform's stack depth limit is adequate.",
-						 max_stack_depth)));
-	}
-}
-
-bool
-stack_is_too_deep(void)
-{
-	char		stack_top_loc;
-	long		stack_depth;
-
-	/*
-	 * Compute distance from reference point to my local variables
-	 */
-	stack_depth = (long) (stack_base_ptr - &stack_top_loc);
-
-	/*
-	 * Take abs value, since stacks grow up on some machines, down on others
-	 */
-	if (stack_depth < 0)
-		stack_depth = -stack_depth;
-
-	/*
-	 * Trouble?
-	 *
-	 * The test on stack_base_ptr prevents us from erroring out if called
-	 * during process setup or in a non-backend process.  Logically it should
-	 * be done first, but putting it here avoids wasting cycles during normal
-	 * cases.
-	 */
-	if (stack_depth > max_stack_depth_bytes &&
-		stack_base_ptr != NULL)
-		return true;
-
-	return false;
-}
-
-/* GUC check hook for max_stack_depth */
-bool
-check_max_stack_depth(int *newval, void **extra, GucSource source)
-{
-	long		newval_bytes = *newval * 1024L;
-	long		stack_rlimit = get_stack_depth_rlimit();
-
-	if (stack_rlimit > 0 && newval_bytes > stack_rlimit - STACK_DEPTH_SLOP)
-	{
-		GUC_check_errdetail("\"max_stack_depth\" must not exceed %ldkB.",
-							(stack_rlimit - STACK_DEPTH_SLOP) / 1024L);
-		GUC_check_errhint("Increase the platform's stack depth limit via \"ulimit -s\" or local equivalent.");
-		return false;
-	}
-	return true;
-}
-
-/* GUC assign hook for max_stack_depth */
-void
-assign_max_stack_depth(int newval, void *extra)
-{
-	long		newval_bytes = newval * 1024L;
-
-	max_stack_depth_bytes = newval_bytes;
-}
-
-/*
  * GUC check_hook for client_connection_check_interval
  */
 bool
@@ -3936,8 +3806,21 @@ process_postgres_switches(int argc, char *argv[], GucContext ctx,
 				/* ignored for consistency with the postmaster */
 				break;
 
-			case 'c':
 			case '-':
+
+				/*
+				 * Error if the user misplaced a special must-be-first option
+				 * for dispatching to a subprogram.  parse_dispatch_option()
+				 * returns DISPATCH_POSTMASTER if it doesn't find a match, so
+				 * error for anything else.
+				 */
+				if (parse_dispatch_option(optarg) != DISPATCH_POSTMASTER)
+					ereport(ERROR,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							 errmsg("--%s must be first argument", optarg)));
+
+				/* FALLTHROUGH */
+			case 'c':
 				{
 					char	   *name,
 							   *value;
@@ -4216,7 +4099,17 @@ PostgresSingleUserMain(int argc, char *argv[],
 	 */
 	InitializeWalConsistencyChecking();
 
+	/*
+	 * Create shared memory etc.  (Nothing's really "shared" in single-user
+	 * mode, but we must have these data structures anyway.)
+	 */
 	CreateSharedMemoryAndSemaphores();
+
+	/*
+	 * Estimate number of openable files.  This must happen after setting up
+	 * semaphores, because on some platforms semaphores count as open files.
+	 */
+	set_max_safe_fds();
 
 	/*
 	 * Remember stand-alone backend startup time,roughly at the same point
@@ -4991,15 +4884,22 @@ PostgresMain(const char *dbname, const char *username)
 
 			case PqMsg_Sync:
 				pq_getmsgend(&input_message);
+
+				/*
+				 * If pipelining was used, we may be in an implicit
+				 * transaction block. Close it before calling
+				 * finish_xact_command.
+				 */
+				EndImplicitTransactionBlock();
 				finish_xact_command();
 				valgrind_report_error_query("SYNC message");
 				send_ready_for_query = true;
 				break;
 
 				/*
-				 * 'X' means that the frontend is closing down the socket. EOF
-				 * means unexpected loss of frontend connection. Either way,
-				 * perform normal shutdown.
+				 * PqMsg_Terminate means that the frontend is closing down the
+				 * socket. EOF means unexpected loss of frontend connection.
+				 * Either way, perform normal shutdown.
 				 */
 			case EOF:
 
@@ -5067,40 +4967,6 @@ forbidden_in_wal_sender(char firstchar)
 					(errcode(ERRCODE_PROTOCOL_VIOLATION),
 					 errmsg("extended query protocol not supported in a replication connection")));
 	}
-}
-
-
-/*
- * Obtain platform stack depth limit (in bytes)
- *
- * Return -1 if unknown
- */
-long
-get_stack_depth_rlimit(void)
-{
-#if defined(HAVE_GETRLIMIT)
-	static long val = 0;
-
-	/* This won't change after process launch, so check just once */
-	if (val == 0)
-	{
-		struct rlimit rlim;
-
-		if (getrlimit(RLIMIT_STACK, &rlim) < 0)
-			val = -1;
-		else if (rlim.rlim_cur == RLIM_INFINITY)
-			val = LONG_MAX;
-		/* rlim_cur is probably of an unsigned type, so check for overflow */
-		else if (rlim.rlim_cur >= LONG_MAX)
-			val = LONG_MAX;
-		else
-			val = rlim.rlim_cur;
-	}
-	return val;
-#else
-	/* On Windows we set the backend stack size in src/backend/Makefile */
-	return WIN32_STACK_RLIMIT;
-#endif
 }
 
 

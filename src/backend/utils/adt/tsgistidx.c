@@ -3,7 +3,7 @@
  * tsgistidx.c
  *	  GiST support functions for tsvector_ops
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -355,7 +355,7 @@ gtsvector_consistent(PG_FUNCTION_ARGS)
 		chkval.arrb = GETARR(key);
 		chkval.arre = chkval.arrb + ARRNELEM(key);
 		PG_RETURN_BOOL(TS_execute(GETQUERY(query),
-								  (void *) &chkval,
+								  &chkval,
 								  TS_EXEC_PHRASE_NO_POS,
 								  checkcondition_arr));
 	}

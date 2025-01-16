@@ -12,7 +12,7 @@
  * example.  For the most part, however, code outside the core planner
  * should not need to include any optimizer/ header except this one.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/optimizer/optimizer.h
@@ -111,6 +111,7 @@ typedef enum
 /* GUC parameters */
 extern PGDLLIMPORT int debug_parallel_query;
 extern PGDLLIMPORT bool parallel_leader_participation;
+extern PGDLLIMPORT bool enable_distinct_reordering;
 
 extern struct PlannedStmt *planner(Query *parse, const char *query_string,
 								   int cursorOptions,

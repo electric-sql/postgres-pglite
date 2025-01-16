@@ -4,7 +4,7 @@
  *	  definition of the "relation" system catalog (pg_class)
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_class.h
@@ -19,7 +19,7 @@
 #define PG_CLASS_H
 
 #include "catalog/genbki.h"
-#include "catalog/pg_class_d.h"
+#include "catalog/pg_class_d.h" /* IWYU pragma: export */
 
 /* ----------------
  *		pg_class definition.  cpp turns this into

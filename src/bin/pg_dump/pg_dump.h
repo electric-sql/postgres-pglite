@@ -3,7 +3,7 @@
  * pg_dump.h
  *	  Common header file for the pg_dump utility
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pg_dump/pg_dump.h
@@ -89,8 +89,16 @@ typedef enum
 /*
  * DumpComponents is a bitmask of the potentially dumpable components of
  * a database object: its core definition, plus optional attributes such
- * as ACL, comments, etc.  The NONE and ALL symbols are convenient
- * shorthands.
+ * as ACL, comments, etc.
+ *
+ * The NONE and ALL symbols are convenient shorthands for assigning values,
+ * but be careful about using them in tests.  For example, a test like
+ * "if (dobj->dump == DUMP_COMPONENT_NONE)" is probably wrong; you likely want
+ * "if (!(dobj->dump & DUMP_COMPONENT_DEFINITION))" instead.  This is because
+ * we aren't too careful about the values of irrelevant bits, as indeed can be
+ * seen in the definition of DUMP_COMPONENT_ALL.  It's also possible that an
+ * object has only subsidiary bits such as DUMP_COMPONENT_ACL set, leading to
+ * unexpected behavior of a test against NONE.
  */
 typedef uint32 DumpComponents;
 #define DUMP_COMPONENT_NONE			(0)
@@ -664,20 +672,20 @@ typedef struct _SubscriptionInfo
 {
 	DumpableObject dobj;
 	const char *rolname;
-	char	   *subenabled;
-	char	   *subbinary;
-	char	   *substream;
-	char	   *subtwophasestate;
-	char	   *subdisableonerr;
-	char	   *subpasswordrequired;
-	char	   *subrunasowner;
+	bool		subenabled;
+	bool		subbinary;
+	char		substream;
+	char		subtwophasestate;
+	bool		subdisableonerr;
+	bool		subpasswordrequired;
+	bool		subrunasowner;
+	bool		subfailover;
 	char	   *subconninfo;
 	char	   *subslotname;
 	char	   *subsynccommit;
 	char	   *subpublications;
 	char	   *suborigin;
 	char	   *suboriginremotelsn;
-	char	   *subfailover;
 } SubscriptionInfo;
 
 /*

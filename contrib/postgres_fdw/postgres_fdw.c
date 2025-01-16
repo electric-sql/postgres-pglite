@@ -3,7 +3,7 @@
  * postgres_fdw.c
  *		  Foreign-data wrapper for remote PostgreSQL servers
  *
- * Portions Copyright (c) 2012-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2012-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  contrib/postgres_fdw/postgres_fdw.c
@@ -630,7 +630,7 @@ postgresGetForeignRelSize(PlannerInfo *root,
 	 * functions.
 	 */
 	fpinfo = (PgFdwRelationInfo *) palloc0(sizeof(PgFdwRelationInfo));
-	baserel->fdw_private = (void *) fpinfo;
+	baserel->fdw_private = fpinfo;
 
 	/* Base foreign tables need to be pushed down always. */
 	fpinfo->pushdown_safe = true;
@@ -1132,7 +1132,7 @@ postgresGetForeignPaths(PlannerInfo *root,
 			clauses = generate_implied_equalities_for_column(root,
 															 baserel,
 															 ec_member_matches_foreign,
-															 (void *) &arg,
+															 &arg,
 															 baserel->lateral_referencers);
 
 			/* Done if there are no more expressions in the foreign rel */
@@ -1514,7 +1514,7 @@ postgresBeginForeignScan(ForeignScanState *node, int eflags)
 	 * We'll save private state in node->fdw_state.
 	 */
 	fsstate = (PgFdwScanState *) palloc0(sizeof(PgFdwScanState));
-	node->fdw_state = (void *) fsstate;
+	node->fdw_state = fsstate;
 
 	/*
 	 * Identify which user to do the remote access as.  This should match what
@@ -1818,7 +1818,7 @@ postgresPlanForeignModify(PlannerInfo *root,
 
 		for (attnum = 1; attnum <= tupdesc->natts; attnum++)
 		{
-			Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum - 1);
+			CompactAttribute *attr = TupleDescCompactAttr(tupdesc, attnum - 1);
 
 			if (!attr->attisdropped)
 				targetAttrs = lappend_int(targetAttrs, attnum);
@@ -2191,7 +2191,7 @@ postgresBeginForeignInsert(ModifyTableState *mtstate,
 	/* We transmit all columns that are defined in the foreign table. */
 	for (attnum = 1; attnum <= tupdesc->natts; attnum++)
 	{
-		Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum - 1);
+		CompactAttribute *attr = TupleDescCompactAttr(tupdesc, attnum - 1);
 
 		if (!attr->attisdropped)
 			targetAttrs = lappend_int(targetAttrs, attnum);
@@ -2664,7 +2664,7 @@ postgresBeginDirectModify(ForeignScanState *node, int eflags)
 	 * We'll save private state in node->fdw_state.
 	 */
 	dmstate = (PgFdwDirectModifyState *) palloc0(sizeof(PgFdwDirectModifyState));
-	node->fdw_state = (void *) dmstate;
+	node->fdw_state = dmstate;
 
 	/*
 	 * Identify which user to do the remote access as.  This should match what
@@ -4311,7 +4311,7 @@ convert_prep_stmt_params(PgFdwModifyState *fmstate,
 			foreach(lc, fmstate->target_attrs)
 			{
 				int			attnum = lfirst_int(lc);
-				Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum - 1);
+				CompactAttribute *attr = TupleDescCompactAttr(tupdesc, attnum - 1);
 				Datum		value;
 				bool		isnull;
 
@@ -7618,7 +7618,7 @@ make_tuple_from_result_row(PGresult *res,
 	errpos.rel = rel;
 	errpos.fsstate = fsstate;
 	errcallback.callback = conversion_error_callback;
-	errcallback.arg = (void *) &errpos;
+	errcallback.arg = &errpos;
 	errcallback.previous = error_context_stack;
 	error_context_stack = &errcallback;
 

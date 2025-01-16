@@ -10,7 +10,7 @@
  * It doesn't matter whether the bits are on spinning rust or some other
  * storage technology.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -106,14 +106,6 @@ static MemoryContext MdCxt;		/* context for all MdfdVec objects */
 #define EXTENSION_CREATE			(1 << 2)
 /* create new segments if needed during recovery */
 #define EXTENSION_CREATE_RECOVERY	(1 << 3)
-/*
- * Allow opening segments which are preceded by segments smaller than
- * RELSEG_SIZE, e.g. inactive segments (see above). Note that this breaks
- * mdnblocks() and related functionality henceforth - which currently is ok,
- * because this is only required in the checkpointer which never uses
- * mdnblocks().
- */
-#define EXTENSION_DONT_CHECK_SIZE	(1 << 4)
 /* don't try to open a segment, if not already open */
 #define EXTENSION_DONT_OPEN			(1 << 5)
 
@@ -1162,19 +1154,21 @@ mdnblocks(SMgrRelation reln, ForkNumber forknum)
 
 /*
  * mdtruncate() -- Truncate relation to specified number of blocks.
+ *
+ * Guaranteed not to allocate memory, so it can be used in a critical section.
+ * Caller must have called smgrnblocks() to obtain curnblk while holding a
+ * sufficient lock to prevent a change in relation size, and not used any smgr
+ * functions for this relation or handled interrupts in between.  This makes
+ * sure we have opened all active segments, so that truncate loop will get
+ * them all!
  */
 void
-mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
+mdtruncate(SMgrRelation reln, ForkNumber forknum,
+		   BlockNumber curnblk, BlockNumber nblocks)
 {
-	BlockNumber curnblk;
 	BlockNumber priorblocks;
 	int			curopensegs;
 
-	/*
-	 * NOTE: mdnblocks makes sure we have opened all active segments, so that
-	 * truncation loop will get them all!
-	 */
-	curnblk = mdnblocks(reln, forknum);
 	if (nblocks > curnblk)
 	{
 		/* Bogus request ... but no complaint if InRecovery */
@@ -1407,7 +1401,7 @@ register_dirty_segment(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 		 * backend fsyncs.
 		 */
 		pgstat_count_io_op_time(IOOBJECT_RELATION, IOCONTEXT_NORMAL,
-								IOOP_FSYNC, io_start, 1);
+								IOOP_FSYNC, io_start, 1, 0);
 	}
 }
 
@@ -1513,7 +1507,7 @@ _fdvec_resize(SMgrRelation reln,
 		reln->md_seg_fds[forknum] =
 			MemoryContextAlloc(MdCxt, sizeof(MdfdVec) * nseg);
 	}
-	else
+	else if (nseg > reln->md_num_open_segs[forknum])
 	{
 		/*
 		 * It doesn't seem worthwhile complicating the code to amortize
@@ -1524,6 +1518,16 @@ _fdvec_resize(SMgrRelation reln,
 		reln->md_seg_fds[forknum] =
 			repalloc(reln->md_seg_fds[forknum],
 					 sizeof(MdfdVec) * nseg);
+	}
+	else
+	{
+		/*
+		 * We don't reallocate a smaller array, because we want mdtruncate()
+		 * to be able to promise that it won't allocate memory, so that it is
+		 * allowed in a critical section.  This means that a bit of space in
+		 * the array is now wasted, until the next time we add a segment and
+		 * reallocate.
+		 */
 	}
 
 	reln->md_num_open_segs[forknum] = nseg;
@@ -1683,14 +1687,12 @@ _mdfd_getseg(SMgrRelation reln, ForkNumber forknum, BlockNumber blkno,
 			}
 			flags = O_CREAT;
 		}
-		else if (!(behavior & EXTENSION_DONT_CHECK_SIZE) &&
-				 nblocks < ((BlockNumber) RELSEG_SIZE))
+		else if (nblocks < ((BlockNumber) RELSEG_SIZE))
 		{
 			/*
-			 * When not extending (or explicitly including truncated
-			 * segments), only open the next segment if the current one is
-			 * exactly RELSEG_SIZE.  If not (this branch), either return NULL
-			 * or fail.
+			 * When not extending, only open the next segment if the current
+			 * one is exactly RELSEG_SIZE.  If not (this branch), either
+			 * return NULL or fail.
 			 */
 			if (behavior & EXTENSION_RETURN_NULL)
 			{
@@ -1794,7 +1796,7 @@ mdsyncfiletag(const FileTag *ftag, char *path)
 		FileClose(file);
 
 	pgstat_count_io_op_time(IOOBJECT_RELATION, IOCONTEXT_NORMAL,
-							IOOP_FSYNC, io_start, 1);
+							IOOP_FSYNC, io_start, 1, 0);
 
 	errno = save_errno;
 	return result;

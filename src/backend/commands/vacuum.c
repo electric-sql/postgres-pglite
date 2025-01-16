@@ -12,7 +12,7 @@
  * CLUSTER, handled in cluster.c.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -130,7 +130,8 @@ check_vacuum_buffer_usage_limit(int *newval, void **extra,
 		return true;
 
 	/* Value does not fall within any allowable range */
-	GUC_check_errdetail("\"vacuum_buffer_usage_limit\" must be 0 or between %d kB and %d kB",
+	GUC_check_errdetail("\"%s\" must be 0 or between %d kB and %d kB.",
+						"vacuum_buffer_usage_limit",
 						MIN_BAS_VAC_RING_SIZE_KB, MAX_BAS_VAC_RING_SIZE_KB);
 
 	return false;
@@ -2217,15 +2218,14 @@ vacuum_rel(Oid relid, RangeVar *relation, VacuumParams *params,
 		{
 			ClusterParams cluster_params = {0};
 
-			/* close relation before vacuuming, but hold lock until commit */
-			relation_close(rel, NoLock);
-			rel = NULL;
-
 			if ((params->options & VACOPT_VERBOSE) != 0)
 				cluster_params.options |= CLUOPT_VERBOSE;
 
 			/* VACUUM FULL is now a variant of CLUSTER; see cluster.c */
-			cluster_rel(relid, InvalidOid, &cluster_params);
+			cluster_rel(rel, InvalidOid, &cluster_params);
+			/* cluster_rel closes the relation, but keeps lock */
+
+			rel = NULL;
 		}
 		else
 			table_relation_vacuum(rel, params, bstrategy);
@@ -2517,7 +2517,7 @@ vac_bulkdel_one_index(IndexVacuumInfo *ivinfo, IndexBulkDeleteResult *istat,
 {
 	/* Do bulk deletion */
 	istat = index_bulk_delete(ivinfo, istat, vac_tid_reaped,
-							  (void *) dead_items);
+							  dead_items);
 
 	ereport(ivinfo->message_level,
 			(errmsg("scanned index \"%s\" to remove %lld row versions",

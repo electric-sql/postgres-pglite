@@ -2,7 +2,7 @@
  * backend_status.h
  *	  Definitions related to backend status reporting
  *
- * Copyright (c) 2001-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2001-2025, PostgreSQL Global Development Group
  *
  * src/include/utils/backend_status.h
  * ----------
@@ -323,6 +323,7 @@ extern const char *pgstat_get_backend_current_activity(int pid, bool checkUser);
 extern const char *pgstat_get_crashed_backend_activity(int pid, char *buffer,
 													   int buflen);
 extern uint64 pgstat_get_my_query_id(void);
+extern BackendType pgstat_get_backend_type_by_proc_number(ProcNumber procNumber);
 
 
 /* ----------

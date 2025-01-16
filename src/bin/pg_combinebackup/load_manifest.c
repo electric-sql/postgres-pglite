@@ -2,7 +2,7 @@
  *
  * Load data from a backup manifest into memory.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pg_combinebackup/load_manifest.c
@@ -204,8 +204,7 @@ load_backup_manifest(char *backup_directory)
 							 (long long int) statbuf.st_size);
 			}
 			bytes_left -= rc;
-			json_parse_manifest_incremental_chunk(
-												  inc_state, buffer, rc, bytes_left == 0);
+			json_parse_manifest_incremental_chunk(inc_state, buffer, rc, bytes_left == 0);
 		}
 
 		/* Release the incremental state memory */

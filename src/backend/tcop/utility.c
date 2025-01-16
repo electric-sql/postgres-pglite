@@ -5,7 +5,7 @@
  *	  commands.  At one time acted as an interface between the Lisp and C
  *	  systems.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -122,7 +122,7 @@ CommandIsReadOnly(PlannedStmt *pstmt)
 /*
  * Determine the degree to which a utility command is read only.
  *
- * Note the definitions of the relevant flags in src/include/utility/tcop.h.
+ * Note the definitions of the relevant flags in src/include/tcop/utility.h.
  */
 static int
 ClassifyUtilityCommandAsReadOnly(Node *parsetree)
@@ -1712,7 +1712,7 @@ ProcessUtilitySlow(ParseState *pstate,
 				break;
 
 			case T_CreateDomainStmt:
-				address = DefineDomain((CreateDomainStmt *) parsetree);
+				address = DefineDomain(pstate, (CreateDomainStmt *) parsetree);
 				break;
 
 			case T_CreateConversionStmt:

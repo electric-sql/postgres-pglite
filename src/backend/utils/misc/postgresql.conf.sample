@@ -96,6 +96,7 @@
 #authentication_timeout = 1min		# 1s-600s
 #password_encryption = scram-sha-256	# scram-sha-256 or md5
 #scram_iterations = 4096
+#md5_password_warnings = on
 
 # GSSAPI using Kerberos
 #krb_server_keyfile = 'FILE:${sysconfdir}/krb5.keytab'
@@ -183,14 +184,6 @@
 
 #max_files_per_process = 1000		# min 64
 					# (change requires restart)
-
-# - Cost-Based Vacuum Delay -
-
-#vacuum_cost_delay = 0			# 0-100 milliseconds (0 disables)
-#vacuum_cost_page_hit = 1		# 0-10000 credits
-#vacuum_cost_page_miss = 2		# 0-10000 credits
-#vacuum_cost_page_dirty = 20		# 0-10000 credits
-#vacuum_cost_limit = 200		# 1-10000 credits
 
 # - Background Writer -
 
@@ -414,6 +407,7 @@
 #enable_sort = on
 #enable_tidscan = on
 #enable_group_by_reordering = on
+#enable_distinct_reordering = on
 
 # - Planner Cost Constants -
 
@@ -654,13 +648,16 @@
 
 
 #------------------------------------------------------------------------------
-# AUTOVACUUM
+# VACUUMING
 #------------------------------------------------------------------------------
+
+# - Automatic Vacuuming -
 
 #autovacuum = on			# Enable autovacuum subprocess?  'on'
 					# requires track_counts to also be on.
-#autovacuum_max_workers = 3		# max number of autovacuum subprocesses
+autovacuum_worker_slots = 16	# autovacuum worker slots to allocate
 					# (change requires restart)
+#autovacuum_max_workers = 3		# max number of autovacuum subprocesses
 #autovacuum_naptime = 1min		# time between autovacuum runs
 #autovacuum_vacuum_threshold = 50	# min number of row updates before
 					# vacuum
@@ -685,6 +682,22 @@
 					# autovacuum, -1 means use
 					# vacuum_cost_limit
 
+# - Cost-Based Vacuum Delay -
+
+#vacuum_cost_delay = 0			# 0-100 milliseconds (0 disables)
+#vacuum_cost_page_hit = 1		# 0-10000 credits
+#vacuum_cost_page_miss = 2		# 0-10000 credits
+#vacuum_cost_page_dirty = 20		# 0-10000 credits
+#vacuum_cost_limit = 200		# 1-10000 credits
+
+# - Freezing -
+
+#vacuum_freeze_table_age = 150000000
+#vacuum_freeze_min_age = 50000000
+#vacuum_failsafe_age = 1600000000
+#vacuum_multixact_freeze_table_age = 150000000
+#vacuum_multixact_freeze_min_age = 5000000
+#vacuum_multixact_failsafe_age = 1600000000
 
 #------------------------------------------------------------------------------
 # CLIENT CONNECTION DEFAULTS
@@ -719,12 +732,6 @@
 #lock_timeout = 0				# in milliseconds, 0 is disabled
 #idle_in_transaction_session_timeout = 0	# in milliseconds, 0 is disabled
 #idle_session_timeout = 0			# in milliseconds, 0 is disabled
-#vacuum_freeze_table_age = 150000000
-#vacuum_freeze_min_age = 50000000
-#vacuum_failsafe_age = 1600000000
-#vacuum_multixact_freeze_table_age = 150000000
-#vacuum_multixact_freeze_min_age = 5000000
-#vacuum_multixact_failsafe_age = 1600000000
 #bytea_output = 'hex'			# hex, escape
 #xmlbinary = 'base64'
 #xmloption = 'content'

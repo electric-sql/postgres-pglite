@@ -3,7 +3,7 @@
  * explain.c
  *	  Explain query execution plans
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994-5, Regents of the University of California
  *
  * IDENTIFICATION
@@ -198,6 +198,7 @@ ExplainQuery(ParseState *pstate, ExplainStmt *stmt,
 	List	   *rewritten;
 	ListCell   *lc;
 	bool		timing_set = false;
+	bool		buffers_set = false;
 	bool		summary_set = false;
 
 	/* Parse options list. */
@@ -212,7 +213,10 @@ ExplainQuery(ParseState *pstate, ExplainStmt *stmt,
 		else if (strcmp(opt->defname, "costs") == 0)
 			es->costs = defGetBoolean(opt);
 		else if (strcmp(opt->defname, "buffers") == 0)
+		{
+			buffers_set = true;
 			es->buffers = defGetBoolean(opt);
+		}
 		else if (strcmp(opt->defname, "wal") == 0)
 			es->wal = defGetBoolean(opt);
 		else if (strcmp(opt->defname, "settings") == 0)
@@ -287,22 +291,25 @@ ExplainQuery(ParseState *pstate, ExplainStmt *stmt,
 	if (es->wal && !es->analyze)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("EXPLAIN option WAL requires ANALYZE")));
+				 errmsg("EXPLAIN option %s requires ANALYZE", "WAL")));
 
 	/* if the timing was not set explicitly, set default value */
 	es->timing = (timing_set) ? es->timing : es->analyze;
+
+	/* if the buffers was not set explicitly, set default value */
+	es->buffers = (buffers_set) ? es->buffers : es->analyze;
 
 	/* check that timing is used with EXPLAIN ANALYZE */
 	if (es->timing && !es->analyze)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("EXPLAIN option TIMING requires ANALYZE")));
+				 errmsg("EXPLAIN option %s requires ANALYZE", "TIMING")));
 
 	/* check that serialize is used with EXPLAIN ANALYZE */
 	if (es->serialize != EXPLAIN_SERIALIZE_NONE && !es->analyze)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("EXPLAIN option SERIALIZE requires ANALYZE")));
+				 errmsg("EXPLAIN option %s requires ANALYZE", "SERIALIZE")));
 
 	/* check that GENERIC_PLAN is not used with EXPLAIN ANALYZE */
 	if (es->generic && es->analyze)
@@ -719,7 +726,7 @@ ExplainOnePlan(PlannedStmt *plannedstmt, IntoClause *into, ExplainState *es,
 			dir = ForwardScanDirection;
 
 		/* run the plan */
-		ExecutorRun(queryDesc, dir, 0, true);
+		ExecutorRun(queryDesc, dir, 0);
 
 		/* run cleanup too */
 		ExecutorFinish(queryDesc);
@@ -1377,8 +1384,8 @@ ExplainPreScanNode(PlanState *planstate, Bitmapset **rels_used)
 /*
  * plan_is_disabled
  *		Checks if the given plan node type was disabled during query planning.
- *		This is evident by the disable_node field being higher than the sum of
- *		the disabled_node field from the plan's children.
+ *		This is evident by the disabled_nodes field being higher than the sum of
+ *		the disabled_nodes field from the plan's children.
  */
 static bool
 plan_is_disabled(Plan *plan)
@@ -1455,8 +1462,8 @@ plan_is_disabled(Plan *plan)
 	}
 
 	/*
-	 * It's disabled if the plan's disable_nodes is higher than the sum of its
-	 * child's plan disabled_nodes.
+	 * It's disabled if the plan's disabled_nodes is higher than the sum of
+	 * its child's plan disabled_nodes.
 	 */
 	if (plan->disabled_nodes > child_disabled_nodes)
 		return true;

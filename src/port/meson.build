@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2024, PostgreSQL Global Development Group
+# Copyright (c) 2022-2025, PostgreSQL Global Development Group
 
 pgport_sources = [
   'bsearch_arg.c',
@@ -82,7 +82,7 @@ endif
 replace_funcs_pos = [
   # x86/x64
   ['pg_crc32c_sse42', 'USE_SSE42_CRC32C'],
-  ['pg_crc32c_sse42', 'USE_SSE42_CRC32C_WITH_RUNTIME_CHECK', 'crc'],
+  ['pg_crc32c_sse42', 'USE_SSE42_CRC32C_WITH_RUNTIME_CHECK'],
   ['pg_crc32c_sse42_choose', 'USE_SSE42_CRC32C_WITH_RUNTIME_CHECK'],
   ['pg_crc32c_sb8', 'USE_SSE42_CRC32C_WITH_RUNTIME_CHECK'],
 
@@ -184,6 +184,7 @@ foreach name, opts : pgport_variants
   lib = static_library('libpgport@0@'.format(name),
       pgport_sources,
       link_with: cflag_libs,
+      link_whole: cflag_libs,
       c_pch: pch_c_h,
       kwargs: opts + {
         'dependencies': opts['dependencies'] + [ssl],

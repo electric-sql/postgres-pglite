@@ -4,7 +4,7 @@
  *	   routines for accessing the system catalogs
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -175,12 +175,12 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 	{
 		for (int i = 0; i < relation->rd_att->natts; i++)
 		{
-			Form_pg_attribute attr = TupleDescAttr(relation->rd_att, i);
+			CompactAttribute *attr = TupleDescCompactAttr(relation->rd_att, i);
 
 			if (attr->attnotnull)
 			{
 				rel->notnullattnums = bms_add_member(rel->notnullattnums,
-													 attr->attnum);
+													 i + 1);
 
 				/*
 				 * Per RemoveAttributeById(), dropped columns will have their
@@ -457,6 +457,7 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 			info->indrestrictinfo = NIL;	/* set later, in indxpath.c */
 			info->predOK = false;	/* set later, in indxpath.c */
 			info->unique = index->indisunique;
+			info->nullsnotdistinct = index->indnullsnotdistinct;
 			info->immediate = index->indimmediate;
 			info->hypothetical = false;
 
@@ -1303,8 +1304,19 @@ get_relation_constraints(PlannerInfo *root,
 			 */
 			if (!constr->check[i].ccvalid)
 				continue;
+
+			/*
+			 * NOT ENFORCED constraints are always marked as invalid, which
+			 * should have been ignored.
+			 */
+			Assert(constr->check[i].ccenforced);
+
+			/*
+			 * Also ignore if NO INHERIT and we weren't told that that's safe.
+			 */
 			if (constr->check[i].ccnoinherit && !include_noinherit)
 				continue;
+
 
 			cexpr = stringToNode(constr->check[i].ccbin);
 

@@ -3,7 +3,7 @@
  * pg_bitutils.c
  *	  Miscellaneous functions for bit-wise operations.
  *
- * Copyright (c) 2019-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2019-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/port/pg_bitutils.c
@@ -370,12 +370,12 @@ static inline int
 pg_popcount64_slow(uint64 word)
 {
 #ifdef HAVE__BUILTIN_POPCOUNT
-#if defined(HAVE_LONG_INT_64)
+#if SIZEOF_LONG == 8
 	return __builtin_popcountl(word);
-#elif defined(HAVE_LONG_LONG_INT_64)
+#elif SIZEOF_LONG_LONG == 8
 	return __builtin_popcountll(word);
 #else
-#error must have a working 64-bit integer datatype
+#error "cannot find integer of the same size as uint64_t"
 #endif
 #else							/* !HAVE__BUILTIN_POPCOUNT */
 	int			result = 0;

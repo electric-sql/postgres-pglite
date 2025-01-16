@@ -3,7 +3,7 @@
  * lock.c
  *	  POSTGRES primary lock mechanism
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -21,7 +21,7 @@
  *
  *	Interface:
  *
- *	InitLocks(), GetLocksMethodTable(), GetLockTagsMethodTable(),
+ *	LockManagerShmemInit(), GetLocksMethodTable(), GetLockTagsMethodTable(),
  *	LockAcquire(), LockRelease(), LockReleaseAll(),
  *	LockCheckConflicts(), GrantLock()
  *
@@ -550,7 +550,7 @@ GetLockTagsMethodTable(const LOCKTAG *locktag)
 uint32
 LockTagHashCode(const LOCKTAG *locktag)
 {
-	return get_hash_value(LockMethodLockHash, (const void *) locktag);
+	return get_hash_value(LockMethodLockHash, locktag);
 }
 
 /*

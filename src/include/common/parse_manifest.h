@@ -3,7 +3,7 @@
  * parse_manifest.h
  *	  Parse a backup manifest in JSON format.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/common/parse_manifest.h
@@ -50,8 +50,8 @@ struct JsonManifestParseContext
 extern void json_parse_manifest(JsonManifestParseContext *context,
 								const char *buffer, size_t size);
 extern JsonManifestParseIncrementalState *json_parse_manifest_incremental_init(JsonManifestParseContext *context);
-extern void json_parse_manifest_incremental_chunk(
-												  JsonManifestParseIncrementalState *incstate, const char *chunk, size_t size,
+extern void json_parse_manifest_incremental_chunk(JsonManifestParseIncrementalState *incstate,
+												  const char *chunk, size_t size,
 												  bool is_last);
 extern void json_parse_manifest_incremental_shutdown(JsonManifestParseIncrementalState *incstate);
 

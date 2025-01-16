@@ -14,6 +14,18 @@
 #
 # $ git log --pretty=format:"%H # %cd%n# %s" $PGINDENTGITHASH -1 --date=iso
 
+6e826278f1ebd9967c0f8adda29c8960a812e344 # 2025-01-13 11:27:32 +0900
+# Fix pgindent damage
+
+301de6a6f609cb3ad2d9d31fd8db9ae6c71e6dea # 2024-12-25 17:55:42 +0100
+# Partial pgindent of .l and .y files
+
+53dcba9be5746cc126bdb949bf81c29ea2cfc24d # 2024-11-21 21:40:17 +0100
+# pgindent run
+
+a7f2f6adc240a2823c2344b89e90bb630dea8803 # 2024-10-16 12:21:13 -0700
+# Whitespace fixup from generated unicode tables.
+
 7f7474a8e4002ac9fd4979cc7b16b50b70b70c28 # 2024-09-27 11:14:31 -0400
 # Reindent pg_verifybackup.c.
 

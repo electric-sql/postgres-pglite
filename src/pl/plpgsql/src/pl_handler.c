@@ -3,7 +3,7 @@
  * pl_handler.c		- Handler for the PL/pgSQL
  *			  procedural language
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -118,7 +118,7 @@ plpgsql_extra_checks_check_hook(char **newvalue, void **extra, GucSource source)
 	if (!myextra)
 		return false;
 	*myextra = extrachecks;
-	*extra = (void *) myextra;
+	*extra = myextra;
 
 	return true;
 }

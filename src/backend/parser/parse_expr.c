@@ -3,7 +3,7 @@
  * parse_expr.c
  *	  handle expressions in parser
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -2807,7 +2807,7 @@ make_row_comparison_op(ParseState *pstate, List *opname,
 					   List *largs, List *rargs, int location)
 {
 	RowCompareExpr *rcexpr;
-	RowCompareType rctype;
+	CompareType cmptype;
 	List	   *opexprs;
 	List	   *opnos;
 	List	   *opfamilies;
@@ -2928,15 +2928,15 @@ make_row_comparison_op(ParseState *pstate, List *opname,
 				 errhint("Row comparison operators must be associated with btree operator families."),
 				 parser_errposition(pstate, location)));
 	}
-	rctype = (RowCompareType) i;
+	cmptype = (CompareType) i;
 
 	/*
 	 * For = and <> cases, we just combine the pairwise operators with AND or
 	 * OR respectively.
 	 */
-	if (rctype == ROWCOMPARE_EQ)
+	if (cmptype == COMPARE_EQ)
 		return (Node *) makeBoolExpr(AND_EXPR, opexprs, location);
-	if (rctype == ROWCOMPARE_NE)
+	if (cmptype == COMPARE_NE)
 		return (Node *) makeBoolExpr(OR_EXPR, opexprs, location);
 
 	/*
@@ -2953,7 +2953,7 @@ make_row_comparison_op(ParseState *pstate, List *opname,
 		{
 			OpBtreeInterpretation *opinfo = lfirst(j);
 
-			if (opinfo->strategy == rctype)
+			if (opinfo->strategy == cmptype)
 			{
 				opfamily = opinfo->opfamily_id;
 				break;
@@ -2989,7 +2989,7 @@ make_row_comparison_op(ParseState *pstate, List *opname,
 	}
 
 	rcexpr = makeNode(RowCompareExpr);
-	rcexpr->rctype = rctype;
+	rcexpr->cmptype = cmptype;
 	rcexpr->opnos = opnos;
 	rcexpr->opfamilies = opfamilies;
 	rcexpr->inputcollids = NIL; /* assign_expr_collations will fix this */
@@ -4113,8 +4113,9 @@ transformJsonReturning(ParseState *pstate, JsonOutput *output, const char *fname
 		if (returning->typid != JSONOID && returning->typid != JSONBOID)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("cannot use RETURNING type %s in %s",
+					 errmsg("cannot use type %s in RETURNING clause of %s",
 							format_type_be(returning->typid), fname),
+					 errhint("Try returning json or jsonb."),
 					 parser_errposition(pstate, output->typeName->location)));
 	}
 	else
@@ -4233,7 +4234,7 @@ transformJsonSerializeExpr(ParseState *pstate, JsonSerializeExpr *expr)
 			if (typcategory != TYPCATEGORY_STRING)
 				ereport(ERROR,
 						(errcode(ERRCODE_DATATYPE_MISMATCH),
-						 errmsg("cannot use RETURNING type %s in %s",
+						 errmsg("cannot use type %s in RETURNING clause of %s",
 								format_type_be(returning->typid),
 								"JSON_SERIALIZE()"),
 						 errhint("Try returning a string type or bytea.")));

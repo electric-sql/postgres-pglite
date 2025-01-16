@@ -739,6 +739,27 @@ reset enable_hashjoin;
 reset enable_nestloop;
 
 --
+-- regression test for bug with hash-right-semi join
+--
+
+create temp table tbl_rs(a int, b int);
+insert into tbl_rs select i, i from generate_series(1,10)i;
+analyze tbl_rs;
+
+-- ensure we get a hash right semi join
+explain (costs off)
+select * from tbl_rs t1 join
+  lateral (select * from tbl_rs t2 where t2.a in
+            (select t1.a+t3.a from tbl_rs t3) and t2.a < 5)
+  on true;
+
+-- and check we get the expected results
+select * from tbl_rs t1 join
+  lateral (select * from tbl_rs t2 where t2.a in
+            (select t1.a+t3.a from tbl_rs t3) and t2.a < 5)
+  on true;
+
+--
 -- regression test for bug #13908 (hash join with skew tuples & nbatch increase)
 --
 
@@ -1460,6 +1481,15 @@ select * from tenk1 a join tenk1 b on
 explain (costs off)
 select * from tenk1 a join tenk1 b on
   (a.unique1 = 1 and b.unique1 = 2) or
+  ((a.unique2 = 3 or a.unique2 = 7) and b.hundred = 4);
+
+explain (costs off)
+select * from tenk1 a join tenk1 b on
+  (a.unique1 = 1 and b.unique1 = 2) or
+  ((a.unique2 = 3 or a.unique2 = 7) and b.hundred = 4);
+explain (costs off)
+select * from tenk1 a join tenk1 b on
+  (a.unique1 < 20 or a.unique1 = 3 or a.unique1 = 1 and b.unique1 = 2) or
   ((a.unique2 = 3 or a.unique2 = 7) and b.hundred = 4);
 
 --
@@ -2986,3 +3016,33 @@ SELECT t1.a FROM skip_fetch t1 LEFT JOIN skip_fetch t2 ON t2.a = 1 WHERE t2.a IS
 
 RESET enable_indexonlyscan;
 RESET enable_seqscan;
+
+-- Test BitmapHeapScan with a rescan releases resources correctly
+SET enable_seqscan = off;
+SET enable_indexscan = off;
+
+CREATE TEMP TABLE rescan_bhs (a INT);
+INSERT INTO rescan_bhs VALUES (1), (2);
+CREATE INDEX ON rescan_bhs (a);
+
+EXPLAIN (COSTS OFF)
+SELECT * FROM rescan_bhs t1 LEFT JOIN rescan_bhs t2 ON t1.a IN
+  (SELECT a FROM rescan_bhs t3 WHERE t2.a > 1);
+SELECT * FROM rescan_bhs t1 LEFT JOIN rescan_bhs t2 ON t1.a IN
+  (SELECT a FROM rescan_bhs t3 WHERE t2.a > 1);
+
+RESET enable_seqscan;
+RESET enable_indexscan;
+
+-- Test that we do not account for nullingrels when looking up statistics
+CREATE TABLE group_tbl (a INT, b INT);
+INSERT INTO group_tbl SELECT 1, 1;
+CREATE STATISTICS group_tbl_stat (ndistinct) ON a, b FROM group_tbl;
+ANALYZE group_tbl;
+
+EXPLAIN (COSTS OFF)
+SELECT 1 FROM group_tbl t1
+    LEFT JOIN (SELECT a c1, COALESCE(a) c2 FROM group_tbl t2) s ON TRUE
+GROUP BY s.c1, s.c2;
+
+DROP TABLE group_tbl;

@@ -3,7 +3,7 @@
  * hash.c
  *	  Implementation of Margo Seltzer's Hashing package for postgres.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -173,7 +173,7 @@ hashbuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	/* do the heap scan */
 	reltuples = table_index_build_scan(heap, index, indexInfo, true, true,
 									   hashbuildCallback,
-									   (void *) &buildstate, NULL);
+									   &buildstate, NULL);
 	pgstat_progress_update_param(PROGRESS_CREATEIDX_TUPLES_TOTAL,
 								 buildstate.indtuples);
 

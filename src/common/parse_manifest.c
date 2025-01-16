@@ -3,7 +3,7 @@
  * parse_manifest.c
  *	  Parse a backup manifest in JSON format.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/common/parse_manifest.c
@@ -182,9 +182,8 @@ json_parse_manifest_incremental_shutdown(JsonManifestParseIncrementalState *incs
  */
 
 void
-json_parse_manifest_incremental_chunk(
-									  JsonManifestParseIncrementalState *incstate, const char *chunk, size_t size,
-									  bool is_last)
+json_parse_manifest_incremental_chunk(JsonManifestParseIncrementalState *incstate,
+									  const char *chunk, size_t size, bool is_last)
 {
 	JsonParseErrorType res,
 				expected;

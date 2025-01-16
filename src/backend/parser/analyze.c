@@ -14,7 +14,7 @@
  * contain optimizable statements, which we should transform.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *	src/backend/parser/analyze.c
@@ -1687,7 +1687,7 @@ transformValuesClause(ParseState *pstate, SelectStmt *stmt)
 			Node	   *col = (Node *) lfirst(lc);
 
 			col = coerce_to_common_type(pstate, col, coltype, "VALUES");
-			lfirst(lc) = (void *) col;
+			lfirst(lc) = col;
 		}
 
 		coltypmod = select_common_typmod(pstate, colexprs[i], coltype);

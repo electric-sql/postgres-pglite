@@ -8,7 +8,7 @@
  * relations need be included.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_attribute.h
@@ -23,7 +23,7 @@
 #define PG_ATTRIBUTE_H
 
 #include "catalog/genbki.h"
-#include "catalog/pg_attribute_d.h"
+#include "catalog/pg_attribute_d.h" /* IWYU pragma: export */
 
 /* ----------------
  *		pg_attribute definition.  cpp turns this into
@@ -72,15 +72,6 @@ CATALOG(pg_attribute,1249,AttributeRelationId) BKI_BOOTSTRAP BKI_ROWTYPE_OID(75,
 	 * Note that (attnum - 1) is often used as the index to an array.
 	 */
 	int16		attnum;
-
-	/*
-	 * fastgetattr() uses attcacheoff to cache byte offsets of attributes in
-	 * heap tuples.  The value actually stored in pg_attribute (-1) indicates
-	 * no cached value.  But when we copy these tuples into a tuple
-	 * descriptor, we may then update attcacheoff in the copies. This speeds
-	 * up the attribute walking process.
-	 */
-	int32		attcacheoff BKI_DEFAULT(-1);
 
 	/*
 	 * atttypmod records type-specific data supplied at table creation time

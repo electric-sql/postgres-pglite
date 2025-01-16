@@ -2,7 +2,7 @@
  * tablesync.c
  *	  PostgreSQL logical replication: initial table data synchronization
  *
- * Copyright (c) 2012-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/replication/logical/tablesync.c
@@ -760,7 +760,7 @@ copy_read_data(void *outbuf, int minread, int maxread)
 				if (avail > maxread)
 					avail = maxread;
 				memcpy(outbuf, &copybuf->data[copybuf->cursor], avail);
-				outbuf = (void *) ((char *) outbuf + avail);
+				outbuf = (char *) outbuf + avail;
 				copybuf->cursor += avail;
 				maxread -= avail;
 				bytesread += avail;

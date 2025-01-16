@@ -6,7 +6,7 @@
  * We don't support copying RelOptInfo, IndexOptInfo, or Path nodes.
  * There are some subsidiary structs that are useful to copy, though.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/nodes/pathnodes.h
@@ -1187,6 +1187,8 @@ struct IndexOptInfo
 	bool		predOK;
 	/* true if a unique index */
 	bool		unique;
+	/* true if the index was defined with NULLS NOT DISTINCT */
+	bool		nullsnotdistinct;
 	/* is uniqueness enforced immediately? */
 	bool		immediate;
 	/* true if index doesn't really exist */
@@ -2340,13 +2342,12 @@ typedef struct WindowAggPath
 typedef struct SetOpPath
 {
 	Path		path;
-	Path	   *subpath;		/* path representing input source */
+	Path	   *leftpath;		/* paths representing input sources */
+	Path	   *rightpath;
 	SetOpCmd	cmd;			/* what to do, see nodes.h */
 	SetOpStrategy strategy;		/* how to do it, see nodes.h */
-	List	   *distinctList;	/* SortGroupClauses identifying target cols */
-	AttrNumber	flagColIdx;		/* where is the flag column, if any */
-	int			firstFlag;		/* flag value for first input relation */
-	Cardinality numGroups;		/* estimated number of groups in input */
+	List	   *groupList;		/* SortGroupClauses identifying target cols */
+	Cardinality numGroups;		/* estimated number of groups in left input */
 } SetOpPath;
 
 /*

@@ -3,7 +3,7 @@
  * verify_heapam.c
  *	  Functions to check postgresql heap relations for corruption
  *
- * Copyright (c) 2016-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2016-2025, PostgreSQL Global Development Group
  *
  *	  contrib/amcheck/verify_heapam.c
  *-------------------------------------------------------------------------
@@ -1571,11 +1571,11 @@ check_tuple_attribute(HeapCheckContext *ctx)
 	struct varlena *attr;
 	char	   *tp;				/* pointer to the tuple data */
 	uint16		infomask;
-	Form_pg_attribute thisatt;
+	CompactAttribute *thisatt;
 	struct varatt_external toast_pointer;
 
 	infomask = ctx->tuphdr->t_infomask;
-	thisatt = TupleDescAttr(RelationGetDescr(ctx->rel), ctx->attnum);
+	thisatt = TupleDescCompactAttr(RelationGetDescr(ctx->rel), ctx->attnum);
 
 	tp = (char *) ctx->tuphdr + ctx->tuphdr->t_hoff;
 
@@ -1596,7 +1596,7 @@ check_tuple_attribute(HeapCheckContext *ctx)
 	/* Skip non-varlena values, but update offset first */
 	if (thisatt->attlen != -1)
 	{
-		ctx->offset = att_align_nominal(ctx->offset, thisatt->attalign);
+		ctx->offset = att_nominal_alignby(ctx->offset, thisatt->attalignby);
 		ctx->offset = att_addlength_pointer(ctx->offset, thisatt->attlen,
 											tp + ctx->offset);
 		if (ctx->tuphdr->t_hoff + ctx->offset > ctx->lp_len)
@@ -1612,8 +1612,8 @@ check_tuple_attribute(HeapCheckContext *ctx)
 	}
 
 	/* Ok, we're looking at a varlena attribute. */
-	ctx->offset = att_align_pointer(ctx->offset, thisatt->attalign, -1,
-									tp + ctx->offset);
+	ctx->offset = att_pointer_alignby(ctx->offset, thisatt->attalignby, -1,
+									  tp + ctx->offset);
 
 	/* Get the (possibly corrupt) varlena datum */
 	attdatum = fetchatt(thisatt, tp + ctx->offset);
@@ -1767,7 +1767,6 @@ check_tuple_attribute(HeapCheckContext *ctx)
 static void
 check_toasted_attribute(HeapCheckContext *ctx, ToastedAttribute *ta)
 {
-	SnapshotData SnapshotToast;
 	ScanKeyData toastkey;
 	SysScanDesc toastscan;
 	bool		found_toasttup;
@@ -1791,10 +1790,9 @@ check_toasted_attribute(HeapCheckContext *ctx, ToastedAttribute *ta)
 	 * Check if any chunks for this toasted object exist in the toast table,
 	 * accessible via the index.
 	 */
-	init_toast_snapshot(&SnapshotToast);
 	toastscan = systable_beginscan_ordered(ctx->toast_rel,
 										   ctx->valid_toast_index,
-										   &SnapshotToast, 1,
+										   get_toast_snapshot(), 1,
 										   &toastkey);
 	found_toasttup = false;
 	while ((toasttup =

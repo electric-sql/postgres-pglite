@@ -3,7 +3,7 @@
  * injection_stats_fixed.c
  *		Code for fixed-numbered statistics of injection points.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -50,6 +50,7 @@ static void injection_stats_fixed_snapshot_cb(void);
 static const PgStat_KindInfo injection_stats_fixed = {
 	.name = "injection_points_fixed",
 	.fixed_amount = true,
+	.write_to_file = true,
 
 	.shared_size = sizeof(PgStat_StatInjFixedEntry),
 	.shared_data_off = offsetof(PgStatShared_InjectionPointFixed, stats),

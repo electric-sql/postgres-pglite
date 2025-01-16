@@ -4,7 +4,7 @@
  *	  various support functions for SP-GiST
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -279,7 +279,7 @@ spgGetCache(Relation index)
 			UnlockReleaseBuffer(metabuffer);
 		}
 
-		index->rd_amcache = (void *) cache;
+		index->rd_amcache = cache;
 	}
 	else
 	{
@@ -331,7 +331,9 @@ getSpGistTupleDesc(Relation index, SpGistTypeDesc *keyType)
 		att->attcollation = InvalidOid;
 		/* In case we changed typlen, we'd better reset following offsets */
 		for (int i = spgFirstIncludeColumn; i < outTupDesc->natts; i++)
-			TupleDescAttr(outTupDesc, i)->attcacheoff = -1;
+			TupleDescCompactAttr(outTupDesc, i)->attcacheoff = -1;
+
+		populate_compact_attribute(outTupDesc, spgKeyColumn);
 	}
 	return outTupDesc;
 }

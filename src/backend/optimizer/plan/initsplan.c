@@ -1,9 +1,9 @@
 /*-------------------------------------------------------------------------
  *
  * initsplan.c
- *	  Target list, qualification, joininfo initialization routines
+ *	  Target list, group by, qualification, joininfo initialization routines
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -14,6 +14,7 @@
  */
 #include "postgres.h"
 
+#include "catalog/pg_constraint.h"
 #include "catalog/pg_type.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -386,6 +387,246 @@ add_vars_to_attr_needed(PlannerInfo *root, List *vars,
 	}
 }
 
+/*****************************************************************************
+ *
+ *	  GROUP BY
+ *
+ *****************************************************************************/
+
+/*
+ * remove_useless_groupby_columns
+ *		Remove any columns in the GROUP BY clause that are redundant due to
+ *		being functionally dependent on other GROUP BY columns.
+ *
+ * Since some other DBMSes do not allow references to ungrouped columns, it's
+ * not unusual to find all columns listed in GROUP BY even though listing the
+ * primary-key columns, or columns of a unique constraint would be sufficient.
+ * Deleting such excess columns avoids redundant sorting or hashing work, so
+ * it's worth doing.
+ *
+ * Relcache invalidations will ensure that cached plans become invalidated
+ * when the underlying supporting indexes are dropped or if a column's NOT
+ * NULL attribute is removed.
+ */
+void
+remove_useless_groupby_columns(PlannerInfo *root)
+{
+	Query	   *parse = root->parse;
+	Bitmapset **groupbyattnos;
+	Bitmapset **surplusvars;
+	bool		tryremove = false;
+	ListCell   *lc;
+	int			relid;
+
+	/* No chance to do anything if there are less than two GROUP BY items */
+	if (list_length(root->processed_groupClause) < 2)
+		return;
+
+	/* Don't fiddle with the GROUP BY clause if the query has grouping sets */
+	if (parse->groupingSets)
+		return;
+
+	/*
+	 * Scan the GROUP BY clause to find GROUP BY items that are simple Vars.
+	 * Fill groupbyattnos[k] with a bitmapset of the column attnos of RTE k
+	 * that are GROUP BY items.
+	 */
+	groupbyattnos = (Bitmapset **) palloc0(sizeof(Bitmapset *) *
+										   (list_length(parse->rtable) + 1));
+	foreach(lc, root->processed_groupClause)
+	{
+		SortGroupClause *sgc = lfirst_node(SortGroupClause, lc);
+		TargetEntry *tle = get_sortgroupclause_tle(sgc, parse->targetList);
+		Var		   *var = (Var *) tle->expr;
+
+		/*
+		 * Ignore non-Vars and Vars from other query levels.
+		 *
+		 * XXX in principle, stable expressions containing Vars could also be
+		 * removed, if all the Vars are functionally dependent on other GROUP
+		 * BY items.  But it's not clear that such cases occur often enough to
+		 * be worth troubling over.
+		 */
+		if (!IsA(var, Var) ||
+			var->varlevelsup > 0)
+			continue;
+
+		/* OK, remember we have this Var */
+		relid = var->varno;
+		Assert(relid <= list_length(parse->rtable));
+
+		/*
+		 * If this isn't the first column for this relation then we now have
+		 * multiple columns.  That means there might be some that can be
+		 * removed.
+		 */
+		tryremove |= !bms_is_empty(groupbyattnos[relid]);
+		groupbyattnos[relid] = bms_add_member(groupbyattnos[relid],
+											  var->varattno - FirstLowInvalidHeapAttributeNumber);
+	}
+
+	/*
+	 * No Vars or didn't find multiple Vars for any relation in the GROUP BY?
+	 * If so, nothing can be removed, so don't waste more effort trying.
+	 */
+	if (!tryremove)
+		return;
+
+	/*
+	 * Consider each relation and see if it is possible to remove some of its
+	 * Vars from GROUP BY.  For simplicity and speed, we do the actual removal
+	 * in a separate pass.  Here, we just fill surplusvars[k] with a bitmapset
+	 * of the column attnos of RTE k that are removable GROUP BY items.
+	 */
+	surplusvars = NULL;			/* don't allocate array unless required */
+	relid = 0;
+	foreach(lc, parse->rtable)
+	{
+		RangeTblEntry *rte = lfirst_node(RangeTblEntry, lc);
+		RelOptInfo *rel;
+		Bitmapset  *relattnos;
+		Bitmapset  *best_keycolumns = NULL;
+		int32		best_nkeycolumns = PG_INT32_MAX;
+
+		relid++;
+
+		/* Only plain relations could have primary-key constraints */
+		if (rte->rtekind != RTE_RELATION)
+			continue;
+
+		/*
+		 * We must skip inheritance parent tables as some of the child rels
+		 * may cause duplicate rows.  This cannot happen with partitioned
+		 * tables, however.
+		 */
+		if (rte->inh && rte->relkind != RELKIND_PARTITIONED_TABLE)
+			continue;
+
+		/* Nothing to do unless this rel has multiple Vars in GROUP BY */
+		relattnos = groupbyattnos[relid];
+		if (bms_membership(relattnos) != BMS_MULTIPLE)
+			continue;
+
+		rel = root->simple_rel_array[relid];
+
+		/*
+		 * Now check each index for this relation to see if there are any with
+		 * columns which are a proper subset of the grouping columns for this
+		 * relation.
+		 */
+		foreach_node(IndexOptInfo, index, rel->indexlist)
+		{
+			Bitmapset  *ind_attnos;
+			bool		nulls_check_ok;
+
+			/*
+			 * Skip any non-unique and deferrable indexes.  Predicate indexes
+			 * have not been checked yet, so we must skip those too as the
+			 * predOK check that's done later might fail.
+			 */
+			if (!index->unique || !index->immediate || index->indpred != NIL)
+				continue;
+
+			/* For simplicity, we currently don't support expression indexes */
+			if (index->indexprs != NIL)
+				continue;
+
+			ind_attnos = NULL;
+			nulls_check_ok = true;
+			for (int i = 0; i < index->nkeycolumns; i++)
+			{
+				/*
+				 * We must insist that the index columns are all defined NOT
+				 * NULL otherwise duplicate NULLs could exist.  However, we
+				 * can relax this check when the index is defined with NULLS
+				 * NOT DISTINCT as there can only be 1 NULL row, therefore
+				 * functional dependency on the unique columns is maintained,
+				 * despite the NULL.
+				 */
+				if (!index->nullsnotdistinct &&
+					!bms_is_member(index->indexkeys[i],
+								   rel->notnullattnums))
+				{
+					nulls_check_ok = false;
+					break;
+				}
+
+				ind_attnos =
+					bms_add_member(ind_attnos,
+								   index->indexkeys[i] -
+								   FirstLowInvalidHeapAttributeNumber);
+			}
+
+			if (!nulls_check_ok)
+				continue;
+
+			/*
+			 * Skip any indexes where the indexed columns aren't a proper
+			 * subset of the GROUP BY.
+			 */
+			if (bms_subset_compare(ind_attnos, relattnos) != BMS_SUBSET1)
+				continue;
+
+			/*
+			 * Record the attribute numbers from the index with the fewest
+			 * columns.  This allows the largest number of columns to be
+			 * removed from the GROUP BY clause.  In the future, we may wish
+			 * to consider using the narrowest set of columns and looking at
+			 * pg_statistic.stawidth as it might be better to use an index
+			 * with, say two INT4s, rather than, say, one long varlena column.
+			 */
+			if (index->nkeycolumns < best_nkeycolumns)
+			{
+				best_keycolumns = ind_attnos;
+				best_nkeycolumns = index->nkeycolumns;
+			}
+		}
+
+		/* Did we find a suitable index? */
+		if (!bms_is_empty(best_keycolumns))
+		{
+			/*
+			 * To easily remember whether we've found anything to do, we don't
+			 * allocate the surplusvars[] array until we find something.
+			 */
+			if (surplusvars == NULL)
+				surplusvars = (Bitmapset **) palloc0(sizeof(Bitmapset *) *
+													 (list_length(parse->rtable) + 1));
+
+			/* Remember the attnos of the removable columns */
+			surplusvars[relid] = bms_difference(relattnos, best_keycolumns);
+		}
+	}
+
+	/*
+	 * If we found any surplus Vars, build a new GROUP BY clause without them.
+	 * (Note: this may leave some TLEs with unreferenced ressortgroupref
+	 * markings, but that's harmless.)
+	 */
+	if (surplusvars != NULL)
+	{
+		List	   *new_groupby = NIL;
+
+		foreach(lc, root->processed_groupClause)
+		{
+			SortGroupClause *sgc = lfirst_node(SortGroupClause, lc);
+			TargetEntry *tle = get_sortgroupclause_tle(sgc, parse->targetList);
+			Var		   *var = (Var *) tle->expr;
+
+			/*
+			 * New list must include non-Vars, outer Vars, and anything not
+			 * marked as surplus.
+			 */
+			if (!IsA(var, Var) ||
+				var->varlevelsup > 0 ||
+				!bms_is_member(var->varattno - FirstLowInvalidHeapAttributeNumber,
+							   surplusvars[var->varno]))
+				new_groupby = lappend(new_groupby, sgc);
+		}
+
+		root->processed_groupClause = new_groupby;
+	}
+}
 
 /*****************************************************************************
  *

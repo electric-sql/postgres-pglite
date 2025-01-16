@@ -102,7 +102,7 @@
  *	support the decoding of the in-progress transactions.  See
  *	CommandEndInvalidationMessages.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -733,7 +733,7 @@ InvalidateSystemCachesExtended(bool debug_discard)
 	int			i;
 
 	InvalidateCatalogSnapshot();
-	ResetCatalogCaches();
+	ResetCatalogCachesExt(debug_discard);
 	RelationCacheInvalidate(debug_discard); /* gets smgr and relmap too */
 
 	for (i = 0; i < syscache_callback_count; i++)

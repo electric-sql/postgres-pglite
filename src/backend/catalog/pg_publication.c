@@ -3,7 +3,7 @@
  * pg_publication.c
  *		publication C API manipulation
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -1202,7 +1202,7 @@ pg_get_publication_tables(PG_FUNCTION_ARGS)
 						   PG_NODE_TREEOID, -1, 0);
 
 		funcctx->tuple_desc = BlessTupleDesc(tupdesc);
-		funcctx->user_fctx = (void *) table_infos;
+		funcctx->user_fctx = table_infos;
 
 		MemoryContextSwitchTo(oldcontext);
 	}

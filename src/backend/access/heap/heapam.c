@@ -3,7 +3,7 @@
  * heapam.c
  *	  heap access method code
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -378,6 +378,8 @@ initscan(HeapScanDesc scan, ScanKey key, bool keep_startblock)
 	ItemPointerSetInvalid(&scan->rs_ctup.t_self);
 	scan->rs_cbuf = InvalidBuffer;
 	scan->rs_cblock = InvalidBlockNumber;
+	scan->rs_ntuples = 0;
+	scan->rs_cindex = 0;
 
 	/*
 	 * Initialize to ForwardScanDirection because it is most common and
@@ -943,8 +945,8 @@ heapgettup_pagemode(HeapScanDesc scan,
 {
 	HeapTuple	tuple = &(scan->rs_ctup);
 	Page		page;
-	int			lineindex;
-	int			linesleft;
+	uint32		lineindex;
+	uint32		linesleft;
 
 	if (likely(scan->rs_inited))
 	{
@@ -989,6 +991,7 @@ continue_page:
 			ItemId		lpp;
 			OffsetNumber lineoff;
 
+			Assert(lineindex <= scan->rs_ntuples);
 			lineoff = scan->rs_vistuples[lineindex];
 			lpp = PageGetItemId(page, lineoff);
 			Assert(ItemIdIsNormal(lpp));
@@ -4197,8 +4200,6 @@ static bool
 heap_attr_equals(TupleDesc tupdesc, int attrnum, Datum value1, Datum value2,
 				 bool isnull1, bool isnull2)
 {
-	Form_pg_attribute att;
-
 	/*
 	 * If one value is NULL and other is not, then they are certainly not
 	 * equal
@@ -4228,8 +4229,10 @@ heap_attr_equals(TupleDesc tupdesc, int attrnum, Datum value1, Datum value2,
 	}
 	else
 	{
+		CompactAttribute *att;
+
 		Assert(attrnum <= tupdesc->natts);
-		att = TupleDescAttr(tupdesc, attrnum - 1);
+		att = TupleDescCompactAttr(tupdesc, attrnum - 1);
 		return datumIsEqual(value1, value2, att->attbyval, att->attlen);
 	}
 }
@@ -4311,7 +4314,7 @@ HeapDetermineColumnsInfo(Relation relation,
 		 * that system attributes can't be stored externally.
 		 */
 		if (attrnum < 0 || isnull1 ||
-			TupleDescAttr(tupdesc, attrnum - 1)->attlen != -1)
+			TupleDescCompactAttr(tupdesc, attrnum - 1)->attlen != -1)
 			continue;
 
 		/*
@@ -6384,7 +6387,7 @@ heap_inplace_update_and_unlock(Relation relation,
 	 *
 	 * ["D" is a VACUUM (ONLY_DATABASE_STATS)]
 	 * ["R" is a VACUUM tbl]
-	 * D: vac_update_datfrozenid() -> systable_beginscan(pg_class)
+	 * D: vac_update_datfrozenxid() -> systable_beginscan(pg_class)
 	 * D: systable_getnext() returns pg_class tuple of tbl
 	 * R: memcpy() into pg_class tuple of tbl
 	 * D: raise pg_database.datfrozenxid, XLogInsert(), finish

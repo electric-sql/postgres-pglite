@@ -24,7 +24,7 @@
  * See psqlscan_int.h for additional commentary.
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -52,12 +52,6 @@
  */
 typedef int YYSTYPE;
 
-/*
- * Set the type of yyextra; we use it as a pointer back to the containing
- * PsqlScanState.
- */
-#define YY_EXTRA_TYPE PsqlScanState
-
 
 /* Return values from yylex() */
 #define LEXRES_EOL			0	/* end of input */
@@ -66,15 +60,6 @@ typedef int YYSTYPE;
 
 
 #define ECHO psqlscan_emit(cur_state, yytext, yyleng)
-
-/*
- * Work around a bug in flex 2.5.35: it emits a couple of functions that
- * it forgets to emit declarations for.  Since we use -Wmissing-prototypes,
- * this would cause warnings.  Providing our own declarations should be
- * harmless even when the bug gets fixed.
- */
-extern int	psql_yyget_column(yyscan_t yyscanner);
-extern void psql_yyset_column(int column_no, yyscan_t yyscanner);
 
 %}
 
@@ -88,6 +73,12 @@ extern void psql_yyset_column(int column_no, yyscan_t yyscanner);
 %option noyywrap
 %option warn
 %option prefix="psql_yy"
+
+/*
+ * Set the type of yyextra; we use it as a pointer back to the containing
+ * PsqlScanState.
+ */
+%option extra-type="PsqlScanState"
 
 /*
  * All of the following definitions and rules should exactly match
@@ -1317,7 +1308,7 @@ bool
 psql_scan_in_quote(PsqlScanState state)
 {
 	return state->start_state != INITIAL &&
-			state->start_state != xqs;
+		state->start_state != xqs;
 }
 
 /*
@@ -1568,8 +1559,8 @@ psqlscan_escape_variable(PsqlScanState state, const char *txt, int len,
 void
 psqlscan_test_variable(PsqlScanState state, const char *txt, int len)
 {
-	char	*varname;
-	char	*value;
+	char	   *varname;
+	char	   *value;
 
 	varname = psqlscan_extract_substring(state, txt + 3, len - 4);
 	if (state->callbacks->get_variable)

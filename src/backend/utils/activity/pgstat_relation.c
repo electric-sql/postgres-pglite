@@ -8,7 +8,7 @@
  * storage implementation and the details about individual types of
  * statistics.
  *
- * Copyright (c) 2001-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2001-2025, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/utils/activity/pgstat_relation.c
@@ -264,6 +264,7 @@ pgstat_report_vacuum(Oid tableoid, bool shared,
 	 * VACUUM command has processed all tables and committed.
 	 */
 	pgstat_flush_io(false);
+	pgstat_flush_backend(false, PGSTAT_BACKEND_FLUSH_IO);
 }
 
 /*
@@ -350,6 +351,7 @@ pgstat_report_analyze(Relation rel,
 
 	/* see pgstat_report_vacuum() */
 	pgstat_flush_io(false);
+	pgstat_flush_backend(false, PGSTAT_BACKEND_FLUSH_IO);
 }
 
 /*

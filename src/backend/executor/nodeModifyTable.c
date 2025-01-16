@@ -3,7 +3,7 @@
  * nodeModifyTable.c
  *	  routines to handle ModifyTable nodes.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -496,14 +496,14 @@ ExecComputeStoredGenerated(ResultRelInfo *resultRelInfo,
 
 	for (int i = 0; i < natts; i++)
 	{
-		Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+		CompactAttribute *attr = TupleDescCompactAttr(tupdesc, i);
 
 		if (ri_GeneratedExprs[i])
 		{
 			Datum		val;
 			bool		isnull;
 
-			Assert(attr->attgenerated == ATTRIBUTE_GENERATED_STORED);
+			Assert(TupleDescAttr(tupdesc, i)->attgenerated == ATTRIBUTE_GENERATED_STORED);
 
 			econtext->ecxt_scantuple = slot;
 

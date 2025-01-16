@@ -4,7 +4,7 @@
  *	  prototypes for various files in optimizer/plan
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/optimizer/planmain.h
@@ -74,6 +74,7 @@ extern void add_vars_to_targetlist(PlannerInfo *root, List *vars,
 								   Relids where_needed);
 extern void add_vars_to_attr_needed(PlannerInfo *root, List *vars,
 									Relids where_needed);
+extern void remove_useless_groupby_columns(PlannerInfo *root);
 extern void find_lateral_references(PlannerInfo *root);
 extern void rebuild_lateral_attr_needed(PlannerInfo *root);
 extern void create_lateral_join_info(PlannerInfo *root);

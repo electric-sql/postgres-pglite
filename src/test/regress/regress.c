@@ -6,7 +6,7 @@
  *
  * This code is released under the terms of the PostgreSQL License.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/test/regress/regress.c
@@ -647,7 +647,9 @@ PG_FUNCTION_INFO_V1(get_environ);
 Datum
 get_environ(PG_FUNCTION_ARGS)
 {
+#if !defined(WIN32) || defined(_MSC_VER)
 	extern char **environ;
+#endif
 	int			nvals = 0;
 	ArrayType  *result;
 	Datum	   *env;

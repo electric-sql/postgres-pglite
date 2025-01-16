@@ -5,7 +5,7 @@
  *
  * See src/backend/access/transam/README for more information.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -2830,7 +2830,7 @@ AbortTransaction(void)
 	pgstat_report_wait_end();
 	pgstat_progress_end_command();
 
-	/* Clean up buffer context locks, too */
+	/* Clean up buffer content locks, too */
 	UnlockBuffers();
 
 	/* Reset WAL record construction state */
@@ -3660,16 +3660,6 @@ PreventInTransactionBlock(bool isTopLevel, const char *stmtType)
 						stmtType)));
 
 	/*
-	 * inside a pipeline that has started an implicit transaction?
-	 */
-	if (MyXactFlags & XACT_FLAGS_PIPELINING)
-		ereport(ERROR,
-				(errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
-		/* translator: %s represents an SQL statement name */
-				 errmsg("%s cannot be executed within a pipeline",
-						stmtType)));
-
-	/*
 	 * inside a function call?
 	 */
 	if (!isTopLevel)
@@ -3778,9 +3768,6 @@ IsInTransactionBlock(bool isTopLevel)
 		return true;
 
 	if (IsSubTransaction())
-		return true;
-
-	if (MyXactFlags & XACT_FLAGS_PIPELINING)
 		return true;
 
 	if (!isTopLevel)

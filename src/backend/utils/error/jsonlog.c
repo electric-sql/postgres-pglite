@@ -3,7 +3,7 @@
  * jsonlog.c
  *	  JSON logging
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -168,7 +168,7 @@ write_jsonlog(ErrorData *edata)
 	}
 
 	/* Session id */
-	appendJSONKeyValueFmt(&buf, "session_id", true, "%" INT64_MODIFIER "x.%x",
+	appendJSONKeyValueFmt(&buf, "session_id", true, INT64_HEX_FORMAT ".%x",
 						  MyStartTime, MyProcPid);
 
 	/* Line number */

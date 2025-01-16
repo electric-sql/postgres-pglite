@@ -5,7 +5,7 @@
  *
  * Code supporting the direct manipulation of statistics.
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -243,7 +243,7 @@ stats_fill_fcinfo_from_arg_pairs(FunctionCallInfo pairs_fcinfo,
 	/*
 	 * For each argument name/value pair, find corresponding positional
 	 * argument for the argument name, and assign the argument value to
-	 * postitional_fcinfo.
+	 * positional_fcinfo.
 	 */
 	for (int i = 0; i < nargs; i += 2)
 	{

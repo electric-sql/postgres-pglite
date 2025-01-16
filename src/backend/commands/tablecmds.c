@@ -3,7 +3,7 @@
  * tablecmds.c
  *	  Commands for creating and altering table structures and settings
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -373,7 +373,7 @@ static void RangeVarCallbackForTruncate(const RangeVar *relation,
 static List *MergeAttributes(List *columns, const List *supers, char relpersistence,
 							 bool is_partition, List **supconstr,
 							 List **supnotnulls);
-static List *MergeCheckConstraint(List *constraints, const char *name, Node *expr);
+static List *MergeCheckConstraint(List *constraints, const char *name, Node *expr, bool is_enforced);
 static void MergeChildAttribute(List *inh_columns, int exist_attno, int newcol_attno, const ColumnDef *newdef);
 static ColumnDef *MergeInheritedAttribute(List *inh_columns, int exist_attno, const ColumnDef *newdef);
 static void MergeAttributesIntoExisting(Relation child_rel, Relation parent_rel, bool ispartition);
@@ -433,7 +433,7 @@ static AlterTableCmd *ATParseTransformCmd(List **wqueue, AlteredTableInfo *tab,
 static void ATRewriteTables(AlterTableStmt *parsetree,
 							List **wqueue, LOCKMODE lockmode,
 							AlterTableUtilityContext *context);
-static void ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode);
+static void ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap);
 static AlteredTableInfo *ATGetQueueEntry(List **wqueue, Relation rel);
 static void ATSimplePermissions(AlterTableType cmdtype, Relation rel, int allowed_targets);
 static void ATSimpleRecursion(List **wqueue, Relation rel,
@@ -973,6 +973,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 			cooked->name = NULL;
 			cooked->attnum = attnum;
 			cooked->expr = colDef->cooked_default;
+			cooked->is_enforced = true;
 			cooked->skip_validation = false;
 			cooked->is_local = true;	/* not used for defaults */
 			cooked->inhcount = 0;	/* ditto */
@@ -980,6 +981,8 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 			cookedDefaults = lappend(cookedDefaults, cooked);
 			attr->atthasdef = true;
 		}
+
+		populate_compact_attribute(descriptor, attnum - 1);
 	}
 
 	/*
@@ -1005,9 +1008,9 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	}
 
 	/*
-	 * Create the relation.  Inherited defaults and constraints are passed in
-	 * for immediate handling --- since they don't need parsing, they can be
-	 * stored immediately.
+	 * Create the relation.  Inherited defaults and CHECK constraints are
+	 * passed in for immediate handling --- since they don't need parsing,
+	 * they can be stored immediately.
 	 */
 	relationId = heap_create_with_catalog(relname,
 										  namespaceId,
@@ -1396,6 +1399,8 @@ BuildDescForRelation(const List *columns)
 			att->attstorage = entry->storage;
 		else if (entry->storage_name)
 			att->attstorage = GetAttributeStorage(att->atttypid, entry->storage_name);
+
+		populate_compact_attribute(desc, attnum - 1);
 	}
 
 	return desc;
@@ -1581,7 +1586,7 @@ RemoveRelations(DropStmt *drop)
 
 		relOid = RangeVarGetRelidExtended(rel, lockmode, RVR_MISSING_OK,
 										  RangeVarCallbackForDropRelation,
-										  (void *) &state);
+										  &state);
 
 		/* Not there? */
 		if (!OidIsValid(relOid))
@@ -2433,10 +2438,11 @@ storage_name(char c)
  * 'is_partition' tells if the table is a partition.
  *
  * Output arguments:
- * 'supconstr' receives a list of constraints belonging to the parents,
- *		updated as necessary to be valid for the child.
- * 'supnotnulls' receives a list of CookedConstraints that corresponds to
- *		constraints coming from inheritance parents.
+ * 'supconstr' receives a list of CookedConstraint representing
+ *		CHECK constraints belonging to parent relations, updated as
+ *		necessary to be valid for the child.
+ * 'supnotnulls' receives a list of CookedConstraint representing
+ *		not-null constraints based on those from parent relations.
  *
  * Return value:
  * Completed schema list.
@@ -2885,7 +2891,8 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
 									   name,
 									   RelationGetRelationName(relation))));
 
-				constraints = MergeCheckConstraint(constraints, name, expr);
+				constraints = MergeCheckConstraint(constraints, name, expr,
+												   check[i].ccenforced);
 			}
 		}
 
@@ -3099,7 +3106,7 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
  * the list.
  */
 static List *
-MergeCheckConstraint(List *constraints, const char *name, Node *expr)
+MergeCheckConstraint(List *constraints, const char *name, Node *expr, bool is_enforced)
 {
 	ListCell   *lc;
 	CookedConstraint *newcon;
@@ -3122,6 +3129,17 @@ MergeCheckConstraint(List *constraints, const char *name, Node *expr)
 				ereport(ERROR,
 						errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 						errmsg("too many inheritance parents"));
+
+			/*
+			 * When enforceability differs, the merged constraint should be
+			 * marked as ENFORCED because one of the parents is ENFORCED.
+			 */
+			if (!ccon->is_enforced && is_enforced)
+			{
+				ccon->is_enforced = true;
+				ccon->skip_validation = false;
+			}
+
 			return constraints;
 		}
 
@@ -3140,6 +3158,8 @@ MergeCheckConstraint(List *constraints, const char *name, Node *expr)
 	newcon->name = pstrdup(name);
 	newcon->expr = expr;
 	newcon->inhcount = 1;
+	newcon->is_enforced = is_enforced;
+	newcon->skip_validation = !is_enforced;
 	return lappend(constraints, newcon);
 }
 
@@ -4142,7 +4162,7 @@ RenameRelation(RenameStmt *stmt)
 		relid = RangeVarGetRelidExtended(stmt->relation, lockmode,
 										 stmt->missing_ok ? RVR_MISSING_OK : 0,
 										 RangeVarCallbackForAlterRelation,
-										 (void *) stmt);
+										 stmt);
 
 		if (!OidIsValid(relid))
 		{
@@ -4390,7 +4410,7 @@ AlterTableLookupRelation(AlterTableStmt *stmt, LOCKMODE lockmode)
 	return RangeVarGetRelidExtended(stmt->relation, lockmode,
 									stmt->missing_ok ? RVR_MISSING_OK : 0,
 									RangeVarCallbackForAlterRelation,
-									(void *) stmt);
+									stmt);
 }
 
 /*
@@ -5896,7 +5916,7 @@ ATRewriteTables(AlterTableStmt *parsetree, List **wqueue, LOCKMODE lockmode,
 			 * modifications, and test the current data within the table
 			 * against new constraints generated by ALTER TABLE commands.
 			 */
-			ATRewriteTable(tab, OIDNewHeap, lockmode);
+			ATRewriteTable(tab, OIDNewHeap);
 
 			/*
 			 * Swap the physical files of the old and new heaps, then rebuild
@@ -5929,7 +5949,7 @@ ATRewriteTables(AlterTableStmt *parsetree, List **wqueue, LOCKMODE lockmode,
 			 */
 			if (tab->constraints != NIL || tab->verify_new_notnull ||
 				tab->partition_constraint != NULL)
-				ATRewriteTable(tab, InvalidOid, lockmode);
+				ATRewriteTable(tab, InvalidOid);
 
 			/*
 			 * If we had SET TABLESPACE but no reason to reconstruct tuples,
@@ -6028,10 +6048,11 @@ ATRewriteTables(AlterTableStmt *parsetree, List **wqueue, LOCKMODE lockmode,
 /*
  * ATRewriteTable: scan or rewrite one table
  *
- * OIDNewHeap is InvalidOid if we don't need to rewrite
+ * A rewrite is requested by passing a valid OIDNewHeap; in that case, caller
+ * must already hold AccessExclusiveLock on it.
  */
 static void
-ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
+ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap)
 {
 	Relation	oldrel;
 	Relation	newrel;
@@ -6056,7 +6077,11 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 	newTupDesc = RelationGetDescr(oldrel);	/* includes all mods */
 
 	if (OidIsValid(OIDNewHeap))
-		newrel = table_open(OIDNewHeap, lockmode);
+	{
+		Assert(CheckRelationOidLockedByMe(OIDNewHeap, AccessExclusiveLock,
+										  false));
+		newrel = table_open(OIDNewHeap, NoLock);
+	}
 	else
 		newrel = NULL;
 
@@ -9972,7 +9997,7 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 
 		if (with_period)
 		{
-			StrategyNumber rtstrategy;
+			CompareType cmptype;
 			bool		for_overlaps = with_period && i == numpks - 1;
 
 			/*
@@ -9982,14 +10007,14 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			if (amid != GIST_AM_OID)
 				elog(ERROR, "only GiST indexes are supported for temporal foreign keys");
 
-			rtstrategy = for_overlaps ? RTOverlapStrategyNumber : RTEqualStrategyNumber;
+			cmptype = for_overlaps ? COMPARE_OVERLAP : COMPARE_EQ;
 
 			/*
 			 * An opclass can use whatever strategy numbers it wants, so we
 			 * ask the opclass what number it actually uses instead of our RT*
 			 * constants.
 			 */
-			eqstrategy = GistTranslateStratnum(opclasses[i], rtstrategy);
+			eqstrategy = GistTranslateStratnum(opclasses[i], cmptype);
 			if (eqstrategy == InvalidStrategy)
 			{
 				HeapTuple	tuple;
@@ -10003,8 +10028,8 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 						for_overlaps
 						? errmsg("could not identify an overlaps operator for foreign key")
 						: errmsg("could not identify an equality operator for foreign key"),
-						errdetail("Could not translate strategy number %d for operator class \"%s\" for access method \"%s\".",
-								  rtstrategy, NameStr(((Form_pg_opclass) GETSTRUCT(tuple))->opcname), "gist"));
+						errdetail("Could not translate compare type %d for operator class \"%s\" for access method \"%s\".",
+								  cmptype, NameStr(((Form_pg_opclass) GETSTRUCT(tuple))->opcname), "gist"));
 			}
 		}
 		else
@@ -10418,6 +10443,7 @@ addFkConstraint(addFkConstraintSides fkside,
 									  CONSTRAINT_FOREIGN,
 									  fkconstraint->deferrable,
 									  fkconstraint->initdeferred,
+									  true, /* Is Enforced */
 									  fkconstraint->initially_valid,
 									  parentConstr,
 									  RelationGetRelid(rel),
@@ -12003,6 +12029,11 @@ ATExecValidateConstraint(List **wqueue, Relation rel, char *constrName,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 				 errmsg("constraint \"%s\" of relation \"%s\" is not a foreign key or check constraint",
 						constrName, RelationGetRelationName(rel))));
+
+	if (!con->conenforced)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("cannot validate NOT ENFORCED constraint")));
 
 	if (!con->convalidated)
 	{
@@ -16249,6 +16280,9 @@ decompile_conbin(HeapTuple contup, TupleDesc tupdesc)
  * The test we apply is to see whether they reverse-compile to the same
  * source string.  This insulates us from issues like whether attributes
  * have the same physical column numbers in parent and child relations.
+ *
+ * Note that we ignore enforceability as there are cases where constraints
+ * with differing enforceability are allowed.
  */
 static bool
 constraints_equivalent(HeapTuple a, HeapTuple b, TupleDesc tupleDesc)
@@ -16518,10 +16552,22 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 			 * If the child constraint is "not valid" then cannot merge with a
 			 * valid parent constraint
 			 */
-			if (parent_con->convalidated && !child_con->convalidated)
+			if (parent_con->convalidated && child_con->conenforced &&
+				!child_con->convalidated)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 						 errmsg("constraint \"%s\" conflicts with NOT VALID constraint on child table \"%s\"",
+								NameStr(child_con->conname), RelationGetRelationName(child_rel))));
+
+			/*
+			 * A non-enforced child constraint cannot be merged with an
+			 * enforced parent constraint. However, the reverse is allowed,
+			 * where the child constraint is enforced.
+			 */
+			if (parent_con->conenforced && !child_con->conenforced)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+						 errmsg("constraint \"%s\" conflicts with NOT ENFORCED constraint on child table \"%s\"",
 								NameStr(child_con->conname), RelationGetRelationName(child_rel))));
 
 			/*
@@ -17296,9 +17342,15 @@ ATExecReplicaIdentity(Relation rel, ReplicaIdentityStmt *stmt, LOCKMODE lockmode
 				 errmsg("\"%s\" is not an index for table \"%s\"",
 						RelationGetRelationName(indexRel),
 						RelationGetRelationName(rel))));
-	/* The AM must support uniqueness, and the index must in fact be unique. */
-	if (!indexRel->rd_indam->amcanunique ||
-		!indexRel->rd_index->indisunique)
+
+	/*
+	 * The AM must support uniqueness, and the index must in fact be unique.
+	 * If we have a WITHOUT OVERLAPS constraint (identified by uniqueness +
+	 * exclusion), we can use that too.
+	 */
+	if ((!indexRel->rd_indam->amcanunique ||
+		 !indexRel->rd_index->indisunique) &&
+		!(indexRel->rd_index->indisunique && indexRel->rd_index->indisexclusion))
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 				 errmsg("cannot use non-unique index \"%s\" as replica identity",
@@ -17713,7 +17765,7 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 	relid = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
 									 stmt->missing_ok ? RVR_MISSING_OK : 0,
 									 RangeVarCallbackForAlterRelation,
-									 (void *) stmt);
+									 stmt);
 
 	if (!OidIsValid(relid))
 	{
@@ -18868,6 +18920,12 @@ ConstraintImpliedByRelConstraint(Relation scanrel, List *testConstraint, List *p
 		 */
 		if (!constr->check[i].ccvalid)
 			continue;
+
+		/*
+		 * NOT ENFORCED constraints are always marked as invalid, which should
+		 * have been ignored.
+		 */
+		Assert(constr->check[i].ccenforced);
 
 		cexpr = stringToNode(constr->check[i].ccbin);
 
@@ -20179,6 +20237,7 @@ DetachAddConstraintIfNeeded(List **wqueue, Relation partRel)
 		n->is_no_inherit = false;
 		n->raw_expr = NULL;
 		n->cooked_expr = nodeToString(make_ands_explicit(constraintExpr));
+		n->is_enforced = true;
 		n->initially_valid = true;
 		n->skip_validation = true;
 		/* It's a re-add, since it nominally already exists */
@@ -20344,7 +20403,7 @@ ATExecAttachPartitionIdx(List **wqueue, Relation parentIdx, RangeVar *name)
 	partIdxId =
 		RangeVarGetRelidExtended(name, AccessExclusiveLock, 0,
 								 RangeVarCallbackForAttachIndex,
-								 (void *) &state);
+								 &state);
 	/* Not there? */
 	if (!OidIsValid(partIdxId))
 		ereport(ERROR,

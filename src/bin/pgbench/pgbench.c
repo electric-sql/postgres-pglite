@@ -5,7 +5,7 @@
  * Originally written by Tatsuo Ishii and enhanced by many contributors.
  *
  * src/bin/pgbench/pgbench.c
- * Copyright (c) 2000-2024, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2025, PostgreSQL Global Development Group
  * ALL RIGHTS RESERVED;
  *
  * Permission to use, copy, modify, and distribute this software and its
@@ -3880,8 +3880,14 @@ advanceConnectionState(TState *thread, CState *st, StatsData *agg)
 						switch (conditional_stack_peek(st->cstack))
 						{
 							case IFSTATE_FALSE:
-								if (command->meta == META_IF ||
-									command->meta == META_ELIF)
+								if (command->meta == META_IF)
+								{
+									/* nested if in skipped branch - ignore */
+									conditional_stack_push(st->cstack,
+														   IFSTATE_IGNORED);
+									st->command++;
+								}
+								else if (command->meta == META_ELIF)
 								{
 									/* we must evaluate the condition */
 									st->state = CSTATE_START_COMMAND;
@@ -3900,11 +3906,7 @@ advanceConnectionState(TState *thread, CState *st, StatsData *agg)
 									conditional_stack_pop(st->cstack);
 									if (conditional_active(st->cstack))
 										st->state = CSTATE_START_COMMAND;
-
-									/*
-									 * else state remains in
-									 * CSTATE_SKIP_COMMAND
-									 */
+									/* else state remains CSTATE_SKIP_COMMAND */
 									st->command++;
 								}
 								break;
@@ -4944,6 +4946,7 @@ initPopulateTable(PGconn *con, const char *table, int64 base,
 	int			n;
 	int64		k;
 	int			chars = 0;
+	int			prev_chars = 0;
 	PGresult   *res;
 	PQExpBufferData sql;
 	char		copy_statement[256];
@@ -5004,10 +5007,10 @@ initPopulateTable(PGconn *con, const char *table, int64 base,
 			double		elapsed_sec = PG_TIME_GET_DOUBLE(pg_time_now() - start);
 			double		remaining_sec = ((double) total - j) * elapsed_sec / j;
 
-			chars = fprintf(stderr, INT64_FORMAT " of " INT64_FORMAT " tuples (%d%%) of %s done (elapsed %.2f s, remaining %.2f s)%c",
+			chars = fprintf(stderr, INT64_FORMAT " of " INT64_FORMAT " tuples (%d%%) of %s done (elapsed %.2f s, remaining %.2f s)",
 							j, total,
 							(int) ((j * 100) / total),
-							table, elapsed_sec, remaining_sec, eol);
+							table, elapsed_sec, remaining_sec);
 		}
 		/* let's not call the timing for each row, but only each 100 rows */
 		else if (use_quiet && (j % 100 == 0))
@@ -5018,19 +5021,29 @@ initPopulateTable(PGconn *con, const char *table, int64 base,
 			/* have we reached the next interval (or end)? */
 			if ((j == total) || (elapsed_sec >= log_interval * LOG_STEP_SECONDS))
 			{
-				chars = fprintf(stderr, INT64_FORMAT " of " INT64_FORMAT " tuples (%d%%) of %s done (elapsed %.2f s, remaining %.2f s)%c",
+				chars = fprintf(stderr, INT64_FORMAT " of " INT64_FORMAT " tuples (%d%%) of %s done (elapsed %.2f s, remaining %.2f s)",
 								j, total,
 								(int) ((j * 100) / total),
-								table, elapsed_sec, remaining_sec, eol);
+								table, elapsed_sec, remaining_sec);
 
 				/* skip to the next interval */
 				log_interval = (int) ceil(elapsed_sec / LOG_STEP_SECONDS);
 			}
 		}
+
+		/*
+		 * If the previous progress message is longer than the current one,
+		 * add spaces to the current line to fully overwrite any remaining
+		 * characters from the previous message.
+		 */
+		if (prev_chars > chars)
+			fprintf(stderr, "%*c", prev_chars - chars, ' ');
+		fputc(eol, stderr);
+		prev_chars = chars;
 	}
 
 	if (chars != 0 && eol != '\n')
-		fprintf(stderr, "%*c\r", chars - 1, ' ');	/* Clear the current line */
+		fprintf(stderr, "%*c\r", chars, ' ');	/* Clear the current line */
 
 	if (PQputline(con, "\\.\n"))
 		pg_fatal("very last PQputline failed");
@@ -6557,13 +6570,13 @@ printResults(StatsData *total,
 					SimpleStats *cstats = &(*commands)->stats;
 
 					if (max_tries == 1)
-						printf("   %11.3f  %10" INT64_MODIFIER "d  %s\n",
+						printf("   %11.3f  %10" PRId64 " %s\n",
 							   (cstats->count > 0) ?
 							   1000.0 * cstats->sum / cstats->count : 0.0,
 							   (*commands)->failures,
 							   (*commands)->first_line);
 					else
-						printf("   %11.3f  %10" INT64_MODIFIER "d  %10" INT64_MODIFIER "d  %s\n",
+						printf("   %11.3f  %10" PRId64 " %10" PRId64 " %s\n",
 							   (cstats->count > 0) ?
 							   1000.0 * cstats->sum / cstats->count : 0.0,
 							   (*commands)->failures,

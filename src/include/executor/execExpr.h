@@ -4,7 +4,7 @@
  *	  Low level infrastructure related to expression evaluation
  *
  *
- * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/executor/execExpr.h
@@ -365,6 +365,7 @@ typedef struct ExprEvalStep
 			/* faster to access without additional indirection: */
 			PGFunction	fn_addr;	/* actual call address */
 			int			nargs;	/* number of arguments */
+			bool		make_ro;	/* make arg0 R/O (used only for NULLIF) */
 		}			func;
 
 		/* for EEOP_BOOL_*_STEP */
@@ -493,7 +494,7 @@ typedef struct ExprEvalStep
 		/* for EEOP_ROWCOMPARE_FINAL */
 		struct
 		{
-			RowCompareType rctype;
+			CompareType cmptype;
 		}			rowcompare_final;
 
 		/* for EEOP_MINMAX */
