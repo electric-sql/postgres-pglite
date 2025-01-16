@@ -28,12 +28,13 @@ export WASI=${WASI:-false}
 # exit on error
 EOE=false
 
+output=$(./cibuild/sdk.sh)
+echo "sdk.sh output: $output"
 
-if ./cibuild/sdk.sh
-then
+if [ "$output" ]; then
     echo "sdk check passed (emscripten)"
 else
-    echo sdk failed
+    echo "sdk failed"
     exit 44
 fi
 
