@@ -1,0 +1,45 @@
+name: Build WASM PGlite files
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    name: Build WASM Postgres
+    runs-on: ubuntu-22.04
+    container:
+      image: electricsql/pglite-builder:16.4_3.1.74.2bi    
+    env:
+      BUILD_CONFIG_FILE: pglite/.buildconfig
+      SDK_ARCHIVE: python3.13-wasm-sdk-Ubuntu-22.04.tar.lz4
+      WASI_SDK_ARCHIVE: python3.13-wasi-sdk-Ubuntu-22.04.tar.lz4
+      SDKROOT: /opt/python-wasm-sdk
+      SYS_PYTHON: /usr/bin/python3
+      PGROOT: /tmp/pglite
+      TOTAL_MEMORY: 128MB
+      CMA_MB: 16
+      DEBUG: false
+      OBJDUMP: true
+      contrib: contrib
+      extra: extra
+      EXTRA_EXT: vector
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: true
+
+      - name: Set build parameters
+        run: |
+          cat ${{ env.BUILD_CONFIG_FILE }} >> $GITHUB_ENV
+
+      - name: Build postgres-pglite
+        run: |
+          ./pglite/cibuild/build-without-docker.sh
+   
