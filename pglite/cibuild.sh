@@ -28,15 +28,15 @@ export WASI=${WASI:-false}
 # exit on error
 EOE=false
 
-output=$(./cibuild/sdk.sh)
-echo "sdk.sh output: $output"
+# output=$(./cibuild/sdk.sh)
+# echo "sdk.sh output: $output"
 
-if [ "$output" ]; then
-    echo "sdk check passed (emscripten)"
-else
-    echo "sdk failed"
-    exit 44
-fi
+# if [ "$output" ]; then
+#     echo "sdk check passed (emscripten)"
+# else
+#     echo "sdk failed"
+#     exit 44
+# fi
 
 
 # the default is a user writeable path.
