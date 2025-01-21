@@ -2,7 +2,7 @@ name: Trigger BuildKite build of Docker image for building PGlite
 
 on:
   push:
-    branches: ['main']
+    branches: ['pglite/REL_16_STABLE']
     paths:
       - pglite/.buildconfig
   pull_request:
