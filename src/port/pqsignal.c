@@ -60,3 +60,8 @@ pqsignal(int signo, pqsigfunc func)
 	return signal(signo, func);
 #endif
 }
+
+/* sneak stubs into libpgport */
+#if defined(__wasi__)
+#   include "../../../patches/wasi_port.c"
+#endif

@@ -4076,7 +4076,11 @@ process_postgres_switches(int argc, char *argv[], GucContext ctx,
 #endif
 }
 
-
+#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#define PG_MAIN
+#include PG_MAIN_INCLUDE
+#undef PG_MAIN
+#else
 /*
  * PostgresSingleUserMain
  *     Entry point for single user mode. argc/argv are the command line
@@ -4972,7 +4976,7 @@ PostgresMain(const char *dbname, const char *username)
 		}
 	}							/* end of input-reading loop */
 }
-
+#endif /* wasm */
 /*
  * Throw an error if we're a WAL sender process.
  *
@@ -5091,7 +5095,7 @@ ShowUsage(const char *title)
 					 (long) user.tv_usec,
 					 (long) sys.tv_sec,
 					 (long) sys.tv_usec);
-#ifndef WIN32
+#if !defined(WIN32) && !defined(__wasi__)
 
 	/*
 	 * The following rusage fields are not defined by POSIX, but they're
