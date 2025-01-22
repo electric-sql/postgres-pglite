@@ -15,14 +15,9 @@ fi
 IMG_NAME="electricsql/emsdk"
 IMG_TAG="${PG_VERSION}_${SDK_VERSION}"
 
-SDK_ARCHIVE="${SDK_ARCHIVE:-python3.13-wasm-sdk-Ubuntu-22.04.tar.lz4}"
-WASI_SDK_ARCHIVE="${WASI_SDK_ARCHIVE:-python3.13-wasi-sdk-Ubuntu-22.04.tar.lz4}"
-
 docker run \
   --rm \
   -e OBJDUMP=${OBJDUMP:-true} \
-  -e SDK_ARCHIVE \
-  -e WASI_SDK_ARCHIVE \
   -e PGSRC=/workspace/postgres-src \
   -e POSTGRES_PGLITE_OUT=/workspace/dist \
   -v ./pglite/cibuild.sh:/workspace/cibuild.sh:rw \
