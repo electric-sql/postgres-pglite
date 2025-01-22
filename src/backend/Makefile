@@ -76,13 +76,17 @@ endif
 endif
 
 ifeq ($(PORTNAME), emscripten)
-PGLITE += $(top_builddir)/libpglite.a
-PGLITE += $(top_builddir)/src/common/libpgcommon_srv.a
-PGLITE += $(top_builddir)/src/port/libpgport_srv.a
+AR ?= llvm-ar
+LIBPGLITE ?= $(top_builddir)/libpglite.a
+LIBPG = $(top_builddir)/libpostgres.a
+PGLITE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
 PGMAIN = main/main.o tcop/postgres.o
 postgres: $(OBJS)
-	$(AR) cr ../../libpglite.a $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
-	COPTS="-Oz -g0 --closure 1" $(CC) $(MAIN_MODULE) $(CFLAGS) $(LDFLAGS) -o $@ $(PGMAIN) $(PGLITE) $(LIBS)
+	$(AR) rcs $(top_builddir)/libpgmain.a $(PGMAIN)
+	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
+	$(CC) -r -o $(top_builddir)/libpglite.o -Wl,--whole-archive  $(PGLITE)
+	$(AR) rcs $(LIBPGLITE) $(top_builddir)/libpglite.o
+	COPTS="$(LOPTS)" $(CC) $(MAIN_MODULE) $(CFLAGS) $(LDFLAGS) -o $@ $(LIBPGLITE) $(top_builddir)/libpgmain.a $(LIBS)
 endif
 
 ifeq ($(PORTNAME), cygwin)
