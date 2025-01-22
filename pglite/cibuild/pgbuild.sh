@@ -100,7 +100,7 @@ CC_PGLITE=$CC_PGLITE
             cat > bin/zic <<END
 #!/bin/bash
 #. /opt/python-wasm-sdk/wasm32-wasi-shell.sh
-TZ=UTC PGTZ=UTC $(command -v wasi-run) $(pwd)/src/timezone/zic.wasi \$@
+TZ=UTC PGTZ=UTC $(which wasi-run) $(pwd)/src/timezone/zic.wasi \$@
 END
         fi
 
@@ -113,7 +113,7 @@ END
             cat > bin/zic <<END
 #!/bin/bash
 #. /opt/python-wasm-sdk/wasm32-bi-emscripten-shell.sh
-TZ=UTC PGTZ=UTC $(command -v node) $(pwd)/src/timezone/zic.cjs \$@
+TZ=UTC PGTZ=UTC $(which node) $(pwd)/src/timezone/zic.cjs \$@
 END
         fi
     fi
