@@ -93,9 +93,8 @@ CC_PGLITE=$CC_PGLITE
     if $WASI
     then
         export EXT=wasi
-        cat > ${PGROOT}/config.site <<END
-ac_cv_exeext=.wasi
-END
+        ACCVEXEEXT==.wasi
+
         if $GETZIC
         then
             cat > bin/zic <<END
@@ -107,9 +106,7 @@ END
 
     else
         export EXT=wasm
-        cat > ${PGROOT}/config.site <<END
-ac_cv_exeext=.cjs
-END
+        ACCVEXEEXT=.cjs
 
         if $GETZIC
         then
@@ -121,7 +118,7 @@ END
         fi
     fi
 
-    if EM_PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig CONFIG_SITE=${PGROOT}/config.site emconfigure $CNF --with-template=$BUILD
+    if EM_PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig ac_cv_exeext=$ACCVEXEEXT emconfigure $CNF --with-template=$BUILD
     then
         echo configure ok
     else
