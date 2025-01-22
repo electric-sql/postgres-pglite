@@ -4,11 +4,9 @@ _errstart_cold
 _errmsg_internal
 _errfinish
 _puts
-_memset
 _AllocSetContextCreateInternal
 _GenericXLogStart
 _GenericXLogRegisterBuffer
-_memcpy
 _GenericXLogFinish
 _UnlockReleaseBuffer
 _MemoryContextDelete
@@ -22,7 +20,6 @@ _GenericXLogAbort
 _BufferGetBlockNumber
 _RelationGetIndexScan
 _pfree
-_memmove
 _palloc0
 _GetAccessStrategy
 _ReadBufferExtended

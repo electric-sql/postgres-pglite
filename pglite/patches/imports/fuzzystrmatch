@@ -4,7 +4,6 @@ _text_to_cstring
 _pg_server_to_any
 _initArrayResult
 _palloc
-_memcpy
 _cstring_to_text_with_len
 _accumArrayResult
 _makeArrayResult
@@ -14,7 +13,6 @@ _pg_utf_mblen
 _cstring_to_text
 _strlen
 _repalloc
-_memset
 _toupper
 _strchr
 _strstr

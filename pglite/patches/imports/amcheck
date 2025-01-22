@@ -7,7 +7,6 @@ _pg_detoast_datum_packed
 _text_to_cstring
 _pg_strcasecmp
 _errhint
-_memset
 _GetTransactionSnapshot
 _InitMaterializedSRF
 _relation_open
@@ -85,7 +84,6 @@ _ItemPointerCompare
 __bt_form_posting
 _bloom_add_element
 _MemoryContextAlloc
-_memcpy
 _MemoryContextReset
 _BuildIndexInfo
 _bloom_prop_bits_set

@@ -6,7 +6,6 @@ _errfinish
 _errstart_cold
 _puts
 _palloc
-_memcpy
 _DirectFunctionCall2Coll
 _pg_detoast_datum_packed
 _deconstruct_array_builtin
@@ -14,7 +13,6 @@ _errcode
 _errmsg
 _has_fn_opclass_options
 _get_fn_opclass_options
-_memset
 _pg_qsort
 _init_local_reloptions
 _add_local_int_reloption
@@ -59,7 +57,6 @@ _IsValidJsonNumber
 _pushJsonbValue
 _JsonbValueToJsonb
 _DirectFunctionCall3Coll
-_memmove
 _construct_empty_array
 _construct_array_builtin
 _construct_md_array

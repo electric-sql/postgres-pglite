@@ -12,9 +12,7 @@ _get_fn_opclass_options
 _pg_detoast_datum
 _memcmp
 _MemoryContextAlloc
-_memcpy
 _Float8GetDatum
-_memset
 _pg_popcount
 _pg_qsort
 _init_local_reloptions

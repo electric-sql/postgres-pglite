@@ -2,7 +2,6 @@ _DefineCustomIntVariable
 _DefineCustomBoolVariable
 _MarkGUCPrefixReserved
 _RequestAddinShmemSpace
-_memset
 _RegisterBackgroundWorker
 _RegisterDynamicBackgroundWorker
 _errstart_cold

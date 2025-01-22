@@ -254,7 +254,7 @@ END
 	mv -vf ./src/bin/pg_resetwal/pg_resetwal.$EXT  ./src/bin/initdb/initdb.$EXT ./src/backend/postgres.$EXT ${PGROOT}/bin/
 
 
-    python3 > ${PGROOT}/PGPASSFILE <<END
+    cat > ${PGROOT}/PGPASSFILE <<END
 USER="${PGPASS:-postgres}"
 PASS="${PGUSER:-postgres}"
 md5pass =  "md5" + __import__('hashlib').md5(USER.encode() + PASS.encode()).hexdigest()
