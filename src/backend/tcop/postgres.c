@@ -105,6 +105,11 @@ int			client_connection_check_interval = 0;
 /* flags for non-system relation kinds to restrict use */
 int			restrict_nonsystem_relation_kind;
 
+#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+int cma_rsize = 0;
+bool quote_all_identifiers = false;
+#endif
+
 /* ----------------
  *		private typedefs etc
  * ----------------
@@ -4076,11 +4081,7 @@ process_postgres_switches(int argc, char *argv[], GucContext ctx,
 #endif
 }
 
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
-#define PG_MAIN
-#include PG_MAIN_INCLUDE
-#undef PG_MAIN
-#else
+
 /*
  * PostgresSingleUserMain
  *     Entry point for single user mode. argc/argv are the command line
@@ -4976,7 +4977,7 @@ PostgresMain(const char *dbname, const char *username)
 		}
 	}							/* end of input-reading loop */
 }
-#endif /* wasm */
+
 /*
  * Throw an error if we're a WAL sender process.
  *
@@ -5095,7 +5096,7 @@ ShowUsage(const char *title)
 					 (long) user.tv_usec,
 					 (long) sys.tv_sec,
 					 (long) sys.tv_usec);
-#if !defined(WIN32) && !defined(__wasi__)
+#ifndef WIN32
 
 	/*
 	 * The following rusage fields are not defined by POSIX, but they're
