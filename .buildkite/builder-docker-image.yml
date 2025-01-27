@@ -11,7 +11,7 @@ steps:
     if: build.env("TRIGGERED_FROM_GHA") == 'true'
     command:
       - |
-        source ./.buildconfig
+        source ./pglite/.buildconfig
         export PG_VERSION=$$PG_VERSION
         export SDK_VERSION=$$SDK_VERSION
         export IMGNAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
