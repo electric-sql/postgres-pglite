@@ -85,6 +85,8 @@ echo "[\$(pwd)] $0 \$@" >> /tmp/disable-shared.log
 END
     ln -sf $PGROOT/bin/emsdk-shared bin/emsdk-shared
 
+    chmod +x bin/zic $PGROOT/bin/emsdk-shared
+
     # for zic and emsdk-shared/wasi-shared called from makefile
     export PATH=$(pwd)/bin:$PATH
 
