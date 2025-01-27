@@ -16,9 +16,6 @@ CC_PGLITE=$CC_PGLITE
     # with root package.json of project
     echo "{}" > package.json
 
-    XML2="--with-zlib --with-libxml --with-libxslt"
-    UUID="--with-uuid=ossp"
-    BUILD=emscripten
     export MAIN_MODULE="-sMAIN_MODULE=1"
     export XML2_CONFIG=$PREFIX/bin/xml2-config
     export ZIC=$(pwd)/bin/zic
@@ -26,11 +23,13 @@ CC_PGLITE=$CC_PGLITE
     cp ${PGSRC}/./src/include/port/wasm_common.h /tmp/pglite/include/wasm_common.h
 
     CNF="${PGSRC}/configure FLEX=`which flex` --prefix=${PGROOT} \
- --cache-file=${PGROOT}/config.cache.${BUILD} \
+ --cache-file=${PGROOT}/config.cache.emscripten \
  --disable-spinlocks --disable-largefile --without-llvm \
  --without-pam --disable-largefile --with-openssl=no \
  --without-readline --without-icu \
- ${UUID} ${XML2} ${PGDEBUG}"
+ --with-uuid=ossp \
+ --with-zlib --with-libxml --with-libxslt \
+  ${PGDEBUG}"
 
     echo "  ==== building wasm MVP:$MVP Debug=${PGDEBUG} with opts : $@  == "
 
@@ -42,6 +41,7 @@ CC_PGLITE=$CC_PGLITE
         echo "using system zic"
         GETZIC=false
     else
+        echo "getting zic"
         GETZIC=true
     fi
 
@@ -57,7 +57,7 @@ TZ=UTC PGTZ=UTC $(which node) $(pwd)/src/timezone/zic.cjs \$@
 END
     fi
 
-    if EM_PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig ac_cv_exeext=$ACCVEXEEXT emconfigure $CNF --with-template=$BUILD
+    if EM_PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig ac_cv_exeext=$ACCVEXEEXT emconfigure $CNF --with-template=emscripten
     then
         echo configure ok
     else
@@ -100,7 +100,7 @@ END
 
     ZIC=${ZIC:-$(realpath bin/zic)}
 
-	if EMCC_CFLAGS="${EMCC_ENV} ${EMCC_CFLAGS}" WASI_CFLAGS="$WASI_CFLAGS" emmake make $BUILD=1 -j $(nproc) 2>&1 > /tmp/build.log
+	if EMCC_CFLAGS="${EMCC_ENV} ${EMCC_CFLAGS}" WASI_CFLAGS="$WASI_CFLAGS" emmake make emscripten=1 -j $(nproc) 2>&1 > /tmp/build.log
 	then
         echo build ok
         cp -vf src/backend/postgres src/backend/postgres.cjs
@@ -108,7 +108,7 @@ END
         # if running a 32bits zic from current build
         unset LD_PRELOAD
 
-        if EMCC_CFLAGS="${EMCC_ENV} ${EMCC_CFLAGS}" WASI_CFLAGS="$WASI_CFLAGS" emmake make $BUILD=1 install 2>&1 > /tmp/install.log
+        if EMCC_CFLAGS="${EMCC_ENV} ${EMCC_CFLAGS}" WASI_CFLAGS="$WASI_CFLAGS" emmake make emscripten=1 install 2>&1 > /tmp/install.log
         then
             echo install ok
             pushd ${PGROOT}
