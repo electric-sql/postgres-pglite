@@ -46,34 +46,23 @@ CC_PGLITE=$CC_PGLITE
     fi
 
     export EXT=wasm
-    ACCVEXEEXT=.cjs
 
     if $GETZIC
     then
         cat > bin/zic <<END
 #!/bin/bash
 #. /opt/python-wasm-sdk/wasm32-bi-emscripten-shell.sh
-TZ=UTC PGTZ=UTC $(which node) $(pwd)/src/timezone/zic.cjs \$@
+TZ=UTC PGTZ=UTC node $(pwd)/src/timezone/zic.cjs \$@
 END
     fi
 
-    if EM_PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig ac_cv_exeext=$ACCVEXEEXT emconfigure $CNF --with-template=emscripten
+    if EM_PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig ac_cv_exeext=.cjs emconfigure $CNF --with-template=emscripten
     then
         echo configure ok
     else
         echo configure failed
         exit 76
     fi
-
-    if grep -q MAIN_MODULE ${PGSRC}/src/backend/Makefile
-    then
-        echo "dyld server patch ok"
-    else
-        echo "missing server dyld patch"
-        exit 273
-    fi
-
-    > /tmp/disable-shared.log
 
     mkdir -p /tmp/pglite/bin
 
@@ -169,13 +158,13 @@ END
 
     cat > /tmp/pglite/bin/pg_config <<END
 #!/bin/bash
-$(which node) /tmp/pglite/bin/pg_config.cjs \$@
+node /tmp/pglite/bin/pg_config.cjs \$@
 END
 
     cat  > /tmp/pglite/postgres <<END
 #!/bin/bash
 . /opt/python-wasm-sdk/wasm32-bi-emscripten-shell.sh
-TZ=UTC PGTZ=UTC PGDATA=${PGDATA} $(which node) /tmp/pglite/bin/postgres.cjs \$@
+TZ=UTC PGTZ=UTC PGDATA=${PGDATA} node /tmp/pglite/bin/postgres.cjs \$@
 END
 
     # force node wasm version
@@ -184,7 +173,7 @@ END
 	cat  > /tmp/pglite/initdb <<END
 #!/bin/bash
 . /opt/python-wasm-sdk/wasm32-bi-emscripten-shell.sh
-TZ=UTC PGTZ=UTC $(which node) /tmp/pglite/bin/initdb.cjs \$@
+TZ=UTC PGTZ=UTC node /tmp/pglite/bin/initdb.cjs \$@
 END
 
     chmod +x /tmp/pglite/postgres /tmp/pglite/bin/postgres
