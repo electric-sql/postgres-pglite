@@ -85,39 +85,16 @@ echo "[\$(pwd)] $0 \$@" >> /tmp/disable-shared.log
 END
     ln -sf $PGROOT/bin/emsdk-shared bin/emsdk-shared
 
-
-    cat > $PGROOT/bin/wasi-shared <<END
-#!/bin/bash
-echo "[\$(pwd)] $0 \$@" >> /tmp/disable-shared.log
-# shared build
-echo ===================================================================================
-wasi-c -L${PREFIX}/lib -DPREFIX=${PGROOT} -shared \$@ -Wno-unused-function
-echo ===================================================================================
-END
-    ln -sf $PGROOT/bin/wasi-shared bin/wasi-shared
-
-    chmod +x bin/zic $PGROOT/bin/wasi-shared $PGROOT/bin/emsdk-shared
-
     # for zic and emsdk-shared/wasi-shared called from makefile
     export PATH=$(pwd)/bin:$PATH
 
     EMCC_NODE="-sEXIT_RUNTIME=1 -DEXIT_RUNTIME -sNODERAWFS -sENVIRONMENT=node"
-
-    # -lwebsocket.js"
-    # -sWEBSOCKET_SUBPROTOCOL=binary -sWEBSOCKET_URL=ws://127.0.0.1:25432"
-
-    # -lwebsocket.js
-    # -sPROXY_POSIX_SOCKETS -pthread -sPROXY_TO_PTHREAD $EMCC_CFLAGS"
-
-    #  -sWASMFS
 
     EMCC_ENV="${EMCC_NODE} -sFORCE_FILESYSTEM=0"
     EMCC_ENV="${EMCC_NODE} -sERROR_ON_UNDEFINED_SYMBOLS"
 
     # PREFIX only required for static initdb
     EMCC_CFLAGS="-sERROR_ON_UNDEFINED_SYMBOLS=1 ${CC_PGLITE} -DPREFIX=${PGROOT} -Wno-macro-redefined -Wno-unused-function"
-
-    # WASI_CFLAGS="${CC_PGLITE} -DPREFIX=${PGROOT} -DPYDK=1 -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types"
 
     ZIC=${ZIC:-$(realpath bin/zic)}
 
@@ -198,9 +175,6 @@ END
 . /opt/python-wasm-sdk/wasm32-bi-emscripten-shell.sh
 TZ=UTC PGTZ=UTC PGDATA=${PGDATA} $(which node) ${PGROOT}/bin/postgres.cjs \$@
 END
-
-# remove the abort but stall prompt
-#  2>&1 | grep --line-buffered -v ^var\\ Module
 
     # force node wasm version
     cp -vf ${PGROOT}/postgres ${PGROOT}/bin/postgres
