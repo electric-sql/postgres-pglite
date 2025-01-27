@@ -1,0 +1,3 @@
+#!/bin/bash
+. /opt/python-wasm-sdk/wasm32-bi-emscripten-shell.sh
+TZ=UTC PGTZ=UTC PGDATA=${PGDATA} node /tmp/pglite/bin/postgres.cjs $@

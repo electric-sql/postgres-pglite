@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "[$(pwd)] $0 $@" >> /tmp/disable-shared.log
+# shared build
+${PG_LINK:-emcc} -L${PREFIX}/lib -DPREFIX=/tmp/pglite -shared -sSIDE_MODULE=1 $@ -Wno-unused-function
