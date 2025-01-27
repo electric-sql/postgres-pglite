@@ -37,9 +37,11 @@ LOCALOBJS += utils/probes.o
 endif
 endif
 
-OBJS = \
+ONLYOBJS = \
 	$(LOCALOBJS) \
-	$(SUBDIROBJS) \
+	$(SUBDIROBJS)
+OBJS = \
+	$(ONLYOBJS) \
 	$(top_builddir)/src/common/libpgcommon_srv.a \
 	$(top_builddir)/src/port/libpgport_srv.a
 
@@ -60,15 +62,31 @@ override LDFLAGS := $(LDFLAGS) $(LDFLAGS_EX) $(LDFLAGS_EX_BE)
 
 all: submake-libpgport submake-catalog-headers submake-utils-headers postgres $(POSTGRES_IMP)
 
+ifneq ($(PORTNAME), emscripten)
 ifneq ($(PORTNAME), cygwin)
 ifneq ($(PORTNAME), win32)
 ifneq ($(PORTNAME), aix)
 
 postgres: $(OBJS)
-	$(CC) $(MAIN_MODULE) $(CFLAGS) $(call expand_subsys,$^) $(LDFLAGS) $(LIBS) -o $@
+	$(CC) $(CFLAGS) $(call expand_subsys,$^) $(LDFLAGS) $(LIBS) -o $@
 
 endif
 endif
+endif
+endif
+
+ifeq ($(PORTNAME), emscripten)
+AR ?= llvm-ar
+LIBPGLITE ?= $(top_builddir)/libpglite.a
+LIBPG = $(top_builddir)/libpostgres.a
+PGLITE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
+PGMAIN = main/main.o tcop/postgres.o
+postgres: $(OBJS)
+	$(AR) rcs $(top_builddir)/libpgmain.a $(PGMAIN)
+	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
+	$(CC) -r -o $(top_builddir)/libpglite.o -Wl,--whole-archive  $(PGLITE)
+	$(AR) rcs $(LIBPGLITE) $(top_builddir)/libpglite.o
+	COPTS="$(LOPTS)" $(CC) $(MAIN_MODULE) $(CFLAGS) $(LDFLAGS) -o $@ $(LIBPGLITE) $(top_builddir)/libpgmain.a $(LIBS)
 endif
 
 ifeq ($(PORTNAME), cygwin)
