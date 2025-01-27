@@ -22,8 +22,8 @@ CC_PGLITE=$CC_PGLITE
 
     cp ${PGSRC}/./src/include/port/wasm_common.h /tmp/pglite/include/wasm_common.h
 
-    CNF="${PGSRC}/configure FLEX=`which flex` --prefix=${PGROOT} \
- --cache-file=${PGROOT}/config.cache.emscripten \
+    CNF="${PGSRC}/configure FLEX=`which flex` --prefix=/tmp/pglite \
+ --cache-file=/tmp/pglite/config.cache.emscripten \
  --disable-spinlocks --disable-largefile --without-llvm \
  --without-pam --disable-largefile --with-openssl=no \
  --without-readline --without-icu \
@@ -75,17 +75,17 @@ END
 
     > /tmp/disable-shared.log
 
-    mkdir -p $PGROOT/bin
+    mkdir -p /tmp/pglite/bin
 
-    cat > $PGROOT/bin/emsdk-shared <<END
+    cat > /tmp/pglite/bin/emsdk-shared <<END
 #!/bin/bash
 echo "[\$(pwd)] $0 \$@" >> /tmp/disable-shared.log
 # shared build
-\${PG_LINK:-emcc} -L${PREFIX}/lib -DPREFIX=${PGROOT} -shared -sSIDE_MODULE=1 \$@ -Wno-unused-function
+\${PG_LINK:-emcc} -L${PREFIX}/lib -DPREFIX=/tmp/pglite -shared -sSIDE_MODULE=1 \$@ -Wno-unused-function
 END
-    ln -sf $PGROOT/bin/emsdk-shared bin/emsdk-shared
+    ln -sf /tmp/pglite/bin/emsdk-shared bin/emsdk-shared
 
-    chmod +x bin/zic $PGROOT/bin/emsdk-shared
+    chmod +x bin/zic /tmp/pglite/bin/emsdk-shared
 
     # for zic and emsdk-shared/wasi-shared called from makefile
     export PATH=$(pwd)/bin:$PATH
@@ -96,7 +96,7 @@ END
     EMCC_ENV="${EMCC_NODE} -sERROR_ON_UNDEFINED_SYMBOLS"
 
     # PREFIX only required for static initdb
-    EMCC_CFLAGS="-sERROR_ON_UNDEFINED_SYMBOLS=1 ${CC_PGLITE} -DPREFIX=${PGROOT} -Wno-macro-redefined -Wno-unused-function"
+    EMCC_CFLAGS="-sERROR_ON_UNDEFINED_SYMBOLS=1 ${CC_PGLITE} -DPREFIX=/tmp/pglite -Wno-macro-redefined -Wno-unused-function"
 
     ZIC=${ZIC:-$(realpath bin/zic)}
 
@@ -111,9 +111,9 @@ END
         if EMCC_CFLAGS="${EMCC_ENV} ${EMCC_CFLAGS}" WASI_CFLAGS="$WASI_CFLAGS" emmake make emscripten=1 install 2>&1 > /tmp/install.log
         then
             echo install ok
-            pushd ${PGROOT}
+            pushd /tmp/pglite
 
-            find . -type f | grep -v plpgsql > ${PGROOT}/pg.installed
+            find . -type f | grep -v plpgsql > /tmp/pglite/pg.installed
             popd
 
             goback=$(pwd)
@@ -121,8 +121,8 @@ END
             python3 cibuild/pack_extension.py builtin
             pushd $goback
 
-            pushd ${PGROOT}
-            find . -type f  > ${PGROOT}/pg.installed
+            pushd /tmp/pglite
+            find . -type f  > /tmp/pglite/pg.installed
             popd
 
         else
@@ -137,12 +137,12 @@ END
 	fi
 
     # wip
-    mv -vf ./src/bin/psql/psql.$EXT ./src/bin/pg_config/pg_config.$EXT ${PGROOT}/bin/
-    mv -vf ./src/bin/pg_dump/pg_restore.$EXT ./src/bin/pg_dump/pg_dump.$EXT ./src/bin/pg_dump/pg_dumpall.$EXT ${PGROOT}/bin/
-	mv -vf ./src/bin/pg_resetwal/pg_resetwal.$EXT  ./src/bin/initdb/initdb.$EXT ./src/backend/postgres.$EXT ${PGROOT}/bin/
+    mv -vf ./src/bin/psql/psql.$EXT ./src/bin/pg_config/pg_config.$EXT /tmp/pglite/bin/
+    mv -vf ./src/bin/pg_dump/pg_restore.$EXT ./src/bin/pg_dump/pg_dump.$EXT ./src/bin/pg_dump/pg_dumpall.$EXT /tmp/pglite/bin/
+	mv -vf ./src/bin/pg_resetwal/pg_resetwal.$EXT  ./src/bin/initdb/initdb.$EXT ./src/backend/postgres.$EXT /tmp/pglite/bin/
 
 
-    cat > ${PGROOT}/PGPASSFILE <<END
+    cat > /tmp/pglite/PGPASSFILE <<END
 USER="${PGPASS:-postgres}"
 PASS="${PGUSER:-postgres}"
 md5pass =  "md5" + __import__('hashlib').md5(USER.encode() + PASS.encode()).hexdigest()
@@ -160,38 +160,38 @@ print(f"localhost:5432:postgres:{USER}:{md5pass}")
 END
 
 
-    if [ -f $PGROOT/bin/pg_config.$EXT ]
+    if [ -f /tmp/pglite/bin/pg_config.$EXT ]
     then
         echo pg_config installed
     else
         echo "pg_config build failed"; exit 243
     fi
 
-    cat > ${PGROOT}/bin/pg_config <<END
+    cat > /tmp/pglite/bin/pg_config <<END
 #!/bin/bash
-$(which node) ${PGROOT}/bin/pg_config.cjs \$@
+$(which node) /tmp/pglite/bin/pg_config.cjs \$@
 END
 
-    cat  > ${PGROOT}/postgres <<END
+    cat  > /tmp/pglite/postgres <<END
 #!/bin/bash
 . /opt/python-wasm-sdk/wasm32-bi-emscripten-shell.sh
-TZ=UTC PGTZ=UTC PGDATA=${PGDATA} $(which node) ${PGROOT}/bin/postgres.cjs \$@
+TZ=UTC PGTZ=UTC PGDATA=${PGDATA} $(which node) /tmp/pglite/bin/postgres.cjs \$@
 END
 
     # force node wasm version
-    cp -vf ${PGROOT}/postgres ${PGROOT}/bin/postgres
+    cp -vf /tmp/pglite/postgres /tmp/pglite/bin/postgres
 
-	cat  > ${PGROOT}/initdb <<END
+	cat  > /tmp/pglite/initdb <<END
 #!/bin/bash
 . /opt/python-wasm-sdk/wasm32-bi-emscripten-shell.sh
-TZ=UTC PGTZ=UTC $(which node) ${PGROOT}/bin/initdb.cjs \$@
+TZ=UTC PGTZ=UTC $(which node) /tmp/pglite/bin/initdb.cjs \$@
 END
 
-    chmod +x ${PGROOT}/postgres ${PGROOT}/bin/postgres
-	chmod +x ${PGROOT}/initdb ${PGROOT}/bin/initdb
+    chmod +x /tmp/pglite/postgres /tmp/pglite/bin/postgres
+	chmod +x /tmp/pglite/initdb /tmp/pglite/bin/initdb
 
     # for extensions building
-    chmod +x ${PGROOT}/bin/pg_config
+    chmod +x /tmp/pglite/bin/pg_config
 
     popd
 echo "pgbuild:end
@@ -200,6 +200,3 @@ echo "pgbuild:end
 
 
 "
-
-
-
