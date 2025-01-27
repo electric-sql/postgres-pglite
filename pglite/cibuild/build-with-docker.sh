@@ -12,8 +12,9 @@ if [[ -z "$SDK_VERSION" || -z "$PG_VERSION" ]]; then
   exit 1
 fi
 
-IMG_NAME="electricsql/pglite-builder"
+IMG_NAME="electricsql/emsdk"
 IMG_TAG="${PG_VERSION}_${SDK_VERSION}"
+
 SDK_ARCHIVE="${SDK_ARCHIVE:-python3.13-wasm-sdk-Ubuntu-22.04.tar.lz4}"
 WASI_SDK_ARCHIVE="${WASI_SDK_ARCHIVE:-python3.13-wasi-sdk-Ubuntu-22.04.tar.lz4}"
 
