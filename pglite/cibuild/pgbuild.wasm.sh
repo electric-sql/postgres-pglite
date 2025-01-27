@@ -89,7 +89,7 @@ END
 
     ZIC=${ZIC:-$(realpath bin/zic)}
 
-	if EMCC_CFLAGS="${EMCC_ENV} ${EMCC_CFLAGS}" WASI_CFLAGS="$WASI_CFLAGS" emmake make emscripten=1 -j $(nproc) 2>&1 > /tmp/build.log
+	if EMCC_CFLAGS="${EMCC_ENV} ${EMCC_CFLAGS}" emmake make emscripten=1 -j $(nproc) 2>&1 > /tmp/build.log
 	then
         echo build ok
         cp -vf src/backend/postgres src/backend/postgres.cjs
@@ -97,7 +97,7 @@ END
         # if running a 32bits zic from current build
         unset LD_PRELOAD
 
-        if EMCC_CFLAGS="${EMCC_ENV} ${EMCC_CFLAGS}" WASI_CFLAGS="$WASI_CFLAGS" emmake make emscripten=1 install 2>&1 > /tmp/install.log
+        if EMCC_CFLAGS="${EMCC_ENV} ${EMCC_CFLAGS}" emmake make emscripten=1 install 2>&1 > /tmp/install.log
         then
             echo install ok
             pushd /tmp/pglite
