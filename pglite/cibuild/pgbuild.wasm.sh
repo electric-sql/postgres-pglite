@@ -7,8 +7,6 @@ pgbuild.wasm:begin
 CC_PGLITE=$CC_PGLITE
 
 "
-
-
     mkdir -p build/postgres
     pushd build/postgres
 
@@ -56,7 +54,7 @@ TZ=UTC PGTZ=UTC node $(pwd)/src/timezone/zic.cjs \$@
 END
     fi
 
-    if EM_PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig ac_cv_exeext=.cjs emconfigure $CNF --with-template=emscripten
+    if ac_cv_exeext=.cjs emconfigure $CNF --with-template=emscripten
     then
         echo configure ok
     else
