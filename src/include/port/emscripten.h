@@ -7,7 +7,7 @@
 #include <emscripten.h>
 #endif
 
-#include "/tmp/pglite/include/wasm_common.h"
+#include "port/wasm_common.h"
 
 
 #define BOOT_END_MARK "build indices"

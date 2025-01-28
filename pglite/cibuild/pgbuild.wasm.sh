@@ -21,7 +21,6 @@ CC_PGLITE=$CC_PGLITE
 
     cp -r ${PGSRC}/pglite/other/* /tmp/pglite/
 
-    cp ${PGSRC}/./src/include/port/wasm_common.h /tmp/pglite/include/wasm_common.h
 
     CNF="${PGSRC}/configure FLEX=`which flex` --prefix=/tmp/pglite \
  --cache-file=/tmp/pglite/config.cache.emscripten \

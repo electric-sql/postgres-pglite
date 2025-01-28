@@ -20,7 +20,7 @@
 #define emscripten_force_exit(...)
 #define EM_JS(...)
 
-#include "/tmp/pglite/include/wasm_common.h"
+#include "port/wasm_common.h"
 
 
 static pid_t
