@@ -1,0 +1,49 @@
+name: Build postgres-pglite (aka Postgresql WASM)
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+on:
+  workflow_call:
+  push:
+    branches: ['pglite/REL_16_STABLE']
+  pull_request:
+
+jobs:
+  build:
+    name: Build postgres-pglite (WASM Postgres)
+    runs-on: ubuntu-22.04
+    env:
+      BUILD_CONFIG_FILE: postgres-pglite/pglite/.buildconfig
+      SYS_PYTHON: /usr/bin/python3
+      PGROOT: /tmp/pglite
+      TOTAL_MEMORY: 128MB
+      CMA_MB: 16
+      DEBUG: false
+      OBJDUMP: true
+      contrib: contrib
+      extra: extra
+      EXTRA_EXT: vector
+
+    steps:
+      - name: Install Docker
+        run: |
+          apt-get update
+          apt-get install -y docker.io
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set build parameters
+        run: |
+          cat ${{ env.BUILD_CONFIG_FILE }} >> $GITHUB_ENV
+
+      - name: Build postgres WASM via emsdk
+        working-directory: ${{ github.workspace }}
+        env: 
+          PGSRC: ${{ github.workspace }}
+        run: |
+          pglite/cibuild/build-with-docker.sh
