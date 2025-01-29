@@ -16,7 +16,7 @@ jobs:
     name: Build postgres-pglite (WASM Postgres)
     runs-on: ubuntu-22.04
     env:
-      BUILD_CONFIG_FILE: postgres-pglite/pglite/.buildconfig
+      BUILD_CONFIG_FILE: pglite/.buildconfig
       SYS_PYTHON: /usr/bin/python3
       PGROOT: /tmp/pglite
       TOTAL_MEMORY: 128MB
