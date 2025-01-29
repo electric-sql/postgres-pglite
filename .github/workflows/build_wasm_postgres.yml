@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       BUILD_CONFIG_FILE: pglite/.buildconfig
-      SYS_PYTHON: /usr/bin/python3
       PGROOT: /tmp/pglite
       TOTAL_MEMORY: 128MB
       CMA_MB: 16
