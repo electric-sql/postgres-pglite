@@ -6,8 +6,8 @@ on:
     paths:
       - pglite/.buildconfig
   pull_request:
-    # paths:
-    #   - pglite/.buildconfig
+    paths:
+      - pglite/.buildconfig
 
 jobs:
   build:
