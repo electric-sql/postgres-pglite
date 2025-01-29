@@ -27,4 +27,4 @@ steps:
         --build-arg SDK_VERSION=$${SDK_VERSION}
         -t $${IMGNAME}:$${IMGTAG}
         -t $${IMGNAME}:latest
-        .
+        ./pglite
