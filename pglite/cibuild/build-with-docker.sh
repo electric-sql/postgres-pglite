@@ -12,7 +12,7 @@ if [[ -z "$SDK_VERSION" || -z "$PG_VERSION" ]]; then
   exit 1
 fi
 
-IMG_NAME="electricsql/emsdk"
+IMG_NAME="electricsql/pglite-builder"
 IMG_TAG="${PG_VERSION}_${SDK_VERSION}"
 
 docker run \
