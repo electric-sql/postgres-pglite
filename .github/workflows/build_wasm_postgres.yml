@@ -28,18 +28,9 @@ jobs:
       EXTRA_EXT: vector
 
     steps:
-    #   - name: Install Docker
-    #     run: |
-    #       sudo apt-get update
-    #       sudo apt-get install -y docker.io
-
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Set build parameters
-        run: |
-          cat ${{ env.BUILD_CONFIG_FILE }} >> $GITHUB_ENV
 
       - name: Build postgres WASM via emsdk
         working-directory: ${{ github.workspace }}
