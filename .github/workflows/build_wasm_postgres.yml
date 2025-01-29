@@ -30,8 +30,8 @@ jobs:
     steps:
       - name: Install Docker
         run: |
-          apt-get update
-          apt-get install -y docker.io
+          sudo apt-get update
+          sudo apt-get install -y docker.io
 
       - uses: actions/checkout@v4
         with:
