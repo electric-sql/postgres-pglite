@@ -93,32 +93,35 @@ CC_PGLITE=$CC_PGLITE
     if $WASI
     then
         export EXT=wasi
-        ACCVEXEEXT==.wasi
-
+        cat > ${PGROOT}/config.site <<END
+ac_cv_exeext=.wasi
+END
         if $GETZIC
         then
             cat > bin/zic <<END
 #!/bin/bash
 #. /opt/python-wasm-sdk/wasm32-wasi-shell.sh
-TZ=UTC PGTZ=UTC $(which wasi-run) $(pwd)/src/timezone/zic.wasi \$@
+TZ=UTC PGTZ=UTC $(command -v wasi-run) $(pwd)/src/timezone/zic.wasi \$@
 END
         fi
 
     else
         export EXT=wasm
-        ACCVEXEEXT=.cjs
+        cat > ${PGROOT}/config.site <<END
+ac_cv_exeext=.cjs
+END
 
         if $GETZIC
         then
             cat > bin/zic <<END
 #!/bin/bash
 #. /opt/python-wasm-sdk/wasm32-bi-emscripten-shell.sh
-TZ=UTC PGTZ=UTC $(which node) $(pwd)/src/timezone/zic.cjs \$@
+TZ=UTC PGTZ=UTC $(command -v node) $(pwd)/src/timezone/zic.cjs \$@
 END
         fi
     fi
 
-    if EM_PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig ac_cv_exeext=$ACCVEXEEXT emconfigure $CNF --with-template=$BUILD
+    if EM_PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig CONFIG_SITE=${PGROOT}/config.site emconfigure $CNF --with-template=$BUILD
     then
         echo configure ok
     else
@@ -251,7 +254,7 @@ END
 	mv -vf ./src/bin/pg_resetwal/pg_resetwal.$EXT  ./src/bin/initdb/initdb.$EXT ./src/backend/postgres.$EXT ${PGROOT}/bin/
 
 
-    cat > ${PGROOT}/PGPASSFILE <<END
+    python3 > ${PGROOT}/PGPASSFILE <<END
 USER="${PGPASS:-postgres}"
 PASS="${PGUSER:-postgres}"
 md5pass =  "md5" + __import__('hashlib').md5(USER.encode() + PASS.encode()).hexdigest()
@@ -304,6 +307,50 @@ END
 
     # for extensions building
     chmod +x ${PGROOT}/bin/pg_config
+
+
+	echo "initdb for PGDATA=${PGDATA} "
+
+    # create empty db hack
+
+	cat >$PGROOT/initdb.sh <<END
+#!/bin/bash
+rm -rf ${PGDATA} /tmp/initdb-* ${PGROOT}/wal/*
+export TZ=UTC
+export PGTZ=UTC
+SQL=/tmp/initdb-\$\$
+# TODO: --waldir=${PGROOT}/wal
+> /tmp/initdb.txt
+
+${PGROOT}/initdb --no-clean --wal-segsize=1 -g $LANG $CRED --pgdata=${PGDATA}
+
+mv /tmp/initdb.boot.txt \${SQL}.boot.sql
+mv /tmp/initdb.single.txt \${SQL}.single.sql
+
+if \${CI:-false}
+then
+    cp -vf \$SQL ${PGROOT}/\$(md5sum \$SQL|cut -c1-32).sql
+fi
+
+# --wal-segsize=1  -> -X 1048576
+
+# CKSUM_B -k --data-checksums
+# 2024-04-24 05:53:28.121 GMT [42] WARNING:  page verification failed, calculated checksum 5487 but expected 0
+# 2024-04-24 05:53:28.121 GMT [42] FATAL:  invalid page in block 0 of relation base/1/1259
+
+CMD="${PGROOT}/postgres --boot -D ${PGDATA} -d 3 $PGOPTS -X 1048576"
+echo "\$CMD < \$SQL.boot.sql"
+\$CMD < \$SQL.boot.sql 2>&1 \\
+ | grep -v --line-buffered 'bootstrap> boot' \\
+ | grep -v --line-buffered 'index'
+
+echo "
+
+\$(md5sum /tmp/initdb-\$\$.*.sql)
+
+    boot done
+"
+END
 
     popd
 echo "pgbuild:end
