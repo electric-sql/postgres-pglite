@@ -21,16 +21,6 @@ CC_PGLITE=$CC_PGLITE
 
     cp -r ${PGSRC}/pglite/other/* /tmp/pglite/
 
-
-    CNF="${PGSRC}/configure FLEX=`which flex` --prefix=/tmp/pglite \
- --cache-file=/tmp/pglite/config.cache.emscripten \
- --disable-spinlocks --disable-largefile --without-llvm \
- --without-pam --disable-largefile --with-openssl=no \
- --without-readline --without-icu \
- --with-uuid=ossp \
- --with-zlib --with-libxml --with-libxslt \
-  ${PGDEBUG}"
-
     echo "  ==== building wasm MVP:$MVP Debug=${PGDEBUG} with opts : $@  == "
 
     mkdir -p bin
@@ -39,8 +29,9 @@ CC_PGLITE=$CC_PGLITE
 #!/bin/bash
 TZ=UTC PGTZ=UTC node $(pwd)/src/timezone/zic.cjs \$@
 END
+    export CONFIG_SITE=${PGSRC}/pglite/config.site
 
-    if ac_cv_exeext=.cjs emconfigure $CNF --with-template=emscripten
+    if emconfigure ${PGSRC}/configure
     then
         echo configure ok
     else

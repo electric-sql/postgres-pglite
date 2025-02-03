@@ -1,0 +1,46 @@
+# config.site for PostgreSQL custom build
+
+# Installation prefix
+prefix=/tmp/pglite
+
+# Cache file location
+cache_file=/tmp/pglite/config.cache.emscripten
+
+# Disable spinlocks
+ac_cv_spinlock=no
+
+# Disable large file support
+ac_cv_sys_large_files=no
+
+# Disable LLVM support
+with_llvm=no
+
+# Disable PAM
+with_pam=no
+
+# Explicitly disable OpenSSL
+with_openssl=no
+
+# Disable readline support
+with_readline=no
+
+# Disable ICU support
+with_icu=no
+
+# Enable OSSP UUID
+with_uuid=ossp
+
+# Enable zlib
+with_zlib=yes
+
+# Enable libxml
+with_libxml=yes
+
+# Enable libxslt
+with_libxslt=yes
+
+# Set extension
+ac_cv_exeext=.cjs
+
+# Set template
+with_template=emscripten
