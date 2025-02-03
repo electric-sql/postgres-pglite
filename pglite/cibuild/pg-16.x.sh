@@ -69,7 +69,7 @@ else
     then
         . cibuild/pgbuild.sh
     else
-        . cibuild/pgbuild.wasm.sh
+        . cibuild/pgbuild.emscripten.sh
     fi
 fi
 
