@@ -1,6 +1,0 @@
-_DefineCustomIntVariable
-_MarkGUCPrefixReserved
-_pg_usleep
-___memory_base
-___table_base
-_ClientAuthentication_hook
