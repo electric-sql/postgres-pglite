@@ -4,7 +4,6 @@ _ProcessInterrupts
 _RmgrNotFound
 _psprintf
 _initStringInfo
-_memset
 _XLogRecGetBlockTagExtended
 _pg_popcount
 _palloc0
@@ -12,7 +11,6 @@ _cstring_to_text
 _construct_array_builtin
 _Int64GetDatum
 _palloc
-_memcpy
 _RestoreBlockImage
 _errstart_cold
 _errcode

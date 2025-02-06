@@ -4,7 +4,6 @@ _errcode
 _errmsg
 _errfinish
 _puts
-_memcpy
 _ProcessInterrupts
 _strlcpy
 _strncat
@@ -39,7 +38,6 @@ _EVP_DecryptInit_ex
 _EVP_DecryptUpdate
 _EVP_DecryptFinal_ex
 _EVP_bf_ecb
-_memset
 _EVP_aes_128_ecb
 _EVP_aes_192_ecb
 _EVP_aes_256_ecb
@@ -62,7 +60,6 @@ _memchr
 _memcmp
 _strchr
 _strstr
-_memmove
 _time
 _BN_bin2bn
 _BN_num_bits
@@ -95,6 +92,8 @@ _strncmp
 _strcpy
 _pg_vsnprintf
 _pstrdup
+_memset
+_memcpy
 _malloc
 _snprintf
 _open
@@ -105,6 +104,7 @@ ___errno_location
 _strerror
 _close
 _vsnprintf
+_memmove
 _write
 ___stack_pointer
 ___memory_base

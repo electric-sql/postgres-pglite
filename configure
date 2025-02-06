@@ -19446,7 +19446,7 @@ ac_config_files="$ac_config_files GNUmakefile src/Makefile.global"
 
 
 ac_config_links="$ac_config_links src/backend/port/pg_sema.c:${SEMA_IMPLEMENTATION} src/backend/port/pg_shmem.c:${SHMEM_IMPLEMENTATION} src/include/pg_config_os.h:src/include/port/${template}.h src/Makefile.port:src/makefiles/Makefile.${template}"
-
+ac_config_links="$ac_config_links src/include/port/wasm_common.h:src/include/port/wasm_common.h"
 
 if test "$PORTNAME" = "win32"; then
 ac_config_commands="$ac_config_commands check_win32_symlinks"

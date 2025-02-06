@@ -23,7 +23,6 @@ _palloc
 _fread
 _repalloc
 _fwrite
-_memcpy
 _pfree
 _errstart
 _errcode_for_file_access
@@ -37,7 +36,6 @@ _getTempRet0
 ___wasm_setjmp
 _invoke_iiiii
 _invoke_v
-_memset
 _invoke_viii
 _invoke_vijiiidjiiii
 _emscripten_longjmp

@@ -15,4 +15,9 @@ rm postgresql 2>/dev/null
 ln -s $PGSRC postgresql
 
 echo "Building postgresql-${PG_VERSION} in folder $PGSRC"
-. cibuild/pgbuild.sh
+if ${WASI}
+then
+    . cibuild/pgbuild.sh
+else
+    . cibuild/pgbuild.emscripten.sh
+fi

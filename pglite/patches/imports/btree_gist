@@ -1,7 +1,5 @@
 _pg_detoast_datum
 _palloc
-_memset
-_memcpy
 _DirectFunctionCall2Coll
 _pfree
 _errstart_cold

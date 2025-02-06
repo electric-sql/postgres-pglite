@@ -1,5 +1,4 @@
 _pstrdup
-_memset
 _strncmp
 _strlen
 _pg_snprintf

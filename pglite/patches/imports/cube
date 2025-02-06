@@ -24,7 +24,6 @@ _Float8GetDatum
 _DirectFunctionCall2Coll
 _repalloc
 _errmsg_internal
-_memcpy
 _strchr
 _errsave_start
 _errsave_finish

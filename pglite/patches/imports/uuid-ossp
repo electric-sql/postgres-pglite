@@ -16,7 +16,6 @@ _isxdigit
 _strtoul
 _gmtime
 _strftime
-_memcpy
 _open
 _fcntl
 _getpid
@@ -28,7 +27,6 @@ _socket
 _ioctl
 _gettimeofday
 _nanosleep
-_memset
 _isalnum
 ___extenddftf2
 ___lttf2

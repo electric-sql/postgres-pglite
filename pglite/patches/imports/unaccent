@@ -32,7 +32,6 @@ _FunctionCall4Coll
 _pg_detoast_datum_copy
 _cstring_to_text
 _palloc
-_memcpy
 ___stack_pointer
 ___memory_base
 ___table_base

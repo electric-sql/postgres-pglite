@@ -20,7 +20,6 @@ _ProcessInterrupts
 _errstart
 _ReadBuffer
 _LockBufferForCleanup
-_memset
 _visibilitymap_pin
 _visibilitymap_clear
 _MarkBufferDirty

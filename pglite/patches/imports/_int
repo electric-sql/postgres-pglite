@@ -20,11 +20,9 @@ _pg_sprintf
 _strlen
 _errmsg_internal
 _DirectFunctionCall3Coll
-_memcpy
 _pg_qsort
 _has_fn_opclass_options
 _get_fn_opclass_options
-_memmove
 _init_local_reloptions
 _add_local_int_reloption
 _pg_detoast_datum_packed
@@ -38,7 +36,6 @@ _bsearch
 _construct_empty_array
 _palloc0
 _qsort_arg
-_memset
 _pg_popcount
 ___stack_pointer
 ___memory_base

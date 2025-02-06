@@ -65,6 +65,11 @@ then
 "
 else
     echo "Building $ARCHIVE (patched) from $PGSRC"
-    . cibuild/pgbuild.sh
+    if ${WASI}
+    then
+        . cibuild/pgbuild.sh
+    else
+        . cibuild/pgbuild.emscripten.sh
+    fi
 fi
 

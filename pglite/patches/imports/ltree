@@ -11,14 +11,12 @@ _array_contains_nulls
 _palloc
 _pg_popcount
 _pg_qsort
-_memset
 _errmsg_internal
 _pfree
 _init_local_reloptions
 _add_local_int_reloption
 _DirectFunctionCall2Coll
 _palloc0
-_memcpy
 _tolower
 _pg_mblen
 _str_tolower

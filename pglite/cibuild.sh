@@ -240,15 +240,6 @@ END
 
     . ${PGROOT}/pgopts.sh
 
-    # make sure no non-mvp feature gets in.
-    cat > ${PGROOT}/config.site <<END
-pgac_cv_sse42_crc32_intrinsics_=no
-pgac_cv_sse42_crc32_intrinsics__msse4_2=no
-pgac_sse42_crc32_intrinsics=no
-pgac_armv8_crc32c_intrinsics=no
-ac_cv_search_sem_open=no
-END
-
 
     # workaround no "locale -a" for Node.
     # this is simply the minimal result a popen call would give.

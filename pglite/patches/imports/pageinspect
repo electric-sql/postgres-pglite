@@ -46,7 +46,6 @@ _relation_open
 _RelationGetNumberOfBlocksInFork
 _errstart
 _PageGetFreeSpace
-_memcpy
 _palloc0
 _pg_sprintf
 _construct_array_builtin
@@ -73,7 +72,6 @@ _accumArrayResult
 _makeArrayResult
 _pg_popcount
 _construct_empty_array
-_memset
 _errdetail_relkind_not_supported
 _ReadBufferExtended
 _ReleaseBuffer
