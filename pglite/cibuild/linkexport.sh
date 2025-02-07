@@ -15,6 +15,7 @@ echo "FULL:" > ${WORKSPACE}/build/sizes.log
 du -hs postgres.wasm >> ${WORKSPACE}/build/sizes.log
 echo >> ${WORKSPACE}/build/sizes.log
 
+mkdir -p ${WORKSPACE}/patches/exports
 
 echo "getting wasm exports lists"
 wasm-objdump -x $(realpath postgres.wasm) > ${WORKSPACE}/patches/exports/pgcore.wasm-objdump
