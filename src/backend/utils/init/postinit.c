@@ -13,6 +13,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#define PG_POSTINIT
 #include "postgres.h"
 
 #include <ctype.h>
@@ -715,6 +716,7 @@ BaseInit(void)
  *		Be very careful with the order of calls in the InitPostgres function.
  * --------------------------------
  */
+
 void
 InitPostgres(const char *in_dbname, Oid dboid,
 			 const char *username, Oid useroid,
@@ -884,8 +886,18 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	}
 	else if (!IsUnderPostmaster)
 	{
+#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+if (!strcmp( username , WASM_USERNAME )) {
+#endif
 		InitializeSessionUserIdStandalone();
 		am_superuser = true;
+#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+} else {
+        //puts("# 894: switching session id");
+        InitializeSessionUserId(username, InvalidOid);
+		am_superuser = superuser();
+}
+#endif
 		if (!ThereIsAtLeastOneRole())
 			ereport(WARNING,
 					(errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -1256,6 +1268,32 @@ InitPostgres(const char *in_dbname, Oid dboid,
 		CommitTransactionCommand();
 }
 
+/* ========================================================================*/
+/*
+void
+ReInitPostgres(const char *in_dbname, Oid dboid,
+			 const char *username, Oid useroid,
+			 bool load_session_libraries,
+			 bool override_allow_connections,
+			 char *out_dbname)
+{
+    puts("ReInitPostgres:Begin");
+    InitPostgres(in_dbname, dboid, username, useroid, load_session_libraries, override_allow_connections, out_dbname);
+    puts("ReInitPostgres:End");
+}
+*/
+/* ========================================================================*/
+
+
+
+
+
+
+
+
+
+
+
 /*
  * Process any command-line switches and any additional GUC variable
  * settings passed in the startup packet.
@@ -1362,14 +1400,15 @@ process_settings(Oid databaseid, Oid roleid)
 static void
 ShutdownPostgres(int code, Datum arg)
 {
+puts("# 1348: " __FILE__);
 	/* Make sure we've killed any active transaction */
 	AbortOutOfAnyTransaction();
-
 	/*
 	 * User locks are not released by transaction end, so be sure to release
 	 * them explicitly.
 	 */
 	LockReleaseAll(USER_LOCKMETHOD, true);
+puts("# 1356: " __FILE__);
 }
 
 
