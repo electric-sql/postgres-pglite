@@ -1194,7 +1194,7 @@ pq_startmsgread(void)
             PqSendPointer = 0;
             PqSendBuffer_save = PqSendBuffer;
             PqSendBuffer = 2 + (char*)(cma_rsize);
-            PqSendBufferSize = (64*1024*1024) - (int)(&PqSendBuffer[0]);
+            PqSendBufferSize = (CMA_MB*1024*1024) - (int)(&PqSendBuffer[0]);
         } else {
             PqRecvBuffer = &PqRecvBuffer_static[0];
             if (PqSendBuffer_save)
