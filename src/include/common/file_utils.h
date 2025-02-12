@@ -27,10 +27,14 @@ typedef enum PGFileType
 struct iovec;					/* avoid including port/pg_iovec.h here */
 
 #ifdef FRONTEND
+#if !defined(fsync_fname)
 extern int	fsync_fname(const char *fname, bool isdir);
+#endif
 extern void fsync_pgdata(const char *pg_data, int serverVersion);
 extern void fsync_dir_recurse(const char *dir);
+#if !defined(durable_rename)
 extern int	durable_rename(const char *oldfile, const char *newfile);
+#endif
 extern int	fsync_parent_path(const char *fname);
 #endif
 

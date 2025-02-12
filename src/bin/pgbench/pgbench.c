@@ -137,7 +137,7 @@ typedef struct socket_set
 	EnterSynchronizationBarrier((barrier), \
 								SYNCHRONIZATION_BARRIER_FLAGS_BLOCK_ONLY)
 #define THREAD_BARRIER_DESTROY(barrier)
-#elif defined(ENABLE_THREAD_SAFETY)
+#elif defined(ENABLE_THREAD_SAFETY) && !defined(__wasi__)
 /* Use POSIX threads */
 #include "port/pg_pthread.h"
 #define THREAD_T pthread_t
@@ -155,6 +155,11 @@ typedef struct socket_set
 #define THREAD_BARRIER_DESTROY(barrier) pthread_barrier_destroy((barrier))
 #else
 /* No threads implementation, use none (-j 1) */
+#if defined(__wasi__)
+#   if defined(ENABLE_THREAD_SAFETY)
+#       undef ENABLE_THREAD_SAFETY
+#   endif
+#endif
 #define THREAD_T void *
 #define THREAD_FUNC_RETURN_TYPE void *
 #define THREAD_FUNC_RETURN return NULL

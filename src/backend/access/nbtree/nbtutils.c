@@ -2732,7 +2732,7 @@ _bt_allequalimage(Relation rel, bool debugmessage)
 			break;
 		}
 	}
-
+#if !defined(__EMSCRIPTEN__)
 	if (debugmessage)
 	{
 		if (allequalimage)
@@ -2742,6 +2742,6 @@ _bt_allequalimage(Relation rel, bool debugmessage)
 			elog(DEBUG1, "index \"%s\" cannot use deduplication",
 				 RelationGetRelationName(rel));
 	}
-
+#endif
 	return allequalimage;
 }
