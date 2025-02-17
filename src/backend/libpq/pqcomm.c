@@ -122,10 +122,16 @@ static char *PqSendBuffer;
 static int	PqSendBufferSize;	/* Size send buffer */
 static size_t PqSendPointer;	/* Next index to store a byte in PqSendBuffer */
 static size_t PqSendStart;		/* Next index to send a byte in PqSendBuffer */
-
+#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 static char PqRecvBuffer[PQ_RECV_BUFFER_SIZE];
 static int	PqRecvPointer;		/* Next index to read a byte from PqRecvBuffer */
 static int	PqRecvLength;		/* End of data available in PqRecvBuffer */
+#else
+static char PqRecvBuffer_static[PQ_RECV_BUFFER_SIZE];
+static char *PqRecvBuffer;
+static int	PqRecvPointer;
+static int	PqRecvLength;
+#endif
 
 /*
  * Message status
@@ -135,6 +141,7 @@ static bool PqCommReadingMsg;	/* in the middle of reading a message */
 
 
 /* Internal functions */
+
 static void socket_comm_reset(void);
 static void socket_close(int code, Datum arg);
 static void socket_set_nonblocking(bool nonblocking);
@@ -148,9 +155,6 @@ static inline int internal_flush(void);
 static pg_noinline int internal_flush_buffer(const char *buf, size_t *start,
 											 size_t *end);
 
-static int	Lock_AF_UNIX(const char *unixSocketDir, const char *unixSocketPath);
-static int	Setup_AF_UNIX(const char *sock_path);
-
 static const PQcommMethods PqCommSocketMethods = {
 	.comm_reset = socket_comm_reset,
 	.flush = socket_flush,
@@ -159,6 +163,10 @@ static const PQcommMethods PqCommSocketMethods = {
 	.putmessage = socket_putmessage,
 	.putmessage_noblock = socket_putmessage_noblock
 };
+
+static int	Lock_AF_UNIX(const char *unixSocketDir, const char *unixSocketPath);
+static int	Setup_AF_UNIX(const char *sock_path);
+
 
 const PQcommMethods *PqCommMethods = &PqCommSocketMethods;
 
@@ -280,7 +288,7 @@ pq_init(ClientSocket *client_sock)
 	PqSendPointer = PqSendStart = PqRecvPointer = PqRecvLength = 0;
 	PqCommBusy = false;
 	PqCommReadingMsg = false;
-
+#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 	/* set up process-exit hook to close the socket */
 	on_proc_exit(socket_close, 0);
 
@@ -310,7 +318,12 @@ pq_init(ClientSocket *client_sock)
 								  MyLatch, NULL);
 	AddWaitEventToSet(FeBeWaitSet, WL_POSTMASTER_DEATH, PGINVALID_SOCKET,
 					  NULL, NULL);
-
+#else
+    PDEBUG("# 220: FIXME: socketfile");
+    #pragma message "FIXME: socketfile"
+    /* because we fill before starting reading message */
+    PqRecvBuffer = &PqRecvBuffer_static[0];
+#endif
 	/*
 	 * The event positions match the order we added them, but let's sanity
 	 * check them to be sure.
@@ -730,7 +743,7 @@ Setup_AF_UNIX(const char *sock_path)
 	Assert(Unix_socket_group);
 	if (Unix_socket_group[0] != '\0')
 	{
-#ifdef WIN32
+#if defined(WIN32) || defined(__wasi__)
 		elog(WARNING, "configuration item \"unix_socket_group\" is not supported on this platform");
 #else
 		char	   *endptr;
@@ -1136,6 +1149,20 @@ pq_buffer_remaining_data(void)
  *		This must be called before any of the pq_get* functions.
  * --------------------------------
  */
+#if defined(I_EMSCRIPTEN) || defined(I_WASI)
+EMSCRIPTEN_KEEPALIVE void
+pq_recvbuf_fill(FILE* fp, int packetlen) {
+    fread( PqRecvBuffer, packetlen, 1, fp);
+    PqRecvPointer = 0;
+    PqRecvLength = packetlen;
+#if PDEBUG
+        printf("# 1199: pq_recvbuf_fill cma_rsize=%d PqRecvLength=%d buf=%p reply=%p\n", cma_rsize, PqRecvLength, &PqRecvBuffer[0], &PqSendBuffer[0]);
+#endif
+
+}
+#endif
+extern int cma_rsize;
+static char * PqSendBuffer_save;
 void
 pq_startmsgread(void)
 {
@@ -1147,7 +1174,29 @@ pq_startmsgread(void)
 		ereport(FATAL,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
 				 errmsg("terminating connection because protocol synchronization was lost")));
+#if defined(I_EMSCRIPTEN) || defined(I_WASI)
+    if (!pq_buffer_remaining_data()) {
+        if (cma_rsize) {
+            PqRecvPointer = 0;
+            PqRecvLength = cma_rsize;
+            PqRecvBuffer = (char*)0x1;
 
+            PqSendPointer = 0;
+            PqSendBuffer_save = PqSendBuffer;
+            PqSendBuffer = 2 + (char*)(cma_rsize);
+            PqSendBufferSize = (64*1024*1024) - (int)(&PqSendBuffer[0]);
+        } else {
+            PqRecvBuffer = &PqRecvBuffer_static[0];
+            if (PqSendBuffer_save)
+                PqSendBuffer=PqSendBuffer_save;
+            PqSendBufferSize = PQ_SEND_BUFFER_SIZE;
+        }
+    }
+#if PDEBUG
+        printf("# 1199: pq_startmsgread cma_rsize=%d PqRecvLength=%d buf=%p reply=%p\n", cma_rsize, PqRecvLength, &PqRecvBuffer[0], &PqSendBuffer[0]);
+#endif
+
+#endif
 	PqCommReadingMsg = true;
 }
 
@@ -1270,7 +1319,55 @@ pq_getmessage(StringInfo s, int maxlen)
 
 	return 0;
 }
+#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+extern FILE* SOCKET_FILE;
+extern int SOCKET_DATA;
+static int
+internal_putbytes(const char *s, size_t len) {
+	if (PqSendPointer >= PqSendBufferSize) {
+        puts("# 1329: overflow");
+    }
 
+    if (!cma_rsize) {
+        int wc=      fwrite(s, 1, len, SOCKET_FILE);
+        SOCKET_DATA+=wc;
+    } else {
+	    size_t		amount;
+	    while (len > 0) {
+		    /* If buffer is full, then flush it out */
+		    if (PqSendPointer >= PqSendBufferSize) {
+			    socket_set_nonblocking(false);
+			    if (internal_flush())
+				    return EOF;
+		    }
+		    amount = PqSendBufferSize - PqSendPointer;
+		    if (amount > len)
+			    amount = len;
+		    memcpy(PqSendBuffer + PqSendPointer, s, amount);
+		    PqSendPointer += amount;
+		    s += amount;
+		    len -= amount;
+            SOCKET_DATA+=amount;
+	    }
+    }
+    return 0;
+}
+
+static int
+socket_flush(void) {
+    return internal_flush();
+}
+
+static int
+internal_flush(void) {
+    /*  no flush for raw wire */
+    if (!cma_rsize) {
+    	PqSendStart = PqSendPointer = 0;
+    }
+	return 0;
+}
+
+#else
 
 static inline int
 internal_putbytes(const char *s, size_t len)
@@ -1421,7 +1518,7 @@ internal_flush_buffer(const char *buf, size_t *start, size_t *end)
 	*start = *end = 0;
 	return 0;
 }
-
+#endif /* wasm */
 /* --------------------------------
  *		pq_flush_if_writable - flush pending output if writable without blocking
  *
