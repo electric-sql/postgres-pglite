@@ -4328,7 +4328,7 @@ else
   ac_save_c_werror_flag=$ac_c_werror_flag
    ac_c_werror_flag=yes
    ac_cv_prog_cc_g=no
-   CFLAGS="-g2"
+   CFLAGS="-g"
    cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -4359,7 +4359,7 @@ if ac_fn_c_try_compile "$LINENO"; then :
 
 else
   ac_c_werror_flag=$ac_save_c_werror_flag
-	 CFLAGS="-g2"
+	 CFLAGS="-g"
 	 cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -4387,13 +4387,13 @@ if test "$ac_test_CFLAGS" = set; then
   CFLAGS=$ac_save_CFLAGS
 elif test $ac_cv_prog_cc_g = yes; then
   if test "$GCC" = yes; then
-    CFLAGS="-g2 -Os"
+    CFLAGS="-g -O2"
   else
-    CFLAGS="-g2"
+    CFLAGS="-g"
   fi
 else
   if test "$GCC" = yes; then
-    CFLAGS="-Os"
+    CFLAGS="-O2"
   else
     CFLAGS=
   fi
@@ -4859,7 +4859,7 @@ else
   ac_save_cxx_werror_flag=$ac_cxx_werror_flag
    ac_cxx_werror_flag=yes
    ac_cv_prog_cxx_g=no
-   CXXFLAGS="-g2"
+   CXXFLAGS="-g"
    cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -4890,7 +4890,7 @@ if ac_fn_cxx_try_compile "$LINENO"; then :
 
 else
   ac_cxx_werror_flag=$ac_save_cxx_werror_flag
-	 CXXFLAGS="-g2"
+	 CXXFLAGS="-g"
 	 cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -4918,13 +4918,13 @@ if test "$ac_test_CXXFLAGS" = set; then
   CXXFLAGS=$ac_save_CXXFLAGS
 elif test $ac_cv_prog_cxx_g = yes; then
   if test "$GXX" = yes; then
-    CXXFLAGS="-g2 -Os"
+    CXXFLAGS="-g -O2"
   else
-    CXXFLAGS="-g2"
+    CXXFLAGS="-g"
   fi
 else
   if test "$GXX" = yes; then
-    CXXFLAGS="-Os"
+    CXXFLAGS="-O2"
   else
     CXXFLAGS=
   fi
@@ -5284,11 +5284,11 @@ elif test "${CFLAGS+set}" = set; then
 elif test "$enable_coverage" = yes; then
   : # no optimization by default
 elif test "$GCC" = yes; then
-  CFLAGS="-Os"
+  CFLAGS="-O2"
 else
   # if the user selected debug mode, don't use -O
   if test "$enable_debug" != yes; then
-    CFLAGS="-Os"
+    CFLAGS="-O"
   fi
 fi
 
@@ -5299,11 +5299,11 @@ elif test "${CXXFLAGS+set}" = set; then
 elif test "$enable_coverage" = yes; then
   : # no optimization by default
 elif test "$GCC" = yes; then
-  CXXFLAGS="-Os"
+  CXXFLAGS="-O2"
 else
   # if the user selected debug mode, don't use -O
   if test "$enable_debug" != yes; then
-    CXXFLAGS="-Os"
+    CXXFLAGS="-O"
   fi
 fi
 
@@ -5316,12 +5316,12 @@ fi
 if test "$ac_env_BITCODE_CFLAGS_set" = set; then
   BITCODE_CFLAGS=$ac_env_BITCODE_CFLAGS_value
 else
-  BITCODE_CFLAGS="-Os $BITCODE_CFLAGS"
+  BITCODE_CFLAGS="-O2 $BITCODE_CFLAGS"
 fi
 if test "$ac_env_BITCODE_CXXFLAGS_set" = set; then
   BITCODE_CXXFLAGS=$ac_env_BITCODE_CXXFLAGS_value
 else
-  BITCODE_CXXFLAGS="-Os $BITCODE_CXXFLAGS"
+  BITCODE_CXXFLAGS="-O2 $BITCODE_CXXFLAGS"
 fi
 
 # C[XX]FLAGS we determined above will be added back at the end
@@ -7551,11 +7551,11 @@ fi
 
 # supply -g if --enable-debug
 if test "$enable_debug" = yes && test "$ac_cv_prog_cc_g" = yes; then
-  CFLAGS="$CFLAGS -g2"
+  CFLAGS="$CFLAGS -g"
 fi
 
 if test "$enable_debug" = yes && test "$ac_cv_prog_cxx_g" = yes; then
-  CXXFLAGS="$CXXFLAGS -g2"
+  CXXFLAGS="$CXXFLAGS -g"
 fi
 
 # enable code coverage if --enable-coverage
@@ -13208,7 +13208,7 @@ cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 #ifdef __cplusplus
 extern "C"
 #endif
-extern char uuid_export ();
+char uuid_export ();
 int
 main ()
 {
@@ -13231,7 +13231,7 @@ $as_echo "$ac_cv_lib_uuid_uuid_export" >&6; }
 if test "x$ac_cv_lib_uuid_uuid_export" = xyes; then :
   UUID_LIBS="-luuid"
 else
-  ac_cv_lib_ossp_uuid_uuid_export=yes
+  as_fn_error $? "library 'ossp-uuid' or 'uuid' is required for OSSP UUID" "$LINENO" 5
 fi
 
 fi
