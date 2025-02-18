@@ -19,7 +19,7 @@
 #include "common/logging.h"
 
 enum pg_log_level __pg_log_level;
-#if !defined(PG_MAIN)
+#if !defined(PGL_MAIN)
 static const char *progname;
 #endif
 static int	log_flags;

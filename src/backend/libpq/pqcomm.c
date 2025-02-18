@@ -189,7 +189,7 @@ pq_init(ClientSocket *client_sock)
 	port->sock = client_sock->sock;
 	memcpy(&port->raddr.addr, &client_sock->raddr.addr, client_sock->raddr.salen);
 	port->raddr.salen = client_sock->raddr.salen;
-
+#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 	/* fill in the server (local) address */
 	port->laddr.salen = sizeof(port->laddr.addr);
 	if (getsockname(port->sock,
@@ -281,7 +281,8 @@ pq_init(ClientSocket *client_sock)
 		(void) pq_setkeepalivescount(tcp_keepalives_count, port);
 		(void) pq_settcpusertimeout(tcp_user_timeout, port);
 	}
-
+#endif /* WASM */
+PDEBUG("# 285:" __FILE__);
 	/* initialize state variables */
 	PqSendBufferSize = PQ_SEND_BUFFER_SIZE;
 	PqSendBuffer = MemoryContextAlloc(TopMemoryContext, PqSendBufferSize);
@@ -318,12 +319,12 @@ pq_init(ClientSocket *client_sock)
 								  MyLatch, NULL);
 	AddWaitEventToSet(FeBeWaitSet, WL_POSTMASTER_DEATH, PGINVALID_SOCKET,
 					  NULL, NULL);
-#else
+#else /* WASM */
     PDEBUG("# 220: FIXME: socketfile");
     #pragma message "FIXME: socketfile"
     /* because we fill before starting reading message */
     PqRecvBuffer = &PqRecvBuffer_static[0];
-#endif
+#endif /* WASM */
 	/*
 	 * The event positions match the order we added them, but let's sanity
 	 * check them to be sure.
