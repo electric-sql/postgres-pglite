@@ -30,6 +30,7 @@
  *
  * libpq itself does not use this.
  */
+#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 pqsigfunc
 pqsignal(int signo, pqsigfunc func)
 {
@@ -53,3 +54,4 @@ pqsignal(int signo, pqsigfunc func)
 	return signal(signo, func);
 #endif
 }
+#endif /* __EMSCRIPTEN__ || __wasi__ */
