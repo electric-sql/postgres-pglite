@@ -11,7 +11,7 @@ ENV \
   SDKROOT=/opt/python-wasm-sdk \
   SYS_PYTHON=/usr/bin/python3 \
   DEBUG=$DEBUG \
-  BUILDS=3.12 \
+  BUILDS=3.13 \
   EMFLAVOUR=3.1.74
 
 WORKDIR /workspace
@@ -27,7 +27,9 @@ RUN \
 
 # Download the python-wasm-sdk source for the given version
 # RUN git clone --depth 1 --branch ${SDK_VERSION} https://github.com/pygame-web/python-wasm-sdk.git
+# RUN git clone --depth 1 --single-branch --branch tudor/useCores https://github.com/electric-sql/portable-sdk.git
 RUN git clone --depth 1 https://github.com/electric-sql/portable-sdk.git
+
 
 WORKDIR /workspace/portable-sdk/python-wasm-sdk
 
@@ -52,17 +54,17 @@ ARG OBJDUMP=true
 ENV \
   PG_VERSION=$PG_VERSION \
   SDK_VERSION=$SDK_VERSION \
-  SDK_ARCHIVE=python3.12-wasm-sdk-Ubuntu-22.04.tar.lz4 \
+  SDK_ARCHIVE=python3.13-wasm-sdk-Ubuntu-22.04.tar.lz4 \
   SDKROOT=/opt/python-wasm-sdk \
   SYS_PYTHON=/usr/bin/python3 \
   PGROOT=/tmp/pglite \
   DEBUG=$DEBUG \
   OBJDUMP=$OBJDUMP
 
-COPY --from=build_sdk /tmp/sdk /tmp/sdk
+COPY --from=build_sdk /tmp/sdk/$SDK_ARCHIVE /tmp/sdk/$SDK_ARCHIVE
 
 RUN tar --use-compress-program=lz4 -xvf /tmp/sdk/${SDK_ARCHIVE} -C /
 
-RUN rm -r /tmp/sdk
+RUN rm /tmp/sdk/$SDK_ARCHIVE
 
 WORKDIR /workspace
