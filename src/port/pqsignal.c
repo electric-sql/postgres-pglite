@@ -171,6 +171,6 @@ pqsignal(int signo, pqsigfunc func)
 }
 
 /* sneak stubs into libpgport */
-#if defined(__wasi__)
-#   include "../../../patches/wasi_port.c"
+#if defined(SDK_PORT)
+#   include "sdk_port.c"
 #endif
