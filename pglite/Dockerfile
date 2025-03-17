@@ -1,4 +1,4 @@
-FROM ubuntu:22.04 AS build_sdk
+FROM --platform=$BUILDPLATFORM ubuntu:22.04 AS build_sdk
 
 ARG PG_VERSION=16.4
 ARG SDK_VERSION=3.1.61.6bi
@@ -27,9 +27,7 @@ RUN \
 
 # Download the python-wasm-sdk source for the given version
 # RUN git clone --depth 1 --branch ${SDK_VERSION} https://github.com/pygame-web/python-wasm-sdk.git
-# RUN git clone --depth 1 --single-branch --branch tudor/useCores https://github.com/electric-sql/portable-sdk.git
-RUN git clone --depth 1 https://github.com/electric-sql/portable-sdk.git
-
+RUN git clone --depth 1 --single-branch --branch tudor/useCores https://github.com/electric-sql/portable-sdk.git
 
 WORKDIR /workspace/portable-sdk/python-wasm-sdk
 
