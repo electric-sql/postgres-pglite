@@ -320,8 +320,8 @@ PDEBUG("# 285:" __FILE__);
 	AddWaitEventToSet(FeBeWaitSet, WL_POSTMASTER_DEATH, PGINVALID_SOCKET,
 					  NULL, NULL);
 #else /* WASM */
-    PDEBUG("# 220: FIXME: socketfile");
-    #pragma message "FIXME: socketfile"
+    PDEBUG("# 323: FIXME: socketfile");
+    #pragma message "FIXME: use socketfile when overflowing PqRecvBuffer_static"
     /* because we fill before starting reading message */
     PqRecvBuffer = &PqRecvBuffer_static[0];
 #endif /* WASM */
@@ -1326,7 +1326,7 @@ extern int SOCKET_DATA;
 static int
 internal_putbytes(const char *s, size_t len) {
 	if (PqSendPointer >= PqSendBufferSize) {
-        fprintf(stderr, "# 1329: overflow %d >= %d cma_rsize=%d CMA=%d\n", PqSendPointer, PqSendBufferSize,cma_rsize, CMA_MB);
+        fprintf(stderr, "# 1329: overflow %zu >= %d cma_rsize=%d CMA=%d\n", PqSendPointer, PqSendBufferSize,cma_rsize, CMA_MB);
     }
 
     if (!cma_rsize) {
