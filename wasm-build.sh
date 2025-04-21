@@ -40,8 +40,8 @@ export PGUSER=${PGUSER:-postgres}
 
 if $DEBUG
 then
-    export COPTS=${COPTS:-"-O2 -g3"}
-    export LOPTS=${LOPTS:-"-O2 -g3 --no-wasm-opt -sASSERTIONS=1"}
+    export COPTS=${COPTS:-"-g3"}
+    export LOPTS=${LOPTS:-"-g3 --no-wasm-opt -sASSERTIONS=1"}
 else
     # DO NOT CHANGE COPTS - optimized wasm corruption fix
     export COPTS=${COPTS:-"-O2 -g3 --no-wasm-opt"}
