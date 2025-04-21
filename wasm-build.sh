@@ -432,7 +432,7 @@ fi
 # only build extra when targeting pglite-wasm .
 
 # TODO link the good tag
-ln -s ${WORKSPACE}/pglite-REL_17_4_WASM ${WORKSPACE}/pglite-wasm
+ln -s ${WORKSPACE}/pglite-REL_17_4_WASM ${WORKSPACE}/pglite-wasm || true
 
 if [ -f  ${WORKSPACE}/pglite-wasm/build.sh ]
 then
