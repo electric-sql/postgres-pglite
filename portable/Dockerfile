@@ -6,10 +6,10 @@ ENV PIP_NO_CACHE_DIR 1
 
 # nb: the python for build from sdk built with clang directly is used as SYS_PYTHON for emsdk
 RUN apk add --no-cache --virtual .build-deps \
-	    tar file lz4 \
+	    tar file lz4 xz \
 	    git patch bison flex \
         findutils binutils coreutils \
-	    libffi curl perl nodejs \
+	    libffi tzdata-utils curl perl nodejs \
         make autoconf automake libtool pkgconfig \
     ;
 
