@@ -476,7 +476,8 @@ Fatal: failed to apply patch : $one
             [ -f $PORTABLE/python3.13-wasm-sdk-alpine-3.21.tar.lz4 ] && cp -f $PORTABLE/python3.13-wasm-sdk-alpine-3.21.tar.lz4 $tmpfile
             [ -f $tmpfile ] || wget -q $SDK_URL -O$tmpfile
             cat $tmpfile | tar x --use-compress-program=lz4
-            tar xf $PORTABLE/wasi-sdk-25.tar.xz
+            tar xf $PORTABLE/wasi-sdk-25.tar.xz $PORTABLE/wasi-sdk-25.0-$(arch)-linux.tar.xz
+            mv tmp/sdk/wasisdk/wasi-sdk-25.0-$(arch)-linux/* tmp/sdk/wasisdk/upstream/
             if [ -f $CONTAINER_PATH/usr/bin/python3 ]
             then
                 echo "system python found"
