@@ -19,6 +19,8 @@ source .buildconfig
 
 cat .buildconfig
 
+[ -f postgres-pglite/configure ] || ln -s $(pwd) postgres-pglite
+
 docker run \
   --rm \
   --env-file .buildconfig \
