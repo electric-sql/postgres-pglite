@@ -20,6 +20,7 @@ source .buildconfig
 cat .buildconfig
 
 [ -f postgres-pglite/configure ] || ln -s $(pwd) postgres-pglite
+mkdir -p postgres-pglite/dist/pglite
 
 docker run \
   --rm \
