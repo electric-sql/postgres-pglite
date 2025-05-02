@@ -22,7 +22,7 @@ cat .buildconfig
 docker run \
   --rm \
   --env-file .buildconfig \
-  -v .:/workspace:rw \
+  -v .:/tmp-workspace:ro \
   -v ./dist:/tmp/sdk/dist:rw \
   $IMG_NAME:$IMG_TAG \
-  bash -c "source ${SDKROOT}/wasm32-bi-emscripten-shell.sh && ./wasm-build.sh ${WHAT:-\"contrib extra\"}"
+  bash -c "cp -r /tmp-workspace/. /workspace && cd /workspace && source ${SDKROOT}/wasm32-bi-emscripten-shell.sh && ./wasm-build.sh ${WHAT:-\"contrib extra\"}"
