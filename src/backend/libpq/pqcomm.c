@@ -131,6 +131,8 @@ static char PqRecvBuffer_static[PQ_RECV_BUFFER_SIZE];
 static char *PqRecvBuffer;
 static int	PqRecvPointer;
 static int	PqRecvLength;
+volatile int querylen = 0;
+volatile FILE* queryfp = NULL;
 #endif
 
 /*
@@ -320,8 +322,8 @@ PDEBUG("# 285:" __FILE__);
 	AddWaitEventToSet(FeBeWaitSet, WL_POSTMASTER_DEATH, PGINVALID_SOCKET,
 					  NULL, NULL);
 #else /* WASM */
-    PDEBUG("# 220: FIXME: socketfile");
-    #pragma message "FIXME: socketfile"
+    PDEBUG("# 323: FIXME: socketfile");
+    #pragma message "FIXME: use socketfile when overflowing PqRecvBuffer_static"
     /* because we fill before starting reading message */
     PqRecvBuffer = &PqRecvBuffer_static[0];
 #endif /* WASM */
@@ -923,6 +925,20 @@ pq_recvbuf(void)
 		else
 			PqRecvLength = PqRecvPointer = 0;
 	}
+#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+    if (queryfp && querylen) {
+        int got = fread( PqRecvBuffer, 1, PQ_RECV_BUFFER_SIZE - PqRecvPointer, queryfp);
+        querylen -= got;
+        PqRecvLength += got;
+        if (querylen<=0) {
+            puts("# 931: could close fp early here " __FILE__);
+            queryfp = NULL;
+        }
+        if (got>0)
+    		return 0;
+    }
+    return EOF;
+#endif
 
 	/* Ensure that we're in blocking mode */
 	socket_set_nonblocking(false);
@@ -1025,7 +1041,7 @@ pq_getbyte_if_available(unsigned char *c)
 		*c = PqRecvBuffer[PqRecvPointer++];
 		return 1;
 	}
-
+puts("# 1028: pq_getbyte_if_available N/I in " __FILE__ ); abort();
 	/* Put the socket into non-blocking mode */
 	socket_set_nonblocking(true);
 
@@ -1129,6 +1145,7 @@ pq_discardbytes(size_t len)
 	return 0;
 }
 
+
 /* --------------------------------
  *		pq_buffer_remaining_data	- return number of bytes in receive buffer
  *
@@ -1150,16 +1167,22 @@ pq_buffer_remaining_data(void)
  *		This must be called before any of the pq_get* functions.
  * --------------------------------
  */
-#if defined(I_EMSCRIPTEN) || defined(I_WASI)
+#if defined(__EMSCRIPTEN__) || defined(__wasi__)
 EMSCRIPTEN_KEEPALIVE void
 pq_recvbuf_fill(FILE* fp, int packetlen) {
-    fread( PqRecvBuffer, packetlen, 1, fp);
+    if (packetlen>PQ_RECV_BUFFER_SIZE) {
+        int got = fread( PqRecvBuffer, 1, PQ_RECV_BUFFER_SIZE, fp);
+        queryfp = fp;
+        querylen = packetlen - got;
+        PqRecvLength = got;
+puts("# 1160: input overflow");
+    } else {
+        fread( PqRecvBuffer, packetlen, 1, fp);
+        PqRecvLength = packetlen;
+        queryfp = NULL;
+        querylen = 0;
+    }
     PqRecvPointer = 0;
-    PqRecvLength = packetlen;
-#if PDEBUG
-        printf("# 1199: pq_recvbuf_fill cma_rsize=%d PqRecvLength=%d buf=%p reply=%p\n", cma_rsize, PqRecvLength, &PqRecvBuffer[0], &PqSendBuffer[0]);
-#endif
-
 }
 #endif
 extern int cma_rsize;
@@ -1175,7 +1198,7 @@ pq_startmsgread(void)
 		ereport(FATAL,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
 				 errmsg("terminating connection because protocol synchronization was lost")));
-#if defined(I_EMSCRIPTEN) || defined(I_WASI)
+#if defined(__EMSCRIPTEN__) || defined(__wasi__)
     if (!pq_buffer_remaining_data()) {
         if (cma_rsize) {
             PqRecvPointer = 0;
@@ -1326,7 +1349,7 @@ extern int SOCKET_DATA;
 static int
 internal_putbytes(const char *s, size_t len) {
 	if (PqSendPointer >= PqSendBufferSize) {
-        fprintf(stderr, "# 1329: overflow %d >= %d cma_rsize=%d CMA=%d\n", PqSendPointer, PqSendBufferSize,cma_rsize, CMA_MB);
+        fprintf(stderr, "# 1329: overflow %zu >= %d cma_rsize=%d CMA=%d\n", PqSendPointer, PqSendBufferSize,cma_rsize, CMA_MB);
     }
 
     if (!cma_rsize) {

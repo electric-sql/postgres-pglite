@@ -49,11 +49,17 @@
 
         if (!ignore_till_sync)
             send_ready_for_query = true;
-
-        if (!is_wire)
+#if PGDEBUG
+        if (is_repl)
             pg_prompt();
+#endif
 
-        goto wire_flush;
+       if (pq_buffer_remaining_data()>0) {
+            if (canary_ex++ > 8)
+                abort;
+            goto incoming;
+       } else
+            goto wire_flush;
 #endif
     }
 
