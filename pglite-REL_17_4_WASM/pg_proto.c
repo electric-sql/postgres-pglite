@@ -5,7 +5,7 @@
  */
     switch (firstchar)
     {
-	    case 'Q':			/* simple query */
+	    case 'Q':			/* PqMsg_Query : simple query */
 		    {
 			    const char *query_string;
 
@@ -15,19 +15,19 @@
 			    query_string = pq_getmsgstring(&input_message);
 			    pq_getmsgend(&input_message);
 
-			    if (am_walsender)
-			    {
+			    if (am_walsender) {
 				    if (!exec_replication_command(query_string))
 					    exec_simple_query(query_string);
-			    }
-			    else
+			    } else
 				    exec_simple_query(query_string);
+
+                // valgrind_report_error_query(query_string);
 
 			    send_ready_for_query = true;
 		    }
 		    break;
 
-	    case 'P':			/* parse */
+	    case 'P':			/* PqMsg_Parse : exec_parse_message */
 		    {
 			    const char *stmt_name;
 			    const char *query_string;
@@ -42,41 +42,56 @@
 			    stmt_name = pq_getmsgstring(&input_message);
 			    query_string = pq_getmsgstring(&input_message);
 			    numParams = pq_getmsgint(&input_message, 2);
-			    if (numParams > 0)
-			    {
+
+			    if (numParams > 0) {
 				    paramTypes = palloc_array(Oid, numParams);
 				    for (int i = 0; i < numParams; i++)
 					    paramTypes[i] = pq_getmsgint(&input_message, 4);
 			    }
+
 			    pq_getmsgend(&input_message);
 
 			    exec_parse_message(query_string, stmt_name,
 							       paramTypes, numParams);
-
 			    //valgrind_report_error_query(query_string);
 		    }
+#pragma warning "-------------------- TEST ------------------"
+#if defined(PGL_LOOP)
+send_ready_for_query = false;
+#endif
+#pragma warning "-------------------- /TEST ------------------"
+
 		    break;
 
-	    case 'B':			/* bind */
-		    forbidden_in_wal_sender(firstchar);
+	    case 'B': 			/* PqMsg_Bind : exec_bind_message */
+            {
+		        forbidden_in_wal_sender(firstchar);
 
-		    /* Set statement_timestamp() */
-		    SetCurrentStatementStartTimestamp();
+		        /* Set statement_timestamp() */
+		        SetCurrentStatementStartTimestamp();
 
-		    /*
-		     * this message is complex enough that it seems best to put
-		     * the field extraction out-of-line
-		     */
-		    exec_bind_message(&input_message);
+		        /*
+		         * this message is complex enough that it seems best to put
+		         * the field extraction out-of-line
+		         */
+		        exec_bind_message(&input_message);
 
-		    /* exec_bind_message does valgrind_report_error_query */
+		        /* exec_bind_message does valgrind_report_error_query */
+            }
+#pragma warning "-------------------- TEST ------------------"
+#if defined(PGL_LOOP)
+if (send_ready_for_query)
+    send_ready_for_query = !pipelining;
+#endif
+#pragma warning "-------------------- /TEST ------------------"
+
 		    break;
 
-	    case 'E':			/* execute */
+	    case 'E':			/* PqMsg_Execute : execute */
 		    {
 			    const char *portal_name;
 			    int			max_rows;
-PDEBUG("# 79: exec_execute_message");
+PDEBUG("# 82: exec_execute_message");
 			    forbidden_in_wal_sender(firstchar);
 
 			    /* Set statement_timestamp() */
@@ -90,44 +105,54 @@ PDEBUG("# 79: exec_execute_message");
 
 			    /* exec_execute_message does valgrind_report_error_query */
 		    }
+#pragma warning "-------------------- TEST ------------------"
+#if defined(PGL_LOOP)
+if (send_ready_for_query)
+    send_ready_for_query = !pipelining;
+#endif
+
+#pragma warning "-------------------- /TEST ------------------"
+
 		    break;
 
-	    case 'F':			/* fastpath function call */
-		    forbidden_in_wal_sender(firstchar);
+	    case 'F':			/* PqMsg_FunctionCall : fastpath function call */
+            {
+		        forbidden_in_wal_sender(firstchar);
 
-		    /* Set statement_timestamp() */
-		    SetCurrentStatementStartTimestamp();
+		        /* Set statement_timestamp() */
+		        SetCurrentStatementStartTimestamp();
 
-		    /* Report query to various monitoring facilities. */
-		    pgstat_report_activity(STATE_FASTPATH, NULL);
-		    set_ps_display("<FASTPATH>");
+		        /* Report query to various monitoring facilities. */
+		        pgstat_report_activity(STATE_FASTPATH, NULL);
+		        set_ps_display("<FASTPATH>");
 
-		    /* start an xact for this function invocation */
-		    start_xact_command();
+		        /* start an xact for this function invocation */
+		        start_xact_command();
 
-		    /*
-		     * Note: we may at this point be inside an aborted
-		     * transaction.  We can't throw error for that until we've
-		     * finished reading the function-call message, so
-		     * HandleFunctionRequest() must check for it after doing so.
-		     * Be careful not to do anything that assumes we're inside a
-		     * valid transaction here.
-		     */
+		        /*
+		         * Note: we may at this point be inside an aborted
+		         * transaction.  We can't throw error for that until we've
+		         * finished reading the function-call message, so
+		         * HandleFunctionRequest() must check for it after doing so.
+		         * Be careful not to do anything that assumes we're inside a
+		         * valid transaction here.
+		         */
 
-		    /* switch back to message context */
-		    MemoryContextSwitchTo(MessageContext);
+		        /* switch back to message context */
+		        MemoryContextSwitchTo(MessageContext);
 
-		    HandleFunctionRequest(&input_message);
+		        HandleFunctionRequest(&input_message);
 
-		    /* commit the function-invocation transaction */
-		    finish_xact_command();
+		        /* commit the function-invocation transaction */
+		        finish_xact_command();
 
-	        // valgrind_report_error_query("fastpath function call");
+	            // valgrind_report_error_query("fastpath function call");
 
-		    send_ready_for_query = true;
+		        send_ready_for_query = true;
+            }
 		    break;
 
-	    case 'C':			/* close */
+	    case 'C':			/* PqMsg_Close : close */
 		    {
 			    int			close_type;
 			    const char *close_target;
@@ -138,8 +163,8 @@ PDEBUG("# 79: exec_execute_message");
 			    close_target = pq_getmsgstring(&input_message);
 			    pq_getmsgend(&input_message);
 
-			    switch (close_type)
-			    {
+			    switch (close_type) {
+
 				    case 'S':
 					    if (close_target[0] != '\0')
 						    DropPreparedStatement(close_target, false);
@@ -149,6 +174,7 @@ PDEBUG("# 79: exec_execute_message");
 						    drop_unnamed_stmt();
 					    }
 					    break;
+
 				    case 'P':
 					    {
 						    Portal		portal;
@@ -158,6 +184,7 @@ PDEBUG("# 79: exec_execute_message");
 							    PortalDrop(portal, false);
 					    }
 					    break;
+
 				    default:
 					    ereport(ERROR,
 							    (errcode(ERRCODE_PROTOCOL_VIOLATION),
@@ -167,17 +194,17 @@ PDEBUG("# 79: exec_execute_message");
 			    }
 
 			    if (whereToSendOutput == DestRemote)
-				    pq_putemptymessage('3');	/* CloseComplete */
+				    pq_putemptymessage('3');	/* PqMsg_CloseComplete : CloseComplete */
 
 			    //valgrind_report_error_query("CLOSE message");
 		    }
 		    break;
 
-	    case 'D':			/* describe */
+	    case 'D':			/* PqMsg_Describe : describe */
 		    {
 			    int			describe_type;
 			    const char *describe_target;
-PDEBUG("# 180: exec_describe_ statement/portal");
+PDEBUG("# 187: exec_describe_ statement/portal");
 			    forbidden_in_wal_sender(firstchar);
 
 			    /* Set statement_timestamp() (needed for xact) */
@@ -187,8 +214,7 @@ PDEBUG("# 180: exec_describe_ statement/portal");
 			    describe_target = pq_getmsgstring(&input_message);
 			    pq_getmsgend(&input_message);
 
-			    switch (describe_type)
-			    {
+			    switch (describe_type) {
 				    case 'S':
 					    exec_describe_statement_message(describe_target);
 					    break;
@@ -205,25 +231,36 @@ PDEBUG("# 180: exec_describe_ statement/portal");
 
 			    // valgrind_report_error_query("DESCRIBE message");
 		    }
-		    break;
-
-	    case 'H':			/* flush */
-		    pq_getmsgend(&input_message);
-		    if (whereToSendOutput == DestRemote)
-			    pq_flush();
-		    break;
-
-	    case 'S':			/* sync */
-		    pq_getmsgend(&input_message);
-            EndImplicitTransactionBlock();
-		    finish_xact_command();
-		    //valgrind_report_error_query("SYNC message");
+#pragma warning "-------------------- TEST ------------------"
 #if defined(PGL_LOOP)
-            if (!pipelining)
-    		    send_ready_for_query = true;
-            else
-    		    send_ready_for_query = false;
+if (send_ready_for_query)
+    send_ready_for_query = !pipelining;
 #endif
+#pragma warning "-------------------- /TEST ------------------"
+
+		    break;
+
+	    case 'H':			/* PqMsg_Flush : flush */
+            {
+		        pq_getmsgend(&input_message);
+		        if (whereToSendOutput == DestRemote)
+			        pq_flush();
+            }
+		    break;
+
+	    case 'S':			/* PqMsg_Sync : sync */
+            {
+		        pq_getmsgend(&input_message);
+				/*
+				 * If pipelining was used, we may be in an implicit
+				 * transaction block. Close it before calling
+				 * finish_xact_command.
+				 */
+                EndImplicitTransactionBlock();
+		        finish_xact_command();
+		        //valgrind_report_error_query("SYNC message");
+    		    send_ready_for_query = true;
+            }
 		    break;
 
 		    /*
