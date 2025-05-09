@@ -152,7 +152,7 @@ if (send_ready_for_query)
             }
 		    break;
 
-	    case 'C':			/* PqMsg_Close : close */
+	    case 'C':			/* PqMsg_Close / PqMsg_CommandComplete : close */
 		    {
 			    int			close_type;
 			    const char *close_target;
@@ -198,6 +198,13 @@ if (send_ready_for_query)
 
 			    //valgrind_report_error_query("CLOSE message");
 		    }
+#pragma warning "-------------------- TEST ------------------"
+#if defined(PGL_LOOP)
+if (send_ready_for_query)
+    send_ready_for_query = !pipelining;
+#endif
+
+#pragma warning "-------------------- /TEST ------------------"
 		    break;
 
 	    case 'D':			/* PqMsg_Describe : describe */
@@ -256,11 +263,18 @@ if (send_ready_for_query)
 				 * transaction block. Close it before calling
 				 * finish_xact_command.
 				 */
+PDEBUG("# 259: EndImplicitTransactionBlock: pending");
                 EndImplicitTransactionBlock();
 		        finish_xact_command();
 		        //valgrind_report_error_query("SYNC message");
     		    send_ready_for_query = true;
             }
+#if defined(PGL_LOOP)
+if (notifyInterruptPending)
+    PDEBUG("# 267: EndImplicitTransactionBlock: NOTIFICATION");
+else
+    PDEBUG("# 269: EndImplicitTransactionBlock: ok");
+#endif
 		    break;
 
 		    /*
