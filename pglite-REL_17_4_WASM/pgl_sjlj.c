@@ -56,7 +56,7 @@
 
        if (pq_buffer_remaining_data()>0) {
             if (canary_ex++ > 8)
-                abort;
+                abort();
             goto incoming;
        } else
             goto wire_flush;
