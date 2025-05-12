@@ -524,10 +524,13 @@ PDEBUG("# 500: NO DATA:" PGS_IN );
     printf("\n# 500: fd=%d is_embed=%d is_repl=%d is_wire=%d fd %s,len=%d cma=%d peek=%d [%s]\n", MyProcPort->sock, is_embed, is_repl, is_wire, PGS_OLOCK, packetlen,cma_rsize, peek, IO);
 #endif
 
-    // buffer query TODO: direct access ?
-    // CMA wire mode. -> packetlen was set to cma_rsize
-    resetStringInfo(inBuf);
-
+    if (is_repl) {
+	resetStringInfo(inBuf);
+	for (int i=0; i<packetlen; i++) {
+	    appendStringInfoChar(inBuf, IO[i]);
+	}
+    }
+	
     if (packetlen<2) {
         puts("# 512: WARNING: empty packet");
         //cma_rsize= 0;
