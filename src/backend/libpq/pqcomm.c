@@ -931,7 +931,7 @@ pq_recvbuf(void)
         querylen -= got;
         PqRecvLength += got;
         if (querylen<=0) {
-            puts("# 931: could close fp early here " __FILE__);
+            PDEBUG("# 931: could close fp early here " __FILE__);
             queryfp = NULL;
         }
         if (got>0)
@@ -1041,7 +1041,9 @@ pq_getbyte_if_available(unsigned char *c)
 		*c = PqRecvBuffer[PqRecvPointer++];
 		return 1;
 	}
-puts("# 1028: pq_getbyte_if_available N/I in " __FILE__ ); abort();
+#if defined(__EMSCRIPTEN__) || (__wasi__)
+puts("# 1044: pq_getbyte_if_available N/I in " __FILE__ ); abort();
+#else
 	/* Put the socket into non-blocking mode */
 	socket_set_nonblocking(true);
 
@@ -1078,7 +1080,7 @@ puts("# 1028: pq_getbyte_if_available N/I in " __FILE__ ); abort();
 		/* EOF detected */
 		r = EOF;
 	}
-
+#endif
 	return r;
 }
 
@@ -1175,7 +1177,7 @@ pq_recvbuf_fill(FILE* fp, int packetlen) {
         queryfp = fp;
         querylen = packetlen - got;
         PqRecvLength = got;
-puts("# 1160: input overflow");
+PDEBUG("# 1178: input overflow");
     } else {
         fread( PqRecvBuffer, packetlen, 1, fp);
         PqRecvLength = packetlen;
