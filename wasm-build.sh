@@ -64,8 +64,9 @@ else
     BUILD=emscripten
     if $DEBUG
     then
-        export COPTS="-O2 -g3 --no-wasm-opt"
-        export LOPTS=${LOPTS:-"-O2 -g3 --no-wasm-opt -sASSERTIONS=1"}
+        # clang default to O0 but specifying -O0 may trigger memory start address bug in emsdk
+        export COPTS="-g3 --no-wasm-opt"
+        export LOPTS=${LOPTS:-"-g3 --no-wasm-opt -sASSERTIONS=1"}
     else
         # DO NOT CHANGE COPTS - optimized wasm corruption fix
         export COPTS="-O2 -g3 --no-wasm-opt"
