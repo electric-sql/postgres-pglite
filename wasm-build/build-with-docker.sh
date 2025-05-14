@@ -32,8 +32,8 @@ fi
 docker run $@ \
   --rm \
   --env-file .buildconfig \
-  --workdir=/workspace \
-  -v ${WORKSPACE}/postgres-pglite:/workspace:rw \
+  --workdir=${WORKSPACE} \
+  -v ${WORKSPACE}/postgres-pglite:${WORKSPACE}:rw \
   -v ${WORKSPACE}/postgres-pglite/dist:/tmp/sdk/dist:rw \
   $IMG_NAME:$IMG_TAG \
   bash --noprofile --rcfile ${SDKROOT}/wasm32-bi-emscripten-shell.sh -ci "( ./wasm-build.sh ${WHAT:-\"contrib extra\"} $PROMPT"
