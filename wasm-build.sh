@@ -64,6 +64,7 @@ else
     BUILD=emscripten
     if $DEBUG
     then
+        # clang default to O0 but specifying -O0 may trigger memory start address bug in emsdk
         export COPTS="-g3 --no-wasm-opt"
         export LOPTS=${LOPTS:-"-g3 --no-wasm-opt -sASSERTIONS=1"}
     else
