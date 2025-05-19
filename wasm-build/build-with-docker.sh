@@ -35,6 +35,7 @@ fi
 docker run $@ \
   --rm \
   --env-file .buildconfig \
+  -e DEBUG=${DEBUG:-false} \
   --workdir=${DOCKER_WORKSPACE} \
   -v ${WORKSPACE}/postgres-pglite:${DOCKER_WORKSPACE}:rw \
   -v ${WORKSPACE}/postgres-pglite/dist:/tmp/sdk/dist:rw \
