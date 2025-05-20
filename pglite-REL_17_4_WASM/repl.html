@@ -307,7 +307,8 @@ pglite.wasi + filesystem: <a href=pglite-wasi.tar.xz download>Download file</a>
                     break
 
                 case 1:
-                    data = "SELECT now(), current_database(), session_user, current_user;"
+                    //data = "SELECT now(), current_database(), session_user, current_user;"
+                    data = "SELECT REPEAT('0123456789abcdef', 64*1024), block FROM generate_series(1,8) AS block;"
                     break
 /*
                 case 2:

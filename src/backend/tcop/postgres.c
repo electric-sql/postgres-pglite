@@ -110,6 +110,7 @@ int			restrict_nonsystem_relation_kind;
 #if (defined(__EMSCRIPTEN__) || defined(__wasi__))
 #if !defined(PGL_MAIN)
     volatile int cma_rsize = 0;
+    volatile bool sockfiles = false;
 #endif // PGL_MAIN
 bool quote_all_identifiers = false;
 FILE* SOCKET_FILE = NULL;
