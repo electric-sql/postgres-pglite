@@ -22,7 +22,7 @@ then
     echo -n
 else
     reset;
-    . /opt/python-wasm-sdk/wasm32-bi-emscripten-shell.sh
+    . ${SDKROOT:-/tmp/sdk}/wasm32-bi-emscripten-shell.sh
     export PGROOT=${PGROOT:-/tmp/pglite}
     export PATH=${PGROOT}/bin:$PATH
 fi
@@ -33,7 +33,7 @@ pushd build/vector
     # OPTFLAGS="" turns off arch optim (sse/neon).
     PG_CONFIG=${PGROOT}/bin/pg_config emmake make OPTFLAGS="" install || exit 33
 
-    cp sql/vector.sql sql/vector--0.8.0.sql ${PGROOT}/share/postgresql/extension/
+    cp sql/vector--0.8.0.sql ${PGROOT}/share/postgresql/extension/
     rm ${PGROOT}/share/postgresql/extension/vector--?.?.?--?.?.?.sql ${PGROOT}/share/postgresql/extension/vector.sql
 popd
 
