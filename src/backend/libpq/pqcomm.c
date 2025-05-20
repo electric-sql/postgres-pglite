@@ -1356,18 +1356,14 @@ internal_putbytes(const char *s, size_t len) {
     size_t amount;
     if (!sockfiles) {
 	    while (len > 0) {
-		    /* If buffer is full, then flush it out */
+		    /* If buffer is full, then flush it out from cma to file and continue from there */
 		    if (PqSendPointer >= PqSendBufferSize) {
-                fprintf(stderr, "# 1361: overflow %zu >= %d cma_rsize=%d CMA_MB=%d\n", PqSendPointer, PqSendBufferSize, cma_rsize, CMA_MB);
                 int redirected = fwrite(PqSendBuffer, 1, PqSendPointer, SOCKET_FILE);
-                fprintf(stderr, "# 1363: redirected %d/%zu from cma to file\n", redirected, PqSendPointer);
                 sockfiles = true;
+#if PGDEBUG
+                fprintf(stderr, "# 1364: overflow %zu >= %d redirect=%d cma_rsize=%d CMA_MB=%d \n", PqSendPointer, PqSendBufferSize, redirected, cma_rsize, CMA_MB);
+#endif
                 break;
-/*
-			    socket_set_nonblocking(false);
-			    if (internal_flush())
-				    return EOF;
-*/
 		    }
 		    amount = PqSendBufferSize - PqSendPointer;
 		    if (amount > len)
