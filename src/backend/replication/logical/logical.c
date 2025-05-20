@@ -542,28 +542,9 @@ CreateDecodingContext(XLogRecPtr start_lsn,
 				errdetail("This replication slot is being synchronized from the primary server."),
 				errhint("Specify another replication slot."));
 
-	/*
-	 * Check if slot has been invalidated due to max_slot_wal_keep_size. Avoid
-	 * "cannot get changes" wording in this errmsg because that'd be
-	 * confusingly ambiguous about no changes being available when called from
-	 * pg_logical_slot_get_changes_guts().
-	 */
-	if (MyReplicationSlot->data.invalidated == RS_INVAL_WAL_REMOVED)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("can no longer get changes from replication slot \"%s\"",
-						NameStr(MyReplicationSlot->data.name)),
-				 errdetail("This slot has been invalidated because it exceeded the maximum reserved size.")));
-
-	if (MyReplicationSlot->data.invalidated != RS_INVAL_NONE)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("can no longer get changes from replication slot \"%s\"",
-						NameStr(MyReplicationSlot->data.name)),
-				 errdetail("This slot has been invalidated because it was conflicting with recovery.")));
-
-	Assert(MyReplicationSlot->data.invalidated == RS_INVAL_NONE);
-	Assert(MyReplicationSlot->data.restart_lsn != InvalidXLogRecPtr);
+	/* slot must be valid to allow decoding */
+	Assert(slot->data.invalidated == RS_INVAL_NONE);
+	Assert(slot->data.restart_lsn != InvalidXLogRecPtr);
 
 	if (start_lsn == InvalidXLogRecPtr)
 	{
@@ -1847,7 +1828,19 @@ LogicalConfirmReceivedLocation(XLogRecPtr lsn)
 
 		SpinLockAcquire(&MyReplicationSlot->mutex);
 
-		MyReplicationSlot->data.confirmed_flush = lsn;
+		/*
+		 * Prevent moving the confirmed_flush backwards, as this could lead to
+		 * data duplication issues caused by replicating already replicated
+		 * changes.
+		 *
+		 * This can happen when a client acknowledges an LSN it doesn't have
+		 * to do anything for, and thus didn't store persistently. After a
+		 * restart, the client can send the prior LSN that it stored
+		 * persistently as an acknowledgement, but we need to ignore such an
+		 * LSN. See similar case handling in CreateDecodingContext.
+		 */
+		if (lsn > MyReplicationSlot->data.confirmed_flush)
+			MyReplicationSlot->data.confirmed_flush = lsn;
 
 		/* if we're past the location required for bumping xmin, do so */
 		if (MyReplicationSlot->candidate_xmin_lsn != InvalidXLogRecPtr &&
@@ -1912,7 +1905,14 @@ LogicalConfirmReceivedLocation(XLogRecPtr lsn)
 	else
 	{
 		SpinLockAcquire(&MyReplicationSlot->mutex);
-		MyReplicationSlot->data.confirmed_flush = lsn;
+
+		/*
+		 * Prevent moving the confirmed_flush backwards. See comments above
+		 * for the details.
+		 */
+		if (lsn > MyReplicationSlot->data.confirmed_flush)
+			MyReplicationSlot->data.confirmed_flush = lsn;
+
 		SpinLockRelease(&MyReplicationSlot->mutex);
 	}
 }
@@ -1940,16 +1940,16 @@ UpdateDecodingStats(LogicalDecodingContext *ctx)
 	if (rb->spillBytes <= 0 && rb->streamBytes <= 0 && rb->totalBytes <= 0)
 		return;
 
-	elog(DEBUG2, "UpdateDecodingStats: updating stats %p %lld %lld %lld %lld %lld %lld %lld %lld",
+	elog(DEBUG2, "UpdateDecodingStats: updating stats %p %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64,
 		 rb,
-		 (long long) rb->spillTxns,
-		 (long long) rb->spillCount,
-		 (long long) rb->spillBytes,
-		 (long long) rb->streamTxns,
-		 (long long) rb->streamCount,
-		 (long long) rb->streamBytes,
-		 (long long) rb->totalTxns,
-		 (long long) rb->totalBytes);
+		 rb->spillTxns,
+		 rb->spillCount,
+		 rb->spillBytes,
+		 rb->streamTxns,
+		 rb->streamCount,
+		 rb->streamBytes,
+		 rb->totalTxns,
+		 rb->totalBytes);
 
 	repSlotStat.spill_txns = rb->spillTxns;
 	repSlotStat.spill_count = rb->spillCount;

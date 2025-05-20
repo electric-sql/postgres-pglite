@@ -50,6 +50,7 @@
 #include "storage/procsignal.h"
 #include "storage/spin.h"
 #include "storage/standby.h"
+#include "utils/memutils.h"
 #include "utils/timeout.h"
 #include "utils/timestamp.h"
 
@@ -91,10 +92,28 @@ static void CheckDeadLock(void);
 
 
 /*
- * Report shared-memory space needed by InitProcGlobal.
+ * Report shared-memory space needed by PGPROC.
  */
-Size
-ProcGlobalShmemSize(void)
+static Size
+PGProcShmemSize(void)
+{
+	Size		size = 0;
+	Size		TotalProcs =
+		add_size(MaxBackends, add_size(NUM_AUXILIARY_PROCS, max_prepared_xacts));
+
+	size = add_size(size, mul_size(TotalProcs, sizeof(PGPROC)));
+	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->xids)));
+	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->subxidStates)));
+	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->statusFlags)));
+
+	return size;
+}
+
+/*
+ * Report shared-memory space needed by Fast-Path locks.
+ */
+static Size
+FastPathLockShmemSize(void)
 {
 	Size		size = 0;
 	Size		TotalProcs =
@@ -102,23 +121,32 @@ ProcGlobalShmemSize(void)
 	Size		fpLockBitsSize,
 				fpRelIdSize;
 
-	/* ProcGlobal */
-	size = add_size(size, sizeof(PROC_HDR));
-	size = add_size(size, mul_size(TotalProcs, sizeof(PGPROC)));
-	size = add_size(size, sizeof(slock_t));
-
-	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->xids)));
-	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->subxidStates)));
-	size = add_size(size, mul_size(TotalProcs, sizeof(*ProcGlobal->statusFlags)));
-
 	/*
 	 * Memory needed for PGPROC fast-path lock arrays. Make sure the sizes are
 	 * nicely aligned in each backend.
 	 */
 	fpLockBitsSize = MAXALIGN(FastPathLockGroupsPerBackend * sizeof(uint64));
-	fpRelIdSize = MAXALIGN(FastPathLockGroupsPerBackend * sizeof(Oid) * FP_LOCK_SLOTS_PER_GROUP);
+	fpRelIdSize = MAXALIGN(FastPathLockSlotsPerBackend() * sizeof(Oid));
 
 	size = add_size(size, mul_size(TotalProcs, (fpLockBitsSize + fpRelIdSize)));
+
+	return size;
+}
+
+/*
+ * Report shared-memory space needed by InitProcGlobal.
+ */
+Size
+ProcGlobalShmemSize(void)
+{
+	Size		size = 0;
+
+	/* ProcGlobal */
+	size = add_size(size, sizeof(PROC_HDR));
+	size = add_size(size, sizeof(slock_t));
+
+	size = add_size(size, PGProcShmemSize());
+	size = add_size(size, FastPathLockShmemSize());
 
 	return size;
 }
@@ -175,6 +203,8 @@ InitProcGlobal(void)
 			   *fpEndPtr PG_USED_FOR_ASSERTS_ONLY;
 	Size		fpLockBitsSize,
 				fpRelIdSize;
+	Size		requestSize;
+	char	   *ptr;
 
 	/* Create the ProcGlobal shared structure */
 	ProcGlobal = (PROC_HDR *)
@@ -204,8 +234,17 @@ InitProcGlobal(void)
 	 * with a single freelist.)  Each PGPROC structure is dedicated to exactly
 	 * one of these purposes, and they do not move between groups.
 	 */
-	procs = (PGPROC *) ShmemAlloc(TotalProcs * sizeof(PGPROC));
-	MemSet(procs, 0, TotalProcs * sizeof(PGPROC));
+	requestSize = PGProcShmemSize();
+
+	ptr = ShmemInitStruct("PGPROC structures",
+						  requestSize,
+						  &found);
+
+	MemSet(ptr, 0, requestSize);
+
+	procs = (PGPROC *) ptr;
+	ptr = (char *) ptr + TotalProcs * sizeof(PGPROC);
+
 	ProcGlobal->allProcs = procs;
 	/* XXX allProcCount isn't really all of them; it excludes prepared xacts */
 	ProcGlobal->allProcCount = MaxBackends + NUM_AUXILIARY_PROCS;
@@ -217,13 +256,17 @@ InitProcGlobal(void)
 	 * XXX: It might make sense to increase padding for these arrays, given
 	 * how hotly they are accessed.
 	 */
-	ProcGlobal->xids =
-		(TransactionId *) ShmemAlloc(TotalProcs * sizeof(*ProcGlobal->xids));
-	MemSet(ProcGlobal->xids, 0, TotalProcs * sizeof(*ProcGlobal->xids));
-	ProcGlobal->subxidStates = (XidCacheStatus *) ShmemAlloc(TotalProcs * sizeof(*ProcGlobal->subxidStates));
-	MemSet(ProcGlobal->subxidStates, 0, TotalProcs * sizeof(*ProcGlobal->subxidStates));
-	ProcGlobal->statusFlags = (uint8 *) ShmemAlloc(TotalProcs * sizeof(*ProcGlobal->statusFlags));
-	MemSet(ProcGlobal->statusFlags, 0, TotalProcs * sizeof(*ProcGlobal->statusFlags));
+	ProcGlobal->xids = (TransactionId *) ptr;
+	ptr = (char *) ptr + (TotalProcs * sizeof(*ProcGlobal->xids));
+
+	ProcGlobal->subxidStates = (XidCacheStatus *) ptr;
+	ptr = (char *) ptr + (TotalProcs * sizeof(*ProcGlobal->subxidStates));
+
+	ProcGlobal->statusFlags = (uint8 *) ptr;
+	ptr = (char *) ptr + (TotalProcs * sizeof(*ProcGlobal->statusFlags));
+
+	/* make sure wer didn't overflow */
+	Assert((ptr > (char *) procs) && (ptr <= (char *) procs + requestSize));
 
 	/*
 	 * Allocate arrays for fast-path locks. Those are variable-length, so
@@ -231,13 +274,18 @@ InitProcGlobal(void)
 	 * shared memory and then divide that between backends.
 	 */
 	fpLockBitsSize = MAXALIGN(FastPathLockGroupsPerBackend * sizeof(uint64));
-	fpRelIdSize = MAXALIGN(FastPathLockGroupsPerBackend * sizeof(Oid) * FP_LOCK_SLOTS_PER_GROUP);
+	fpRelIdSize = MAXALIGN(FastPathLockSlotsPerBackend() * sizeof(Oid));
 
-	fpPtr = ShmemAlloc(TotalProcs * (fpLockBitsSize + fpRelIdSize));
-	MemSet(fpPtr, 0, TotalProcs * (fpLockBitsSize + fpRelIdSize));
+	requestSize = FastPathLockShmemSize();
+
+	fpPtr = ShmemInitStruct("Fast-Path Lock Array",
+							requestSize,
+							&found);
+
+	MemSet(fpPtr, 0, requestSize);
 
 	/* For asserts checking we did not overflow. */
-	fpEndPtr = fpPtr + (TotalProcs * (fpLockBitsSize + fpRelIdSize));
+	fpEndPtr = fpPtr + requestSize;
 
 	for (i = 0; i < TotalProcs; i++)
 	{
@@ -330,7 +378,9 @@ InitProcGlobal(void)
 	PreparedXactProcs = &procs[MaxBackends + NUM_AUXILIARY_PROCS];
 
 	/* Create ProcStructLock spinlock, too */
-	ProcStructLock = (slock_t *) ShmemAlloc(sizeof(slock_t));
+	ProcStructLock = (slock_t *) ShmemInitStruct("ProcStructLock spinlock",
+												 sizeof(slock_t),
+												 &found);
 	SpinLockInit(ProcStructLock);
 }
 
@@ -813,6 +863,8 @@ LockErrorCleanup(void)
 		if (MyProc->waitStatus == PROC_WAIT_STATUS_OK)
 			GrantAwaitedLock();
 	}
+
+	ResetAwaitedLock();
 
 	LWLockRelease(partitionLock);
 
@@ -1514,10 +1566,6 @@ ProcSleep(LOCALLOCK *locallock)
 			long		secs;
 			int			usecs;
 			long		msecs;
-			dlist_iter	proc_iter;
-			PROCLOCK   *curproclock;
-			bool		first_holder = true,
-						first_waiter = true;
 			int			lockHoldersNum = 0;
 
 			initStringInfo(&buf);
@@ -1533,54 +1581,10 @@ ProcSleep(LOCALLOCK *locallock)
 			msecs = secs * 1000 + usecs / 1000;
 			usecs = usecs % 1000;
 
-			/*
-			 * we loop over the lock's procLocks to gather a list of all
-			 * holders and waiters. Thus we will be able to provide more
-			 * detailed information for lock debugging purposes.
-			 *
-			 * lock->procLocks contains all processes which hold or wait for
-			 * this lock.
-			 */
-
+			/* Gather a list of all lock holders and waiters */
 			LWLockAcquire(partitionLock, LW_SHARED);
-
-			dlist_foreach(proc_iter, &lock->procLocks)
-			{
-				curproclock =
-					dlist_container(PROCLOCK, lockLink, proc_iter.cur);
-
-				/*
-				 * we are a waiter if myProc->waitProcLock == curproclock; we
-				 * are a holder if it is NULL or something different
-				 */
-				if (curproclock->tag.myProc->waitProcLock == curproclock)
-				{
-					if (first_waiter)
-					{
-						appendStringInfo(&lock_waiters_sbuf, "%d",
-										 curproclock->tag.myProc->pid);
-						first_waiter = false;
-					}
-					else
-						appendStringInfo(&lock_waiters_sbuf, ", %d",
-										 curproclock->tag.myProc->pid);
-				}
-				else
-				{
-					if (first_holder)
-					{
-						appendStringInfo(&lock_holders_sbuf, "%d",
-										 curproclock->tag.myProc->pid);
-						first_holder = false;
-					}
-					else
-						appendStringInfo(&lock_holders_sbuf, ", %d",
-										 curproclock->tag.myProc->pid);
-
-					lockHoldersNum++;
-				}
-			}
-
+			GetLockHoldersAndWaiters(locallock, &lock_holders_sbuf,
+									 &lock_waiters_sbuf, &lockHoldersNum);
 			LWLockRelease(partitionLock);
 
 			if (deadlock_state == DS_SOFT_DEADLOCK)
@@ -1883,6 +1887,81 @@ CheckDeadLockAlert(void)
 	 */
 	SetLatch(MyLatch);
 	errno = save_errno;
+}
+
+/*
+ * GetLockHoldersAndWaiters - get lock holders and waiters for a lock
+ *
+ * Fill lock_holders_sbuf and lock_waiters_sbuf with the PIDs of processes holding
+ * and waiting for the lock, and set lockHoldersNum to the number of lock holders.
+ *
+ * The lock table's partition lock must be held on entry and remains held on exit.
+ */
+void
+GetLockHoldersAndWaiters(LOCALLOCK *locallock, StringInfo lock_holders_sbuf,
+						 StringInfo lock_waiters_sbuf, int *lockHoldersNum)
+{
+	dlist_iter	proc_iter;
+	PROCLOCK   *curproclock;
+	LOCK	   *lock = locallock->lock;
+	bool		first_holder = true,
+				first_waiter = true;
+
+#ifdef USE_ASSERT_CHECKING
+	{
+		uint32		hashcode = locallock->hashcode;
+		LWLock	   *partitionLock = LockHashPartitionLock(hashcode);
+
+		Assert(LWLockHeldByMe(partitionLock));
+	}
+#endif
+
+	*lockHoldersNum = 0;
+
+	/*
+	 * Loop over the lock's procLocks to gather a list of all holders and
+	 * waiters. Thus we will be able to provide more detailed information for
+	 * lock debugging purposes.
+	 *
+	 * lock->procLocks contains all processes which hold or wait for this
+	 * lock.
+	 */
+	dlist_foreach(proc_iter, &lock->procLocks)
+	{
+		curproclock =
+			dlist_container(PROCLOCK, lockLink, proc_iter.cur);
+
+		/*
+		 * We are a waiter if myProc->waitProcLock == curproclock; we are a
+		 * holder if it is NULL or something different.
+		 */
+		if (curproclock->tag.myProc->waitProcLock == curproclock)
+		{
+			if (first_waiter)
+			{
+				appendStringInfo(lock_waiters_sbuf, "%d",
+								 curproclock->tag.myProc->pid);
+				first_waiter = false;
+			}
+			else
+				appendStringInfo(lock_waiters_sbuf, ", %d",
+								 curproclock->tag.myProc->pid);
+		}
+		else
+		{
+			if (first_holder)
+			{
+				appendStringInfo(lock_holders_sbuf, "%d",
+								 curproclock->tag.myProc->pid);
+				first_holder = false;
+			}
+			else
+				appendStringInfo(lock_holders_sbuf, ", %d",
+								 curproclock->tag.myProc->pid);
+
+			(*lockHoldersNum)++;
+		}
+	}
 }
 
 /*

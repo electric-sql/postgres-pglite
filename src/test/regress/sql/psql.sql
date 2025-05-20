@@ -1047,11 +1047,15 @@ select \if false \\ (bogus \else \\ 42 \endif \\ forty_two;
 	\echo arg1 arg2 arg3 arg4 arg5
 	\echo arg1
 	\encoding arg1
+	\endpipeline
 	\errverbose
 	\f arg1
+	\flush
+	\flushrequest
 	\g arg1
 	\gx arg1
 	\gexec
+	\getresults
 	SELECT 1 AS one \gset
 	\h
 	\?
@@ -1070,10 +1074,13 @@ select \if false \\ (bogus \else \\ 42 \endif \\ forty_two;
 	\q
 	\reset
 	\s arg1
+	\sendpipeline
 	\set arg1 arg2 arg3 arg4 arg5 arg6 arg7
 	\setenv arg1 arg2
 	\sf whole_line
 	\sv whole_line
+	\startpipeline
+	\syncpipeline
 	\t arg1
 	\T arg1
 	\timing arg1

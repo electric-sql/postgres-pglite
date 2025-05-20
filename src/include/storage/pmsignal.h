@@ -17,11 +17,11 @@
 #include <signal.h>
 
 #ifdef HAVE_SYS_PRCTL_H
-#include "sys/prctl.h"
+#include <sys/prctl.h>
 #endif
 
 #ifdef HAVE_SYS_PROCCTL_H
-#include "sys/procctl.h"
+#include <sys/procctl.h>
 #endif
 
 /*
@@ -33,6 +33,7 @@
 typedef enum
 {
 	PMSIGNAL_RECOVERY_STARTED,	/* recovery has started */
+	PMSIGNAL_RECOVERY_CONSISTENT,	/* recovery has reached consistent state */
 	PMSIGNAL_BEGIN_HOT_STANDBY, /* begin Hot Standby */
 	PMSIGNAL_ROTATE_LOGFILE,	/* send SIGUSR1 to syslogger to rotate logfile */
 	PMSIGNAL_START_AUTOVAC_LAUNCHER,	/* start an autovacuum launcher */
@@ -40,9 +41,10 @@ typedef enum
 	PMSIGNAL_BACKGROUND_WORKER_CHANGE,	/* background worker state change */
 	PMSIGNAL_START_WALRECEIVER, /* start a walreceiver */
 	PMSIGNAL_ADVANCE_STATE_MACHINE, /* advance postmaster's state machine */
+	PMSIGNAL_XLOG_IS_SHUTDOWN,	/* ShutdownXLOG() completed */
 } PMSignalReason;
 
-#define NUM_PMSIGNALS (PMSIGNAL_ADVANCE_STATE_MACHINE+1)
+#define NUM_PMSIGNALS (PMSIGNAL_XLOG_IS_SHUTDOWN+1)
 
 /*
  * Reasons why the postmaster would send SIGQUIT to its children.

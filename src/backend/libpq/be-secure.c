@@ -131,7 +131,7 @@ secure_open_server(Port *port)
 	}
 	Assert(pq_buffer_remaining_data() == 0);
 
-	INJECTION_POINT("backend-ssl-startup");
+	INJECTION_POINT("backend-ssl-startup", NULL);
 
 	r = be_tls_open_server(port);
 
@@ -302,7 +302,7 @@ secure_raw_read(Port *port, void *ptr, size_t len)
  *	Write data to a secure connection.
  */
 ssize_t
-secure_write(Port *port, void *ptr, size_t len)
+secure_write(Port *port, const void *ptr, size_t len)
 {
 	ssize_t		n;
 	int			waitfor;

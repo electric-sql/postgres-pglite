@@ -11,7 +11,6 @@
 #ifndef PGSTAT_H
 #define PGSTAT_H
 
-#include "access/xlogdefs.h"
 #include "datatype/timestamp.h"
 #include "portability/instr_time.h"
 #include "postmaster/pgarch.h"	/* for MAX_XFN_CHARS */
@@ -212,7 +211,7 @@ typedef struct PgStat_TableXactStatus
  * ------------------------------------------------------------
  */
 
-#define PGSTAT_FILE_FORMAT_ID	0x01A5BCB1
+#define PGSTAT_FILE_FORMAT_ID	0x01A5BCB7
 
 typedef struct PgStat_ArchiverStats
 {
@@ -274,14 +273,16 @@ typedef enum IOObject
 {
 	IOOBJECT_RELATION,
 	IOOBJECT_TEMP_RELATION,
+	IOOBJECT_WAL,
 } IOObject;
 
-#define IOOBJECT_NUM_TYPES (IOOBJECT_TEMP_RELATION + 1)
+#define IOOBJECT_NUM_TYPES (IOOBJECT_WAL + 1)
 
 typedef enum IOContext
 {
 	IOCONTEXT_BULKREAD,
 	IOCONTEXT_BULKWRITE,
+	IOCONTEXT_INIT,
 	IOCONTEXT_NORMAL,
 	IOCONTEXT_VACUUM,
 } IOContext;
@@ -314,6 +315,10 @@ typedef enum IOOp
 
 #define IOOP_NUM_TYPES (IOOP_WRITE + 1)
 
+#define pgstat_is_ioop_tracked_in_bytes(io_op) \
+	(((unsigned int) (io_op)) < IOOP_NUM_TYPES && \
+	 ((unsigned int) (io_op)) >= IOOP_EXTEND)
+
 typedef struct PgStat_BktypeIO
 {
 	uint64		bytes[IOOBJECT_NUM_TYPES][IOCONTEXT_NUM_TYPES][IOOP_NUM_TYPES];
@@ -333,24 +338,6 @@ typedef struct PgStat_IO
 	TimestampTz stat_reset_timestamp;
 	PgStat_BktypeIO stats[BACKEND_NUM_TYPES];
 } PgStat_IO;
-
-typedef struct PgStat_Backend
-{
-	TimestampTz stat_reset_timestamp;
-	PgStat_BktypeIO io_stats;
-} PgStat_Backend;
-
-/* ---------
- * PgStat_BackendPending	Non-flushed backend stats.
- * ---------
- */
-typedef struct PgStat_BackendPending
-{
-	/*
-	 * Backend statistics store the same amount of IO data as PGSTAT_KIND_IO.
-	 */
-	PgStat_PendingIO pending_io;
-} PgStat_BackendPending;
 
 typedef struct PgStat_StatDBEntry
 {
@@ -461,36 +448,61 @@ typedef struct PgStat_StatTabEntry
 	PgStat_Counter analyze_count;
 	TimestampTz last_autoanalyze_time;	/* autovacuum initiated */
 	PgStat_Counter autoanalyze_count;
+
+	PgStat_Counter total_vacuum_time;	/* times in milliseconds */
+	PgStat_Counter total_autovacuum_time;
+	PgStat_Counter total_analyze_time;
+	PgStat_Counter total_autoanalyze_time;
 } PgStat_StatTabEntry;
 
-typedef struct PgStat_WalStats
+/* ------
+ * PgStat_WalCounters	WAL activity data gathered from WalUsage
+ *
+ * This stores all the counters and data gathered from WalUsage for WAL
+ * activity statistics, separated into its own structure so as this can be
+ * shared across multiple Stats structures.
+ * ------
+ */
+typedef struct PgStat_WalCounters
 {
 	PgStat_Counter wal_records;
 	PgStat_Counter wal_fpi;
 	uint64		wal_bytes;
 	PgStat_Counter wal_buffers_full;
-	PgStat_Counter wal_write;
-	PgStat_Counter wal_sync;
-	PgStat_Counter wal_write_time;
-	PgStat_Counter wal_sync_time;
+} PgStat_WalCounters;
+
+/* -------
+ * PgStat_WalStats		WAL statistics
+ * -------
+ */
+typedef struct PgStat_WalStats
+{
+	PgStat_WalCounters wal_counters;
 	TimestampTz stat_reset_timestamp;
 } PgStat_WalStats;
 
-/*
- * This struct stores wal-related durations as instr_time, which makes it
- * cheaper and easier to accumulate them, by not requiring type
- * conversions. During stats flush instr_time will be converted into
- * microseconds.
+/* -------
+ * PgStat_Backend		Backend statistics
+ * -------
  */
-typedef struct PgStat_PendingWalStats
+typedef struct PgStat_Backend
 {
-	PgStat_Counter wal_buffers_full;
-	PgStat_Counter wal_write;
-	PgStat_Counter wal_sync;
-	instr_time	wal_write_time;
-	instr_time	wal_sync_time;
-} PgStat_PendingWalStats;
+	TimestampTz stat_reset_timestamp;
+	PgStat_BktypeIO io_stats;
+	PgStat_WalCounters wal_counters;
+} PgStat_Backend;
 
+/* ---------
+ * PgStat_BackendPending	Non-flushed backend stats.
+ * ---------
+ */
+typedef struct PgStat_BackendPending
+{
+	/*
+	 * Backend statistics store the same amount of IO data as PGSTAT_KIND_IO.
+	 */
+	PgStat_PendingIO pending_io;
+} PgStat_BackendPending;
 
 /*
  * Functions in pgstat.c
@@ -501,7 +513,7 @@ extern Size StatsShmemSize(void);
 extern void StatsShmemInit(void);
 
 /* Functions called during server startup / shutdown */
-extern void pgstat_restore_stats(XLogRecPtr redo);
+extern void pgstat_restore_stats(void);
 extern void pgstat_discard_stats(void);
 extern void pgstat_before_server_shutdown(int code, Datum arg);
 
@@ -536,7 +548,18 @@ extern PgStat_ArchiverStats *pgstat_fetch_stat_archiver(void);
  * Functions in pgstat_backend.c
  */
 
+/* used by pgstat_io.c for I/O stats tracked in backends */
+extern void pgstat_count_backend_io_op_time(IOObject io_object,
+											IOContext io_context,
+											IOOp io_op,
+											instr_time io_time);
+extern void pgstat_count_backend_io_op(IOObject io_object,
+									   IOContext io_context,
+									   IOOp io_op, uint32 cnt,
+									   uint64 bytes);
 extern PgStat_Backend *pgstat_fetch_stat_backend(ProcNumber procNumber);
+extern PgStat_Backend *pgstat_fetch_stat_backend_by_pid(int pid,
+														BackendType *bktype);
 extern bool pgstat_tracks_backend_bktype(BackendType bktype);
 extern void pgstat_create_backend(ProcNumber procnum);
 
@@ -588,8 +611,8 @@ extern void pgstat_drop_database(Oid databaseid);
 extern void pgstat_report_autovac(Oid dboid);
 extern void pgstat_report_recovery_conflict(int reason);
 extern void pgstat_report_deadlock(void);
+extern void pgstat_prepare_report_checksum_failure(Oid dboid);
 extern void pgstat_report_checksum_failures_in_db(Oid dboid, int failurecount);
-extern void pgstat_report_checksum_failure(void);
 extern void pgstat_report_connect(Oid dboid);
 extern void pgstat_update_parallel_workers_stats(PgStat_Counter workers_to_launch,
 												 PgStat_Counter workers_launched);
@@ -636,10 +659,11 @@ extern void pgstat_assoc_relation(Relation rel);
 extern void pgstat_unlink_relation(Relation rel);
 
 extern void pgstat_report_vacuum(Oid tableoid, bool shared,
-								 PgStat_Counter livetuples, PgStat_Counter deadtuples);
+								 PgStat_Counter livetuples, PgStat_Counter deadtuples,
+								 TimestampTz starttime);
 extern void pgstat_report_analyze(Relation rel,
 								  PgStat_Counter livetuples, PgStat_Counter deadtuples,
-								  bool resetcounter);
+								  bool resetcounter, TimestampTz starttime);
 
 /*
  * If stats are enabled, but pending data hasn't been prepared yet, call
@@ -813,14 +837,5 @@ extern PGDLLIMPORT PgStat_Counter pgStatTransactionIdleTime;
 
 /* updated by the traffic cop and in errfinish() */
 extern PGDLLIMPORT SessionEndType pgStatSessionEndCause;
-
-
-/*
- * Variables in pgstat_wal.c
- */
-
-/* updated directly by backends and background processes */
-extern PGDLLIMPORT PgStat_PendingWalStats PendingWalStats;
-
 
 #endif							/* PGSTAT_H */

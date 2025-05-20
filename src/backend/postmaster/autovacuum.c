@@ -88,6 +88,7 @@
 #include "postmaster/autovacuum.h"
 #include "postmaster/interrupt.h"
 #include "postmaster/postmaster.h"
+#include "storage/aio_subsys.h"
 #include "storage/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
@@ -120,6 +121,7 @@ int			autovacuum_max_workers;
 int			autovacuum_work_mem = -1;
 int			autovacuum_naptime;
 int			autovacuum_vac_thresh;
+int			autovacuum_vac_max_thresh;
 double		autovacuum_vac_scale;
 int			autovacuum_vac_ins_thresh;
 double		autovacuum_vac_ins_scale;
@@ -315,8 +317,8 @@ static WorkerInfo MyWorkerInfo = NULL;
 int			AutovacuumLauncherPid = 0;
 
 static Oid	do_start_worker(void);
-static void HandleAutoVacLauncherInterrupts(void);
-static void AutoVacLauncherShutdown(void) pg_attribute_noreturn();
+static void ProcessAutoVacLauncherInterrupts(void);
+pg_noreturn static void AutoVacLauncherShutdown(void);
 static void launcher_determine_sleep(bool canlaunch, bool recursing,
 									 struct timeval *nap);
 static void launch_worker(TimestampTz now);
@@ -363,7 +365,7 @@ static void check_av_worker_gucs(void);
  * Main entry point for the autovacuum launcher process.
  */
 void
-AutoVacLauncherMain(char *startup_data, size_t startup_data_len)
+AutoVacLauncherMain(const void *startup_data, size_t startup_data_len)
 {
 	sigjmp_buf	local_sigjmp_buf;
 
@@ -464,6 +466,7 @@ AutoVacLauncherMain(char *startup_data, size_t startup_data_len)
 		 */
 		LWLockReleaseAll();
 		pgstat_report_wait_end();
+		pgaio_error_cleanup();
 		UnlockBuffers();
 		/* this is probably dead code, but let's be safe: */
 		if (AuxProcessResourceOwner)
@@ -593,7 +596,7 @@ AutoVacLauncherMain(char *startup_data, size_t startup_data_len)
 
 		ResetLatch(MyLatch);
 
-		HandleAutoVacLauncherInterrupts();
+		ProcessAutoVacLauncherInterrupts();
 
 		/*
 		 * a worker finished, or postmaster signaled failure to start a worker
@@ -741,7 +744,7 @@ AutoVacLauncherMain(char *startup_data, size_t startup_data_len)
  * Process any new interrupts.
  */
 static void
-HandleAutoVacLauncherInterrupts(void)
+ProcessAutoVacLauncherInterrupts(void)
 {
 	/* the normal shutdown case */
 	if (ShutdownRequestPending)
@@ -777,6 +780,10 @@ HandleAutoVacLauncherInterrupts(void)
 	/* Perform logging of memory contexts of this process */
 	if (LogMemoryContextPending)
 		ProcessLogMemoryContextInterrupt();
+
+	/* Publish memory contexts of this process */
+	if (PublishMemoryContextPending)
+		ProcessGetMemoryContextInterrupt();
 
 	/* Process sinval catchup interrupts that happened while sleeping */
 	ProcessCatchupInterrupt();
@@ -1370,7 +1377,7 @@ avl_sigusr2_handler(SIGNAL_ARGS)
  * Main entry point for autovacuum worker processes.
  */
 void
-AutoVacWorkerMain(char *startup_data, size_t startup_data_len)
+AutoVacWorkerMain(const void *startup_data, size_t startup_data_len)
 {
 	sigjmp_buf	local_sigjmp_buf;
 	Oid			dbid;
@@ -1915,7 +1922,7 @@ do_autovacuum(void)
 	 * This injection point is put in a transaction block to work with a wait
 	 * that uses a condition variable.
 	 */
-	INJECTION_POINT("autovacuum-worker-start");
+	INJECTION_POINT("autovacuum-worker-start", NULL);
 
 	/*
 	 * Compute the multixact age for which freezing is urgent.  This is
@@ -2826,6 +2833,12 @@ table_recheck_autovac(Oid relid, HTAB *table_toast_map,
 		tab->at_params.is_wraparound = wraparound;
 		tab->at_params.log_min_duration = log_min_duration;
 		tab->at_params.toast_parent = InvalidOid;
+
+		/*
+		 * Later, in vacuum_rel(), we check reloptions for any
+		 * vacuum_max_eager_freeze_failure_rate override.
+		 */
+		tab->at_params.max_eager_freeze_failure_rate = vacuum_max_eager_freeze_failure_rate;
 		tab->at_storage_param_vac_cost_limit = avopts ?
 			avopts->vacuum_cost_limit : 0;
 		tab->at_storage_param_vac_cost_delay = avopts ?
@@ -2895,6 +2908,8 @@ recheck_relation_needs_vacanalyze(Oid relid,
  * threshold.  This threshold is calculated as
  *
  * threshold = vac_base_thresh + vac_scale_factor * reltuples
+ * if (threshold > vac_max_thresh)
+ *     threshold = vac_max_thresh;
  *
  * For analyze, the analysis done is that the number of tuples inserted,
  * deleted and updated since the last analyze exceeds a threshold calculated
@@ -2929,10 +2944,10 @@ relation_needs_vacanalyze(Oid relid,
 {
 	bool		force_vacuum;
 	bool		av_enabled;
-	float4		reltuples;		/* pg_class.reltuples */
 
 	/* constants from reloptions or GUC variables */
 	int			vac_base_thresh,
+				vac_max_thresh,
 				vac_ins_base_thresh,
 				anl_base_thresh;
 	float4		vac_scale_factor,
@@ -2973,6 +2988,11 @@ relation_needs_vacanalyze(Oid relid,
 	vac_base_thresh = (relopts && relopts->vacuum_threshold >= 0)
 		? relopts->vacuum_threshold
 		: autovacuum_vac_thresh;
+
+	/* -1 is used to disable max threshold */
+	vac_max_thresh = (relopts && relopts->vacuum_max_threshold >= -1)
+		? relopts->vacuum_max_threshold
+		: autovacuum_vac_max_thresh;
 
 	vac_ins_scale_factor = (relopts && relopts->vacuum_ins_scale_factor >= 0)
 		? relopts->vacuum_ins_scale_factor
@@ -3037,7 +3057,11 @@ relation_needs_vacanalyze(Oid relid,
 	 */
 	if (PointerIsValid(tabentry) && AutoVacuumingActive())
 	{
-		reltuples = classForm->reltuples;
+		float4		pcnt_unfrozen = 1;
+		float4		reltuples = classForm->reltuples;
+		int32		relpages = classForm->relpages;
+		int32		relallfrozen = classForm->relallfrozen;
+
 		vactuples = tabentry->dead_tuples;
 		instuples = tabentry->ins_since_vacuum;
 		anltuples = tabentry->mod_since_analyze;
@@ -3046,8 +3070,29 @@ relation_needs_vacanalyze(Oid relid,
 		if (reltuples < 0)
 			reltuples = 0;
 
+		/*
+		 * If we have data for relallfrozen, calculate the unfrozen percentage
+		 * of the table to modify insert scale factor. This helps us decide
+		 * whether or not to vacuum an insert-heavy table based on the number
+		 * of inserts to the more "active" part of the table.
+		 */
+		if (relpages > 0 && relallfrozen > 0)
+		{
+			/*
+			 * It could be the stats were updated manually and relallfrozen >
+			 * relpages. Clamp relallfrozen to relpages to avoid nonsensical
+			 * calculations.
+			 */
+			relallfrozen = Min(relallfrozen, relpages);
+			pcnt_unfrozen = 1 - ((float4) relallfrozen / relpages);
+		}
+
 		vacthresh = (float4) vac_base_thresh + vac_scale_factor * reltuples;
-		vacinsthresh = (float4) vac_ins_base_thresh + vac_ins_scale_factor * reltuples;
+		if (vac_max_thresh >= 0 && vacthresh > (float4) vac_max_thresh)
+			vacthresh = (float4) vac_max_thresh;
+
+		vacinsthresh = (float4) vac_ins_base_thresh +
+			vac_ins_scale_factor * reltuples * pcnt_unfrozen;
 		anlthresh = (float4) anl_base_thresh + anl_scale_factor * reltuples;
 
 		/*

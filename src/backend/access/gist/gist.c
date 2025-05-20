@@ -65,6 +65,9 @@ gisthandler(PG_FUNCTION_ARGS)
 	amroutine->amoptsprocnum = GIST_OPTIONS_PROC;
 	amroutine->amcanorder = false;
 	amroutine->amcanorderbyop = true;
+	amroutine->amcanhash = false;
+	amroutine->amconsistentequality = false;
+	amroutine->amconsistentordering = false;
 	amroutine->amcanbackward = false;
 	amroutine->amcanunique = false;
 	amroutine->amcanmulticol = true;
@@ -107,6 +110,8 @@ gisthandler(PG_FUNCTION_ARGS)
 	amroutine->amestimateparallelscan = NULL;
 	amroutine->aminitparallelscan = NULL;
 	amroutine->amparallelrescan = NULL;
+	amroutine->amtranslatestrategy = NULL;
+	amroutine->amtranslatecmptype = gisttranslatecmptype;
 
 	PG_RETURN_POINTER(amroutine);
 }
@@ -1043,12 +1048,19 @@ gistFindCorrectParent(Relation r, GISTInsertStack *child, bool is_build)
 	/*
 	 * The page has changed since we looked. During normal operation, every
 	 * update of a page changes its LSN, so the LSN we memorized should have
-	 * changed too. During index build, however, we don't WAL-log the changes
-	 * until we have built the index, so the LSN doesn't change. There is no
-	 * concurrent activity during index build, but we might have changed the
-	 * parent ourselves.
+	 * changed too.
+	 *
+	 * During index build, however, we don't WAL-log the changes until we have
+	 * built the index, so the LSN doesn't change. There is no concurrent
+	 * activity during index build, but we might have changed the parent
+	 * ourselves.
+	 *
+	 * We will also get here if child->downlinkoffnum is invalid. That happens
+	 * if 'parent' had been updated by an earlier call to this function on its
+	 * grandchild, which had to move right.
 	 */
-	Assert(parent->lsn != PageGetLSN(parent->page) || is_build);
+	Assert(parent->lsn != PageGetLSN(parent->page) || is_build ||
+		   child->downlinkoffnum == InvalidOffsetNumber);
 
 	/*
 	 * Scan the page to re-find the downlink. If the page was split, it might

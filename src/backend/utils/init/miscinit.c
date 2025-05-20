@@ -127,7 +127,7 @@ InitPostmasterChild(void)
 #endif
 
 	/* Initialize process-local latch support */
-	InitializeLatchSupport();
+	InitializeWaitEventSupport();
 	InitProcessLocalLatch();
 	InitializeLatchWaitSet();
 
@@ -188,7 +188,7 @@ InitStandaloneProcess(const char *argv0)
 	InitProcessGlobals();
 
 	/* Initialize process-local latch support */
-	InitializeLatchSupport();
+	InitializeWaitEventSupport();
 	InitProcessLocalLatch();
 	InitializeLatchWaitSet();
 
@@ -292,6 +292,9 @@ GetBackendTypeDesc(BackendType backendType)
 			break;
 		case B_CHECKPOINTER:
 			backendDesc = gettext_noop("checkpointer");
+			break;
+		case B_IO_WORKER:
+			backendDesc = gettext_noop("io worker");
 			break;
 		case B_LOGGER:
 			backendDesc = gettext_noop("logger");

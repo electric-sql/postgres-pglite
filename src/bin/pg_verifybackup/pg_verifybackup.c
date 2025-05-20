@@ -15,14 +15,15 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <time.h>
 
+#include "access/xlog_internal.h"
 #include "common/logging.h"
 #include "common/parse_manifest.h"
 #include "fe_utils/simple_list.h"
 #include "getopt_long.h"
-#include "limits.h"
 #include "pg_verifybackup.h"
 #include "pgtime.h"
 
@@ -69,9 +70,9 @@ static void verifybackup_per_wal_range_cb(JsonManifestParseContext *context,
 										  TimeLineID tli,
 										  XLogRecPtr start_lsn,
 										  XLogRecPtr end_lsn);
-static void report_manifest_error(JsonManifestParseContext *context,
-								  const char *fmt,...)
-			pg_attribute_printf(2, 3) pg_attribute_noreturn();
+pg_noreturn static void report_manifest_error(JsonManifestParseContext *context,
+											  const char *fmt,...)
+			pg_attribute_printf(2, 3);
 
 static void verify_tar_backup(verifier_context *context, DIR *dir);
 static void verify_plain_backup_directory(verifier_context *context,
@@ -337,7 +338,7 @@ main(int argc, char **argv)
 	if (!no_parse_wal && context.format == 't')
 	{
 		pg_log_error("pg_waldump cannot read tar files");
-		pg_log_error_hint("You must use -n or --no-parse-wal when verifying a tar-format backup.");
+		pg_log_error_hint("You must use -n/--no-parse-wal when verifying a tar-format backup.");
 		exit(1);
 	}
 
@@ -693,11 +694,11 @@ verify_plain_backup_file(verifier_context *context, char *relpath,
 		return;
 	}
 
-	/* If it's not a directory, it should be a plain file. */
+	/* If it's not a directory, it should be a regular file. */
 	if (!S_ISREG(sb.st_mode))
 	{
 		report_backup_error(context,
-							"\"%s\" is not a file or directory",
+							"\"%s\" is not a regular file or directory",
 							relpath);
 		return;
 	}
@@ -730,7 +731,7 @@ verify_plain_backup_file(verifier_context *context, char *relpath,
 	 * version 1.
 	 */
 	if (context->manifest->version != 1 &&
-		strcmp(relpath, "global/pg_control") == 0)
+		strcmp(relpath, XLOG_CONTROL_FILE) == 0)
 		verify_control_file(fullpath, context->manifest->system_identifier);
 
 	/* Update statistics for progress report, if necessary */
@@ -770,10 +771,10 @@ verify_control_file(const char *controlpath, uint64 manifest_system_identifier)
 
 	/* System identifiers should match. */
 	if (manifest_system_identifier != control_file->system_identifier)
-		report_fatal_error("%s: manifest system identifier is %llu, but control file has %llu",
+		report_fatal_error("%s: manifest system identifier is %" PRIu64 ", but control file has %" PRIu64,
 						   controlpath,
-						   (unsigned long long) manifest_system_identifier,
-						   (unsigned long long) control_file->system_identifier);
+						   manifest_system_identifier,
+						   control_file->system_identifier);
 
 	/* Release memory. */
 	pfree(control_file);
@@ -898,11 +899,11 @@ precheck_tar_backup_file(verifier_context *context, char *relpath,
 		return;
 	}
 
-	/* In a tar format backup, we expect only plain files. */
+	/* In a tar format backup, we expect only regular files. */
 	if (!S_ISREG(sb.st_mode))
 	{
 		report_backup_error(context,
-							"\"%s\" is not a plain file",
+							"file \"%s\" is not a regular file",
 							relpath);
 		return;
 	}
@@ -1165,9 +1166,8 @@ verify_file_checksum(verifier_context *context, manifest_file *m,
 	if (bytes_read != m->size)
 	{
 		report_backup_error(context,
-							"file \"%s\" should contain %llu bytes, but read %llu bytes",
-							relpath, (unsigned long long) m->size,
-							(unsigned long long) bytes_read);
+							"file \"%s\" should contain %" PRIu64 " bytes, but read %" PRIu64,
+							relpath, m->size, bytes_read);
 		return;
 	}
 

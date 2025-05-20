@@ -68,6 +68,9 @@ CATALOG(pg_class,1259,RelationRelationId) BKI_BOOTSTRAP BKI_ROWTYPE_OID(83,Relat
 	/* # of all-visible blocks (not always up-to-date) */
 	int32		relallvisible BKI_DEFAULT(0);
 
+	/* # of all-frozen blocks (not always up-to-date) */
+	int32		relallfrozen BKI_DEFAULT(0);
+
 	/* OID of toast table; 0 if none */
 	Oid			reltoastrelid BKI_DEFAULT(0) BKI_LOOKUP_OPT(pg_class);
 
@@ -228,8 +231,8 @@ MAKE_SYSCACHE(RELNAMENSP, pg_class_relname_nsp_index, 128);
 	 (relkind) == RELKIND_TOASTVALUE || \
 	 (relkind) == RELKIND_MATVIEW)
 
-extern int	errdetail_relkind_not_supported(char relkind);
-
 #endif							/* EXPOSE_TO_CLIENT_CODE */
+
+extern int	errdetail_relkind_not_supported(char relkind);
 
 #endif							/* PG_CLASS_H */

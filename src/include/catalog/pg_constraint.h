@@ -264,7 +264,7 @@ extern HeapTuple findNotNullConstraint(Oid relid, const char *colname);
 extern HeapTuple findDomainNotNullConstraint(Oid typid);
 extern AttrNumber extractNotNullColumn(HeapTuple constrTup);
 extern bool AdjustNotNullInheritance(Oid relid, AttrNumber attnum,
-									 bool is_local, bool is_no_inherit);
+									 bool is_local, bool is_no_inherit, bool is_notvalid);
 extern List *RelationGetNotNullConstraints(Oid relid, bool cooked,
 										   bool include_noinh);
 
@@ -290,7 +290,8 @@ extern void DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 									   int *num_fk_del_set_cols, AttrNumber *fk_del_set_cols);
 extern void FindFKPeriodOpers(Oid opclass,
 							  Oid *containedbyoperoid,
-							  Oid *aggedcontainedbyoperoid);
+							  Oid *aggedcontainedbyoperoid,
+							  Oid *intersectoperoid);
 
 extern bool check_functional_grouping(Oid relid,
 									  Index varno, Index varlevelsup,

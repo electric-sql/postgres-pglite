@@ -35,7 +35,6 @@
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_opclass.h"
-#include "catalog/pg_opfamily.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
 #include "commands/comment.h"
@@ -1011,20 +1010,6 @@ DefineIndex(Oid tableId,
 					 key->partopfamily[i]);
 
 			/*
-			 * We'll need to be able to identify the equality operators
-			 * associated with index columns, too.  We know what to do with
-			 * btree opclasses; if there are ever any other index types that
-			 * support unique indexes, this logic will need extension. But if
-			 * we have an exclusion constraint (or a temporal PK), it already
-			 * knows the operators, so we don't have to infer them.
-			 */
-			if (stmt->unique && !stmt->iswithoutoverlaps && accessMethodId != BTREE_AM_OID)
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("cannot match partition key to an index using access method \"%s\"",
-								accessMethodName)));
-
-			/*
 			 * It may be possible to support UNIQUE constraints when partition
 			 * keys are expressions, but is it worth it?  Give up for now.
 			 */
@@ -1058,13 +1043,19 @@ DefineIndex(Oid tableId,
 						Oid			idx_eqop = InvalidOid;
 
 						if (stmt->unique && !stmt->iswithoutoverlaps)
-							idx_eqop = get_opfamily_member(idx_opfamily,
-														   idx_opcintype,
-														   idx_opcintype,
-														   BTEqualStrategyNumber);
+							idx_eqop = get_opfamily_member_for_cmptype(idx_opfamily,
+																	   idx_opcintype,
+																	   idx_opcintype,
+																	   COMPARE_EQ);
 						else if (exclusion)
 							idx_eqop = indexInfo->ii_ExclusionOps[j];
-						Assert(idx_eqop);
+
+						if (!idx_eqop)
+							ereport(ERROR,
+									errcode(ERRCODE_UNDEFINED_OBJECT),
+									errmsg("could not identify an equality operator for type %s", format_type_be(idx_opcintype)),
+									errdetail("There is no suitable operator in operator family \"%s\" for access method \"%s\".",
+											  get_opfamily_name(idx_opfamily, false), get_am_name(get_opfamily_method(idx_opfamily))));
 
 						if (ptkey_eqop == idx_eqop)
 						{
@@ -1111,6 +1102,9 @@ DefineIndex(Oid tableId,
 	/*
 	 * We disallow indexes on system columns.  They would not necessarily get
 	 * updated correctly, and they don't seem useful anyway.
+	 *
+	 * Also disallow virtual generated columns in indexes (use expression
+	 * index instead).
 	 */
 	for (int i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
 	{
@@ -1120,14 +1114,26 @@ DefineIndex(Oid tableId,
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("index creation on system columns is not supported")));
+
+
+		if (TupleDescAttr(RelationGetDescr(rel), attno - 1)->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
+			ereport(ERROR,
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					stmt->primary ?
+					errmsg("primary keys on virtual generated columns are not supported") :
+					stmt->isconstraint ?
+					errmsg("unique constraints on virtual generated columns are not supported") :
+					errmsg("indexes on virtual generated columns are not supported"));
 	}
 
 	/*
-	 * Also check for system columns used in expressions or predicates.
+	 * Also check for system and generated columns used in expressions or
+	 * predicates.
 	 */
 	if (indexInfo->ii_Expressions || indexInfo->ii_Predicate)
 	{
 		Bitmapset  *indexattrs = NULL;
+		int			j;
 
 		pull_varattnos((Node *) indexInfo->ii_Expressions, 1, &indexattrs);
 		pull_varattnos((Node *) indexInfo->ii_Predicate, 1, &indexattrs);
@@ -1139,6 +1145,24 @@ DefineIndex(Oid tableId,
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						 errmsg("index creation on system columns is not supported")));
+		}
+
+		/*
+		 * XXX Virtual generated columns in index expressions or predicates
+		 * could be supported, but it needs support in
+		 * RelationGetIndexExpressions() and RelationGetIndexPredicate().
+		 */
+		j = -1;
+		while ((j = bms_next_member(indexattrs, j)) >= 0)
+		{
+			AttrNumber	attno = j + FirstLowInvalidHeapAttributeNumber;
+
+			if (TupleDescAttr(RelationGetDescr(rel), attno - 1)->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 stmt->isconstraint ?
+						 errmsg("unique constraints on virtual generated columns are not supported") :
+						 errmsg("indexes on virtual generated columns are not supported")));
 		}
 	}
 
@@ -2147,29 +2171,12 @@ ComputeIndexAttrs(IndexInfo *indexInfo,
 			opfamily = get_opclass_family(opclassOids[attn]);
 			strat = get_op_opfamily_strategy(opid, opfamily);
 			if (strat == 0)
-			{
-				HeapTuple	opftuple;
-				Form_pg_opfamily opfform;
-
-				/*
-				 * attribute->opclass might not explicitly name the opfamily,
-				 * so fetch the name of the selected opfamily for use in the
-				 * error message.
-				 */
-				opftuple = SearchSysCache1(OPFAMILYOID,
-										   ObjectIdGetDatum(opfamily));
-				if (!HeapTupleIsValid(opftuple))
-					elog(ERROR, "cache lookup failed for opfamily %u",
-						 opfamily);
-				opfform = (Form_pg_opfamily) GETSTRUCT(opftuple);
-
 				ereport(ERROR,
 						(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 						 errmsg("operator %s is not a member of operator family \"%s\"",
 								format_operator(opid),
-								NameStr(opfform->opfname)),
+								get_opfamily_name(opfamily, false)),
 						 errdetail("The exclusion operator must be related to the index operator class for the constraint.")));
-			}
 
 			indexInfo->ii_ExclusionOps[attn] = opid;
 			indexInfo->ii_ExclusionProcs[attn] = get_opcode(opid);
@@ -2440,38 +2447,30 @@ void
 GetOperatorFromCompareType(Oid opclass, Oid rhstype, CompareType cmptype,
 						   Oid *opid, StrategyNumber *strat)
 {
+	Oid			amid;
 	Oid			opfamily;
 	Oid			opcintype;
 
 	Assert(cmptype == COMPARE_EQ || cmptype == COMPARE_OVERLAP || cmptype == COMPARE_CONTAINED_BY);
+
+	amid = get_opclass_method(opclass);
 
 	*opid = InvalidOid;
 
 	if (get_opclass_opfamily_and_input_type(opclass, &opfamily, &opcintype))
 	{
 		/*
-		 * Ask the opclass to translate to its internal stratnum
-		 *
-		 * For now we only need GiST support, but this could support other
-		 * indexams if we wanted.
+		 * Ask the index AM to translate to its internal stratnum
 		 */
-		*strat = GistTranslateStratnum(opclass, cmptype);
+		*strat = IndexAmTranslateCompareType(cmptype, amid, opfamily, true);
 		if (*strat == InvalidStrategy)
-		{
-			HeapTuple	tuple;
-
-			tuple = SearchSysCache1(CLAOID, ObjectIdGetDatum(opclass));
-			if (!HeapTupleIsValid(tuple))
-				elog(ERROR, "cache lookup failed for operator class %u", opclass);
-
 			ereport(ERROR,
 					errcode(ERRCODE_UNDEFINED_OBJECT),
-					cmptype = COMPARE_EQ ? errmsg("could not identify an equality operator for type %s", format_type_be(opcintype)) :
+					cmptype == COMPARE_EQ ? errmsg("could not identify an equality operator for type %s", format_type_be(opcintype)) :
 					cmptype == COMPARE_OVERLAP ? errmsg("could not identify an overlaps operator for type %s", format_type_be(opcintype)) :
 					cmptype == COMPARE_CONTAINED_BY ? errmsg("could not identify a contained-by operator for type %s", format_type_be(opcintype)) : 0,
-					errdetail("Could not translate compare type %d for operator class \"%s\" for access method \"%s\".",
-							  cmptype, NameStr(((Form_pg_opclass) GETSTRUCT(tuple))->opcname), "gist"));
-		}
+					errdetail("Could not translate compare type %d for operator family \"%s\", input type %s, access method \"%s\".",
+							  cmptype, get_opfamily_name(opfamily, false), format_type_be(opcintype), get_am_name(amid)));
 
 		/*
 		 * We parameterize rhstype so foreign keys can ask for a <@ operator
@@ -2484,21 +2483,13 @@ GetOperatorFromCompareType(Oid opclass, Oid rhstype, CompareType cmptype,
 	}
 
 	if (!OidIsValid(*opid))
-	{
-		HeapTuple	tuple;
-
-		tuple = SearchSysCache1(OPFAMILYOID, ObjectIdGetDatum(opfamily));
-		if (!HeapTupleIsValid(tuple))
-			elog(ERROR, "cache lookup failed for operator family %u", opfamily);
-
 		ereport(ERROR,
 				errcode(ERRCODE_UNDEFINED_OBJECT),
 				cmptype == COMPARE_EQ ? errmsg("could not identify an equality operator for type %s", format_type_be(opcintype)) :
 				cmptype == COMPARE_OVERLAP ? errmsg("could not identify an overlaps operator for type %s", format_type_be(opcintype)) :
 				cmptype == COMPARE_CONTAINED_BY ? errmsg("could not identify a contained-by operator for type %s", format_type_be(opcintype)) : 0,
 				errdetail("There is no suitable operator in operator family \"%s\" for access method \"%s\".",
-						  NameStr(((Form_pg_opfamily) GETSTRUCT(tuple))->opfname), "gist"));
-	}
+						  get_opfamily_name(opfamily, false), get_am_name(amid)));
 }
 
 /*
@@ -3901,9 +3892,9 @@ ReindexRelationConcurrently(const ReindexStmt *stmt, Oid relationOid, const Rein
 
 #ifdef USE_INJECTION_POINTS
 		if (idx->safe)
-			INJECTION_POINT("reindex-conc-index-safe");
+			INJECTION_POINT("reindex-conc-index-safe", NULL);
 		else
-			INJECTION_POINT("reindex-conc-index-not-safe");
+			INJECTION_POINT("reindex-conc-index-not-safe", NULL);
 #endif
 
 		idx->tableId = RelationGetRelid(heapRel);

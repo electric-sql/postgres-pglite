@@ -1095,19 +1095,13 @@ gist_stratnum_common(PG_FUNCTION_ARGS)
  * Returns InvalidStrategy if the function is not defined.
  */
 StrategyNumber
-GistTranslateStratnum(Oid opclass, CompareType cmptype)
+gisttranslatecmptype(CompareType cmptype, Oid opfamily)
 {
-	Oid			opfamily;
-	Oid			opcintype;
 	Oid			funcid;
 	Datum		result;
 
-	/* Look up the opclass family and input datatype. */
-	if (!get_opclass_opfamily_and_input_type(opclass, &opfamily, &opcintype))
-		return InvalidStrategy;
-
 	/* Check whether the function is provided. */
-	funcid = get_opfamily_proc(opfamily, opcintype, opcintype, GIST_STRATNUM_PROC);
+	funcid = get_opfamily_proc(opfamily, ANYOID, ANYOID, GIST_STRATNUM_PROC);
 	if (!OidIsValid(funcid))
 		return InvalidStrategy;
 

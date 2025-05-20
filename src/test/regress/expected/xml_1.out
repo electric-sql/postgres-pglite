@@ -583,6 +583,16 @@ ERROR:  unsupported XML feature
 LINE 1: ...EATE VIEW xmlview9 AS SELECT xmlserialize(content 'good' as ...
                                                              ^
 DETAIL:  This functionality requires the server to be built with libxml support.
+CREATE VIEW xmlview10 AS SELECT xmlserialize(document '<foo><bar>42</bar></foo>' AS text indent);
+ERROR:  unsupported XML feature
+LINE 1: ...TE VIEW xmlview10 AS SELECT xmlserialize(document '<foo><bar...
+                                                             ^
+DETAIL:  This functionality requires the server to be built with libxml support.
+CREATE VIEW xmlview11 AS SELECT xmlserialize(document '<foo><bar>42</bar></foo>' AS character varying no indent);
+ERROR:  unsupported XML feature
+LINE 1: ...TE VIEW xmlview11 AS SELECT xmlserialize(document '<foo><bar...
+                                                             ^
+DETAIL:  This functionality requires the server to be built with libxml support.
 SELECT table_name, view_definition FROM information_schema.views
   WHERE table_name LIKE 'xmlview%' ORDER BY 1;
  table_name |                                view_definition                                 
@@ -1037,6 +1047,10 @@ EXPLAIN (COSTS OFF, VERBOSE) SELECT * FROM xmltableview1;
 -- errors
 SELECT * FROM XMLTABLE (ROW () PASSING null COLUMNS v1 timestamp) AS f (v1, v2);
 ERROR:  XMLTABLE function has 1 columns available but 2 columns specified
+SELECT * FROM XMLTABLE (ROW () PASSING null COLUMNS v1 timestamp __pg__is_not_null 1) AS f (v1);
+ERROR:  option name "__pg__is_not_null" cannot be used in XMLTABLE
+LINE 1: ...MLTABLE (ROW () PASSING null COLUMNS v1 timestamp __pg__is_n...
+                                                             ^
 -- XMLNAMESPACES tests
 SELECT * FROM XMLTABLE(XMLNAMESPACES('http://x.y' AS zz),
                       '/zz:rows/zz:row'

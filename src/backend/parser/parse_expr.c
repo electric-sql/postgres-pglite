@@ -2053,10 +2053,18 @@ transformArrayExpr(ParseState *pstate, A_ArrayExpr *a,
 
 			/*
 			 * Check for sub-array expressions, if we haven't already found
-			 * one.
+			 * one.  Note we don't accept domain-over-array as a sub-array,
+			 * nor int2vector nor oidvector; those have constraints that don't
+			 * map well to being treated as a sub-array.
 			 */
-			if (!newa->multidims && type_is_array(exprType(newe)))
-				newa->multidims = true;
+			if (!newa->multidims)
+			{
+				Oid			newetype = exprType(newe);
+
+				if (newetype != INT2VECTOROID && newetype != OIDVECTOROID &&
+					type_is_array(newetype))
+					newa->multidims = true;
+			}
 		}
 
 		newelems = lappend(newelems, newe);
@@ -2619,6 +2627,13 @@ transformWholeRowRef(ParseState *pstate, ParseNamespaceItem *nsitem,
 	 * point, there seems no harm in expanding it now rather than during
 	 * planning.
 	 *
+	 * Note that if the nsitem is an OLD/NEW alias for the target RTE (as can
+	 * appear in a RETURNING list), its alias won't match the target RTE's
+	 * alias, but we still want to make a whole-row Var here rather than a
+	 * RowExpr, for consistency with direct references to the target RTE, and
+	 * so that any dropped columns are handled correctly.  Thus we also check
+	 * p_returning_type here.
+	 *
 	 * Note that if the RTE is a function returning scalar, we create just a
 	 * plain reference to the function value, not a composite containing a
 	 * single column.  This is pretty inconsistent at first sight, but it's
@@ -2626,12 +2641,16 @@ transformWholeRowRef(ParseState *pstate, ParseNamespaceItem *nsitem,
 	 * "rel.*" mean the same thing for composite relations, so why not for
 	 * scalar functions...
 	 */
-	if (nsitem->p_names == nsitem->p_rte->eref)
+	if (nsitem->p_names == nsitem->p_rte->eref ||
+		nsitem->p_returning_type != VAR_RETURNING_DEFAULT)
 	{
 		Var		   *result;
 
 		result = makeWholeRowVar(nsitem->p_rte, nsitem->p_rtindex,
 								 sublevels_up, true);
+
+		/* mark Var for RETURNING OLD/NEW, as necessary */
+		result->varreturningtype = nsitem->p_returning_type;
 
 		/* location is not filled in by makeWholeRowVar */
 		result->location = location;
@@ -2655,9 +2674,8 @@ transformWholeRowRef(ParseState *pstate, ParseNamespaceItem *nsitem,
 		 * are in the RTE.  We needn't worry about marking the RTE for SELECT
 		 * access, as the common columns are surely so marked already.
 		 */
-		expandRTE(nsitem->p_rte, nsitem->p_rtindex,
-				  sublevels_up, location, false,
-				  NULL, &fields);
+		expandRTE(nsitem->p_rte, nsitem->p_rtindex, sublevels_up,
+				  nsitem->p_returning_type, location, false, NULL, &fields);
 		rowexpr = makeNode(RowExpr);
 		rowexpr->args = list_truncate(fields,
 									  list_length(nsitem->p_names->colnames));
@@ -2814,7 +2832,7 @@ make_row_comparison_op(ParseState *pstate, List *opname,
 	ListCell   *l,
 			   *r;
 	List	  **opinfo_lists;
-	Bitmapset  *strats;
+	Bitmapset  *cmptypes;
 	int			nopers;
 	int			i;
 
@@ -2879,45 +2897,45 @@ make_row_comparison_op(ParseState *pstate, List *opname,
 
 	/*
 	 * Now we must determine which row comparison semantics (= <> < <= > >=)
-	 * apply to this set of operators.  We look for btree opfamilies
-	 * containing the operators, and see which interpretations (strategy
-	 * numbers) exist for each operator.
+	 * apply to this set of operators.  We look for opfamilies containing the
+	 * operators, and see which interpretations (cmptypes) exist for each
+	 * operator.
 	 */
 	opinfo_lists = (List **) palloc(nopers * sizeof(List *));
-	strats = NULL;
+	cmptypes = NULL;
 	i = 0;
 	foreach(l, opexprs)
 	{
 		Oid			opno = ((OpExpr *) lfirst(l))->opno;
-		Bitmapset  *this_strats;
+		Bitmapset  *this_cmptypes;
 		ListCell   *j;
 
-		opinfo_lists[i] = get_op_btree_interpretation(opno);
+		opinfo_lists[i] = get_op_index_interpretation(opno);
 
 		/*
-		 * convert strategy numbers into a Bitmapset to make the intersection
+		 * convert comparison types into a Bitmapset to make the intersection
 		 * calculation easy.
 		 */
-		this_strats = NULL;
+		this_cmptypes = NULL;
 		foreach(j, opinfo_lists[i])
 		{
-			OpBtreeInterpretation *opinfo = lfirst(j);
+			OpIndexInterpretation *opinfo = lfirst(j);
 
-			this_strats = bms_add_member(this_strats, opinfo->strategy);
+			this_cmptypes = bms_add_member(this_cmptypes, opinfo->cmptype);
 		}
 		if (i == 0)
-			strats = this_strats;
+			cmptypes = this_cmptypes;
 		else
-			strats = bms_int_members(strats, this_strats);
+			cmptypes = bms_int_members(cmptypes, this_cmptypes);
 		i++;
 	}
 
 	/*
 	 * If there are multiple common interpretations, we may use any one of
-	 * them ... this coding arbitrarily picks the lowest btree strategy
+	 * them ... this coding arbitrarily picks the lowest comparison type
 	 * number.
 	 */
-	i = bms_next_member(strats, -1);
+	i = bms_next_member(cmptypes, -1);
 	if (i < 0)
 	{
 		/* No common interpretation, so fail */
@@ -2951,9 +2969,9 @@ make_row_comparison_op(ParseState *pstate, List *opname,
 
 		foreach(j, opinfo_lists[i])
 		{
-			OpBtreeInterpretation *opinfo = lfirst(j);
+			OpIndexInterpretation *opinfo = lfirst(j);
 
-			if (opinfo->strategy == cmptype)
+			if (opinfo->cmptype == cmptype)
 			{
 				opfamily = opinfo->opfamily_id;
 				break;
@@ -3754,7 +3772,7 @@ transformJsonArrayQueryConstructor(ParseState *pstate,
 	/* Transform query only for counting target list entries. */
 	qpstate = make_parsestate(pstate);
 
-	query = transformStmt(qpstate, ctor->query);
+	query = transformStmt(qpstate, copyObject(ctor->query));
 
 	if (count_nonjunk_tlist_entries(query->targetList) != 1)
 		ereport(ERROR,

@@ -560,7 +560,7 @@ main(int argc, char *argv[])
 
 			executeCommand(conn, install_sql, opts.echo);
 			pfree(install_sql);
-			pfree(schema);
+			PQfreemem(schema);
 		}
 
 		/*
@@ -587,6 +587,7 @@ main(int argc, char *argv[])
 			/* Querying the catalog succeeded, but amcheck is missing. */
 			pg_log_warning("skipping database \"%s\": amcheck is not installed",
 						   PQdb(conn));
+			PQclear(result);
 			disconnectDatabase(conn);
 			conn = NULL;
 			continue;

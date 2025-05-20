@@ -354,17 +354,19 @@ build_subplan(PlannerInfo *root, Plan *plan, Path *path,
 		Node	   *arg = pitem->item;
 
 		/*
-		 * The Var, PlaceHolderVar, Aggref or GroupingFunc has already been
-		 * adjusted to have the correct varlevelsup, phlevelsup, or
-		 * agglevelsup.
+		 * The Var, PlaceHolderVar, Aggref, GroupingFunc, or ReturningExpr has
+		 * already been adjusted to have the correct varlevelsup, phlevelsup,
+		 * agglevelsup, or retlevelsup.
 		 *
-		 * If it's a PlaceHolderVar, Aggref or GroupingFunc, its arguments
-		 * might contain SubLinks, which have not yet been processed (see the
-		 * comments for SS_replace_correlation_vars).  Do that now.
+		 * If it's a PlaceHolderVar, Aggref, GroupingFunc, or ReturningExpr,
+		 * its arguments might contain SubLinks, which have not yet been
+		 * processed (see the comments for SS_replace_correlation_vars).  Do
+		 * that now.
 		 */
 		if (IsA(arg, PlaceHolderVar) ||
 			IsA(arg, Aggref) ||
-			IsA(arg, GroupingFunc))
+			IsA(arg, GroupingFunc) ||
+			IsA(arg, ReturningExpr))
 			arg = SS_process_sublinks(root, arg, false);
 
 		splan->parParam = lappend_int(splan->parParam, pitem->paramId);
@@ -1212,6 +1214,86 @@ inline_cte_walker(Node *node, inline_cte_walker_context *context)
 	return expression_tree_walker(node, inline_cte_walker, context);
 }
 
+/*
+ * Attempt to transform 'testexpr' over the VALUES subquery into
+ * a ScalarArrayOpExpr.  We currently support the transformation only when
+ * it ends up with a constant array.  Otherwise, the evaluation of non-hashed
+ * SAOP might be slower than the corresponding Hash Join with VALUES.
+ *
+ * Return transformed ScalarArrayOpExpr or NULL if transformation isn't
+ * allowed.
+ */
+ScalarArrayOpExpr *
+convert_VALUES_to_ANY(PlannerInfo *root, Node *testexpr, Query *values)
+{
+	RangeTblEntry *rte;
+	Node	   *leftop;
+	Node	   *rightop;
+	Oid			opno;
+	ListCell   *lc;
+	Oid			inputcollid;
+	List	   *exprs = NIL;
+
+	/*
+	 * Check we have a binary operator over a single-column subquery with no
+	 * joins and no LIMIT/OFFSET/ORDER BY clauses.
+	 */
+	if (!IsA(testexpr, OpExpr) ||
+		list_length(((OpExpr *) testexpr)->args) != 2 ||
+		list_length(values->targetList) > 1 ||
+		values->limitCount != NULL ||
+		values->limitOffset != NULL ||
+		values->sortClause != NIL ||
+		list_length(values->rtable) != 1)
+		return NULL;
+
+	rte = linitial_node(RangeTblEntry, values->rtable);
+	leftop = linitial(((OpExpr *) testexpr)->args);
+	rightop = lsecond(((OpExpr *) testexpr)->args);
+	opno = ((OpExpr *) testexpr)->opno;
+	inputcollid = ((OpExpr *) testexpr)->inputcollid;
+
+	/*
+	 * Also, check that only RTE corresponds to VALUES; the list of values has
+	 * at least two items and no volatile functions.
+	 */
+	if (rte->rtekind != RTE_VALUES ||
+		list_length(rte->values_lists) < 2 ||
+		contain_volatile_functions((Node *) rte->values_lists))
+		return NULL;
+
+	foreach(lc, rte->values_lists)
+	{
+		List	   *elem = lfirst(lc);
+		Node	   *value = linitial(elem);
+
+		/*
+		 * Prepare an evaluation of the right side of the operator with
+		 * substitution of the given value.
+		 */
+		value = convert_testexpr(root, rightop, list_make1(value));
+
+		/*
+		 * Try to evaluate constant expressions.  We could get Const as a
+		 * result.
+		 */
+		value = eval_const_expressions(root, value);
+
+		/*
+		 * As we only support constant output arrays, all the items must also
+		 * be constant.
+		 */
+		if (!IsA(value, Const))
+			return NULL;
+
+		exprs = lappend(exprs, value);
+	}
+
+	/* Finally, build ScalarArrayOpExpr at the top of the 'exprs' list. */
+	return make_SAOP_expr(opno, leftop, exprType(rightop),
+						  linitial_oid(rte->colcollations), inputcollid,
+						  exprs, false);
+}
 
 /*
  * convert_ANY_sublink_to_join: try to convert an ANY SubLink to a join
@@ -1863,8 +1945,8 @@ convert_EXISTS_to_ANY(PlannerInfo *root, Query *subselect,
 /*
  * Replace correlation vars (uplevel vars) with Params.
  *
- * Uplevel PlaceHolderVars, aggregates, GROUPING() expressions, and
- * MergeSupportFuncs are replaced, too.
+ * Uplevel PlaceHolderVars, aggregates, GROUPING() expressions,
+ * MergeSupportFuncs, and ReturningExprs are replaced, too.
  *
  * Note: it is critical that this runs immediately after SS_process_sublinks.
  * Since we do not recurse into the arguments of uplevel PHVs and aggregates,
@@ -1924,6 +2006,12 @@ replace_correlation_vars_mutator(Node *node, PlannerInfo *root)
 			return (Node *) replace_outer_merge_support(root,
 														(MergeSupportFunc *) node);
 	}
+	if (IsA(node, ReturningExpr))
+	{
+		if (((ReturningExpr *) node)->retlevelsup > 0)
+			return (Node *) replace_outer_returning(root,
+													(ReturningExpr *) node);
+	}
 	return expression_tree_mutator(node, replace_correlation_vars_mutator, root);
 }
 
@@ -1977,11 +2065,11 @@ process_sublinks_mutator(Node *node, process_sublinks_context *context)
 	}
 
 	/*
-	 * Don't recurse into the arguments of an outer PHV, Aggref or
-	 * GroupingFunc here.  Any SubLinks in the arguments have to be dealt with
-	 * at the outer query level; they'll be handled when build_subplan
-	 * collects the PHV, Aggref or GroupingFunc into the arguments to be
-	 * passed down to the current subplan.
+	 * Don't recurse into the arguments of an outer PHV, Aggref, GroupingFunc,
+	 * or ReturningExpr here.  Any SubLinks in the arguments have to be dealt
+	 * with at the outer query level; they'll be handled when build_subplan
+	 * collects the PHV, Aggref, GroupingFunc, or ReturningExpr into the
+	 * arguments to be passed down to the current subplan.
 	 */
 	if (IsA(node, PlaceHolderVar))
 	{
@@ -1996,6 +2084,11 @@ process_sublinks_mutator(Node *node, process_sublinks_context *context)
 	else if (IsA(node, GroupingFunc))
 	{
 		if (((GroupingFunc *) node)->agglevelsup > 0)
+			return node;
+	}
+	else if (IsA(node, ReturningExpr))
+	{
+		if (((ReturningExpr *) node)->retlevelsup > 0)
 			return node;
 	}
 
@@ -2110,7 +2203,9 @@ SS_identify_outer_params(PlannerInfo *root)
 	outer_params = NULL;
 	for (proot = root->parent_root; proot != NULL; proot = proot->parent_root)
 	{
-		/* Include ordinary Var/PHV/Aggref/GroupingFunc params */
+		/*
+		 * Include ordinary Var/PHV/Aggref/GroupingFunc/ReturningExpr params.
+		 */
 		foreach(l, proot->plan_params)
 		{
 			PlannerParamItem *pitem = (PlannerParamItem *) lfirst(l);

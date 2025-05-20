@@ -14,6 +14,24 @@
 #
 # $ git log --pretty=format:"%H # %cd%n# %s" $PGINDENTGITHASH -1 --date=iso
 
+918e7287ed20eb1fe280ab6c4056ccf94dcd53a8 # 2025-04-30 19:18:30 +1200
+# Fix broken indentation
+
+e1a8b1ad587112e67fdc5aa7b388631dde4dbdda # 2025-04-04 09:38:22 -0500
+# Re-pgindent pg_largeobject.c after commit 0d6c477664.
+
+796bdda484c838313959f65e2b700f14ac7c0e66 # 2025-03-18 09:02:36 -0400
+# Fix indentation again.
+
+203c1b4cc49455364b6bcab8034900d1c016b9cd # 2025-03-17 16:06:17 -0400
+# Fix indentation.
+
+b955df443405e056fd9047ef819a1465654f9d79 # 2025-03-13 12:41:44 +1300
+# Fix indentation issue
+
+76aa615943049c04efd36ab4765c06eda89cdfea # 2025-01-31 16:44:24 +0900
+# Fix bad indentation introduced in commit d47cbf474
+
 6e826278f1ebd9967c0f8adda29c8960a812e344 # 2025-01-13 11:27:32 +0900
 # Fix pgindent damage
 

@@ -17,7 +17,7 @@
 #include "plpy_main.h"
 #include "plpy_procedure.h"
 #include "plpy_subxactobject.h"
-#include "plpython.h"
+#include "plpy_util.h"
 #include "utils/fmgrprotos.h"
 #include "utils/rel.h"
 
@@ -1066,13 +1066,7 @@ PLy_procedure_call(PLyProcedure *proc, const char *kargs, PyObject *vargs)
 
 	PG_TRY();
 	{
-#if PY_VERSION_HEX >= 0x03020000
-		rv = PyEval_EvalCode(proc->code,
-							 proc->globals, proc->globals);
-#else
-		rv = PyEval_EvalCode((PyCodeObject *) proc->code,
-							 proc->globals, proc->globals);
-#endif
+		rv = PyEval_EvalCode(proc->code, proc->globals, proc->globals);
 
 		/*
 		 * Since plpy will only let you close subtransactions that you

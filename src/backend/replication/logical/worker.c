@@ -414,6 +414,8 @@ static inline void reset_apply_error_context_info(void);
 static TransApplyAction get_transaction_apply_action(TransactionId xid,
 													 ParallelApplyWorkerInfo **winfo);
 
+static void replorigin_reset(int code, Datum arg);
+
 /*
  * Form the origin name for the subscription.
  *
@@ -668,7 +670,8 @@ create_edata_for_relation(LogicalRepRelMapEntry *rel)
 
 	addRTEPermissionInfo(&perminfos, rte);
 
-	ExecInitRangeTable(estate, list_make1(rte), perminfos);
+	ExecInitRangeTable(estate, list_make1(rte), perminfos,
+					   bms_make_singleton(1));
 
 	edata->targetRelInfo = resultRelInfo = makeNode(ResultRelInfo);
 
@@ -2453,8 +2456,13 @@ apply_handle_insert(StringInfo s)
 		apply_handle_tuple_routing(edata,
 								   remoteslot, NULL, CMD_INSERT);
 	else
-		apply_handle_insert_internal(edata, edata->targetRelInfo,
-									 remoteslot);
+	{
+		ResultRelInfo *relinfo = edata->targetRelInfo;
+
+		ExecOpenIndices(relinfo, false);
+		apply_handle_insert_internal(edata, relinfo, remoteslot);
+		ExecCloseIndices(relinfo);
+	}
 
 	finish_edata(edata);
 
@@ -2481,16 +2489,18 @@ apply_handle_insert_internal(ApplyExecutionData *edata,
 {
 	EState	   *estate = edata->estate;
 
-	/* We must open indexes here. */
-	ExecOpenIndices(relinfo, true);
+	/* Caller should have opened indexes already. */
+	Assert(relinfo->ri_IndexRelationDescs != NULL ||
+		   !relinfo->ri_RelationDesc->rd_rel->relhasindex ||
+		   RelationGetIndexList(relinfo->ri_RelationDesc) == NIL);
+
+	/* Caller will not have done this bit. */
+	Assert(relinfo->ri_onConflictArbiterIndexes == NIL);
 	InitConflictIndexes(relinfo);
 
 	/* Do the insert. */
 	TargetPrivilegesCheck(relinfo->ri_RelationDesc, ACL_INSERT);
 	ExecSimpleRelationInsert(relinfo, estate, remoteslot);
-
-	/* Cleanup. */
-	ExecCloseIndices(relinfo);
 }
 
 /*
@@ -2666,12 +2676,13 @@ apply_handle_update_internal(ApplyExecutionData *edata,
 	LogicalRepRelMapEntry *relmapentry = edata->targetRel;
 	Relation	localrel = relinfo->ri_RelationDesc;
 	EPQState	epqstate;
-	TupleTableSlot *localslot;
+	TupleTableSlot *localslot = NULL;
+	ConflictTupleInfo conflicttuple = {0};
 	bool		found;
 	MemoryContext oldctx;
 
 	EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1, NIL);
-	ExecOpenIndices(relinfo, true);
+	ExecOpenIndices(relinfo, false);
 
 	found = FindReplTupleInLocalRel(edata, localrel,
 									&relmapentry->remoterel,
@@ -2685,16 +2696,13 @@ apply_handle_update_internal(ApplyExecutionData *edata,
 	 */
 	if (found)
 	{
-		RepOriginId localorigin;
-		TransactionId localxmin;
-		TimestampTz localts;
-
 		/*
 		 * Report the conflict if the tuple was modified by a different
 		 * origin.
 		 */
-		if (GetTupleTransactionInfo(localslot, &localxmin, &localorigin, &localts) &&
-			localorigin != replorigin_session_origin)
+		if (GetTupleTransactionInfo(localslot, &conflicttuple.xmin,
+									&conflicttuple.origin, &conflicttuple.ts) &&
+			conflicttuple.origin != replorigin_session_origin)
 		{
 			TupleTableSlot *newslot;
 
@@ -2702,9 +2710,11 @@ apply_handle_update_internal(ApplyExecutionData *edata,
 			newslot = table_slot_create(localrel, &estate->es_tupleTable);
 			slot_store_data(newslot, relmapentry, newtup);
 
+			conflicttuple.slot = localslot;
+
 			ReportApplyConflict(estate, relinfo, LOG, CT_UPDATE_ORIGIN_DIFFERS,
-								remoteslot, localslot, newslot,
-								InvalidOid, localxmin, localorigin, localts);
+								remoteslot, newslot,
+								list_make1(&conflicttuple));
 		}
 
 		/* Process and store remote tuple in the slot */
@@ -2733,9 +2743,7 @@ apply_handle_update_internal(ApplyExecutionData *edata,
 		 * emitting a log message.
 		 */
 		ReportApplyConflict(estate, relinfo, LOG, CT_UPDATE_MISSING,
-							remoteslot, NULL, newslot,
-							InvalidOid, InvalidTransactionId,
-							InvalidRepOriginId, 0);
+							remoteslot, newslot, list_make1(&conflicttuple));
 	}
 
 	/* Cleanup. */
@@ -2815,8 +2823,14 @@ apply_handle_delete(StringInfo s)
 		apply_handle_tuple_routing(edata,
 								   remoteslot, NULL, CMD_DELETE);
 	else
-		apply_handle_delete_internal(edata, edata->targetRelInfo,
+	{
+		ResultRelInfo *relinfo = edata->targetRelInfo;
+
+		ExecOpenIndices(relinfo, false);
+		apply_handle_delete_internal(edata, relinfo,
 									 remoteslot, rel->localindexoid);
+		ExecCloseIndices(relinfo);
+	}
 
 	finish_edata(edata);
 
@@ -2847,10 +2861,15 @@ apply_handle_delete_internal(ApplyExecutionData *edata,
 	LogicalRepRelation *remoterel = &edata->targetRel->remoterel;
 	EPQState	epqstate;
 	TupleTableSlot *localslot;
+	ConflictTupleInfo conflicttuple = {0};
 	bool		found;
 
 	EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1, NIL);
-	ExecOpenIndices(relinfo, false);
+
+	/* Caller should have opened indexes already. */
+	Assert(relinfo->ri_IndexRelationDescs != NULL ||
+		   !localrel->rd_rel->relhasindex ||
+		   RelationGetIndexList(localrel) == NIL);
 
 	found = FindReplTupleInLocalRel(edata, localrel, remoterel, localindexoid,
 									remoteslot, &localslot);
@@ -2858,19 +2877,19 @@ apply_handle_delete_internal(ApplyExecutionData *edata,
 	/* If found delete it. */
 	if (found)
 	{
-		RepOriginId localorigin;
-		TransactionId localxmin;
-		TimestampTz localts;
-
 		/*
 		 * Report the conflict if the tuple was modified by a different
 		 * origin.
 		 */
-		if (GetTupleTransactionInfo(localslot, &localxmin, &localorigin, &localts) &&
-			localorigin != replorigin_session_origin)
+		if (GetTupleTransactionInfo(localslot, &conflicttuple.xmin,
+									&conflicttuple.origin, &conflicttuple.ts) &&
+			conflicttuple.origin != replorigin_session_origin)
+		{
+			conflicttuple.slot = localslot;
 			ReportApplyConflict(estate, relinfo, LOG, CT_DELETE_ORIGIN_DIFFERS,
-								remoteslot, localslot, NULL,
-								InvalidOid, localxmin, localorigin, localts);
+								remoteslot, NULL,
+								list_make1(&conflicttuple));
+		}
 
 		EvalPlanQualSetSlot(&epqstate, localslot);
 
@@ -2885,13 +2904,10 @@ apply_handle_delete_internal(ApplyExecutionData *edata,
 		 * emitting a log message.
 		 */
 		ReportApplyConflict(estate, relinfo, LOG, CT_DELETE_MISSING,
-							remoteslot, NULL, NULL,
-							InvalidOid, InvalidTransactionId,
-							InvalidRepOriginId, 0);
+							remoteslot, NULL, list_make1(&conflicttuple));
 	}
 
 	/* Cleanup. */
-	ExecCloseIndices(relinfo);
 	EvalPlanQualEnd(&epqstate);
 }
 
@@ -3056,9 +3072,7 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 				Relation	partrel_new;
 				bool		found;
 				EPQState	epqstate;
-				RepOriginId localorigin;
-				TransactionId localxmin;
-				TimestampTz localts;
+				ConflictTupleInfo conflicttuple = {0};
 
 				/* Get the matching local tuple from the partition. */
 				found = FindReplTupleInLocalRel(edata, partrel,
@@ -3076,11 +3090,9 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 					 * The tuple to be updated could not be found.  Do nothing
 					 * except for emitting a log message.
 					 */
-					ReportApplyConflict(estate, partrelinfo,
-										LOG, CT_UPDATE_MISSING,
-										remoteslot_part, NULL, newslot,
-										InvalidOid, InvalidTransactionId,
-										InvalidRepOriginId, 0);
+					ReportApplyConflict(estate, partrelinfo, LOG,
+										CT_UPDATE_MISSING, remoteslot_part,
+										newslot, list_make1(&conflicttuple));
 
 					return;
 				}
@@ -3089,8 +3101,10 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 				 * Report the conflict if the tuple was modified by a
 				 * different origin.
 				 */
-				if (GetTupleTransactionInfo(localslot, &localxmin, &localorigin, &localts) &&
-					localorigin != replorigin_session_origin)
+				if (GetTupleTransactionInfo(localslot, &conflicttuple.xmin,
+											&conflicttuple.origin,
+											&conflicttuple.ts) &&
+					conflicttuple.origin != replorigin_session_origin)
 				{
 					TupleTableSlot *newslot;
 
@@ -3098,10 +3112,11 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 					newslot = table_slot_create(partrel, &estate->es_tupleTable);
 					slot_store_data(newslot, part_entry, newtup);
 
+					conflicttuple.slot = localslot;
+
 					ReportApplyConflict(estate, partrelinfo, LOG, CT_UPDATE_ORIGIN_DIFFERS,
-										remoteslot_part, localslot, newslot,
-										InvalidOid, localxmin, localorigin,
-										localts);
+										remoteslot_part, newslot,
+										list_make1(&conflicttuple));
 				}
 
 				/*
@@ -3130,7 +3145,6 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 					 * work already done above to find the local tuple in the
 					 * partition.
 					 */
-					ExecOpenIndices(partrelinfo, true);
 					InitConflictIndexes(partrelinfo);
 
 					EvalPlanQualSetSlot(&epqstate, remoteslot_part);
@@ -3180,8 +3194,6 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 											 get_namespace_name(RelationGetNamespace(partrel_new)),
 											 RelationGetRelationName(partrel_new));
 
-					ExecOpenIndices(partrelinfo, false);
-
 					/* DELETE old tuple found in the old partition. */
 					EvalPlanQualSetSlot(&epqstate, localslot);
 					TargetPrivilegesCheck(partrelinfo->ri_RelationDesc, ACL_DELETE);
@@ -3216,7 +3228,6 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 												 remoteslot_part);
 				}
 
-				ExecCloseIndices(partrelinfo);
 				EvalPlanQualEnd(&epqstate);
 			}
 			break;
@@ -4092,7 +4103,7 @@ subscription_change_cb(Datum arg, int cacheid, uint32 hashvalue)
  * subxact_info_write
  *	  Store information about subxacts for a toplevel transaction.
  *
- * For each subxact we store offset of it's first change in the main file.
+ * For each subxact we store offset of its first change in the main file.
  * The file is always over-written as a whole.
  *
  * XXX We should only store subxacts that were not aborted yet.
@@ -4507,6 +4518,14 @@ start_apply(XLogRecPtr origin_startpos)
 	}
 	PG_CATCH();
 	{
+		/*
+		 * Reset the origin state to prevent the advancement of origin
+		 * progress if we fail to apply. Otherwise, this will result in
+		 * transaction loss as that transaction won't be sent again by the
+		 * server.
+		 */
+		replorigin_reset(0, (Datum) 0);
+
 		if (MySubscription->disableonerr)
 			DisableSubscriptionAndExit();
 		else
@@ -4995,22 +5014,11 @@ void
 apply_error_callback(void *arg)
 {
 	ApplyErrorCallbackArg *errarg = &apply_error_callback_arg;
-	int			elevel;
 
 	if (apply_error_callback_arg.command == 0)
 		return;
 
 	Assert(errarg->origin_name);
-
-	elevel = geterrlevel();
-
-	/*
-	 * Reset the origin state to prevent the advancement of origin progress if
-	 * we fail to apply. Otherwise, this will result in transaction loss as
-	 * that transaction won't be sent again by the server.
-	 */
-	if (elevel >= ERROR)
-		replorigin_reset(0, (Datum) 0);
 
 	if (errarg->rel == NULL)
 	{

@@ -27,13 +27,7 @@
 #endif
 #include <netinet/tcp.h>
 
-#ifdef ENABLE_GSS
-#if defined(HAVE_GSSAPI_H)
-#include <gssapi.h>
-#else
-#include <gssapi/gssapi.h>
-#endif							/* HAVE_GSSAPI_H */
-#endif							/* ENABLE_GSS */
+#include "libpq/pg-gssapi.h"
 
 #ifdef ENABLE_SSPI
 #define SECURITY_WIN32
@@ -144,6 +138,9 @@ typedef struct Port
 	int			remote_hostname_resolv; /* see above */
 	int			remote_hostname_errcode;	/* see above */
 	char	   *remote_port;	/* text rep of remote port */
+
+	/* local_host is filled only if needed (see log_status_format) */
+	char		local_host[64]; /* ip addr of local socket for client conn */
 
 	/*
 	 * Information that needs to be saved from the startup packet and passed
@@ -312,7 +309,7 @@ extern ssize_t be_tls_read(Port *port, void *ptr, size_t len, int *waitfor);
 /*
  * Write data to a secure connection.
  */
-extern ssize_t be_tls_write(Port *port, void *ptr, size_t len, int *waitfor);
+extern ssize_t be_tls_write(Port *port, const void *ptr, size_t len, int *waitfor);
 
 /*
  * Return information about the SSL connection.
@@ -352,7 +349,7 @@ extern bool be_gssapi_get_delegation(Port *port);
 
 /* Read and write to a GSSAPI-encrypted connection. */
 extern ssize_t be_gssapi_read(Port *port, void *ptr, size_t len);
-extern ssize_t be_gssapi_write(Port *port, void *ptr, size_t len);
+extern ssize_t be_gssapi_write(Port *port, const void *ptr, size_t len);
 #endif							/* ENABLE_GSS */
 
 extern PGDLLIMPORT ProtocolVersion FrontendProtocol;

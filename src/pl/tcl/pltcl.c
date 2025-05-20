@@ -39,7 +39,10 @@
 #include "utils/typcache.h"
 
 
-PG_MODULE_MAGIC;
+PG_MODULE_MAGIC_EXT(
+					.name = "pltcl",
+					.version = PG_VERSION
+);
 
 #define HAVE_TCL_VERSION(maj,min) \
 	((TCL_MAJOR_VERSION > maj) || \
@@ -3205,6 +3208,9 @@ pltcl_build_tuple_argument(HeapTuple tuple, TupleDesc tupdesc, bool include_gene
 		{
 			/* don't include unless requested */
 			if (!include_generated)
+				continue;
+			/* never include virtual columns */
+			if (att->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
 				continue;
 		}
 

@@ -81,6 +81,9 @@ ecpg_keywords.o: ecpg_kwlist_d.h
 c_keywords.o: c_kwlist_d.h
 keywords.o: $(top_srcdir)/src/include/parser/kwlist.h
 
+check:
+	$(prove_check)
+
 install: all installdirs
 	$(INSTALL_PROGRAM) ecpg$(X) '$(DESTDIR)$(bindir)'
 
@@ -94,3 +97,4 @@ clean distclean:
 	rm -f *.o ecpg$(X)
 	rm -f typename.c
 	rm -f preproc.y preproc.c preproc.h pgc.c c_kwlist_d.h ecpg_kwlist_d.h
+	rm -rf tmp_check

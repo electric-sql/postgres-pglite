@@ -3027,7 +3027,7 @@ Access method: heap
 (4 rows)
 
 \dt+
-                                                  List of relations
+                                                    List of tables
      Schema      |     Name      | Type  |        Owner         | Persistence | Access method |  Size   | Description 
 -----------------+---------------+-------+----------------------+-------------+---------------+---------+-------------
  tableam_display | tbl_heap      | table | regress_display_role | permanent   | heap          | 0 bytes | 
@@ -3035,7 +3035,7 @@ Access method: heap
 (2 rows)
 
 \dm+
-                                                           List of relations
+                                                      List of materialized views
      Schema      |        Name        |       Type        |        Owner         | Persistence | Access method |  Size   | Description 
 -----------------+--------------------+-------------------+----------------------+-------------+---------------+---------+-------------
  tableam_display | mat_view_heap_psql | materialized view | regress_display_role | permanent   | heap_psql     | 0 bytes | 
@@ -3043,7 +3043,7 @@ Access method: heap
 
 -- But not for views and sequences.
 \dv+
-                                          List of relations
+                                            List of views
      Schema      |      Name      | Type |        Owner         | Persistence |  Size   | Description 
 -----------------+----------------+------+----------------------+-------------+---------+-------------
  tableam_display | view_heap_psql | view | regress_display_role | permanent   | 0 bytes | 
@@ -4678,11 +4678,15 @@ bar 'bar' "bar"
 	\echo arg1 arg2 arg3 arg4 arg5
 	\echo arg1
 	\encoding arg1
+	\endpipeline
 	\errverbose
 	\f arg1
+	\flush
+	\flushrequest
 	\g arg1
 	\gx arg1
 	\gexec
+	\getresults
 	SELECT 1 AS one \gset
 	\h
 	\?
@@ -4702,10 +4706,13 @@ invalid command \lo
 	\q
 	\reset
 	\s arg1
+	\sendpipeline
 	\set arg1 arg2 arg3 arg4 arg5 arg6 arg7
 	\setenv arg1 arg2
 	\sf whole_line
 	\sv whole_line
+	\startpipeline
+	\syncpipeline
 	\t arg1
 	\T arg1
 	\timing arg1
@@ -5325,9 +5332,10 @@ Function              | in_range(time without time zone,time without time zone,i
  btree | uuid_ops        | uuid                 | uuid                  |      1 | uuid_cmp
  btree | uuid_ops        | uuid                 | uuid                  |      2 | uuid_sortsupport
  btree | uuid_ops        | uuid                 | uuid                  |      4 | btequalimage
+ btree | uuid_ops        | uuid                 | uuid                  |      6 | uuid_skipsupport
  hash  | uuid_ops        | uuid                 | uuid                  |      1 | uuid_hash
  hash  | uuid_ops        | uuid                 | uuid                  |      2 | uuid_hash_extended
-(5 rows)
+(6 rows)
 
 -- check \dconfig
 set work_mem = 10240;
@@ -6244,7 +6252,7 @@ List of access methods
 (0 rows)
 
 \dt "no.such.table.relation"
-      List of relations
+        List of tables
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
@@ -6316,31 +6324,31 @@ List of access methods
 (0 rows)
 
 \di "no.such.index.relation"
-          List of relations
+           List of indexes
  Schema | Name | Type | Owner | Table 
 --------+------+------+-------+-------
 (0 rows)
 
 \dm "no.such.materialized.view"
-      List of relations
+  List of materialized views
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
 
 \ds "no.such.relation"
-      List of relations
+      List of sequences
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
 
 \dt "no.such.relation"
-      List of relations
+        List of tables
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
 
 \dv "no.such.relation"
-      List of relations
+        List of views
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
@@ -6453,9 +6461,9 @@ List of schemas
 (0 rows)
 
 \dx "no.such.installed.extension"
-     List of installed extensions
- Name | Version | Schema | Description 
-------+---------+--------+-------------
+              List of installed extensions
+ Name | Version | Default version | Schema | Description 
+------+---------+-----------------+--------+-------------
 (0 rows)
 
 \dX "no.such.extended.statistics"
@@ -6474,7 +6482,7 @@ List of schemas
 \dA "no.such.schema"."no.such.access.method"
 improper qualified name (too many dotted names): "no.such.schema"."no.such.access.method"
 \dt "no.such.schema"."no.such.table.relation"
-      List of relations
+        List of tables
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
@@ -6526,31 +6534,31 @@ improper qualified name (too many dotted names): "no.such.schema"."no.such.table
 (0 rows)
 
 \di "no.such.schema"."no.such.index.relation"
-          List of relations
+           List of indexes
  Schema | Name | Type | Owner | Table 
 --------+------+------+-------+-------
 (0 rows)
 
 \dm "no.such.schema"."no.such.materialized.view"
-      List of relations
+  List of materialized views
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
 
 \ds "no.such.schema"."no.such.relation"
-      List of relations
+      List of sequences
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
 
 \dt "no.such.schema"."no.such.relation"
-      List of relations
+        List of tables
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
 
 \dv "no.such.schema"."no.such.relation"
-      List of relations
+        List of views
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
@@ -6641,7 +6649,7 @@ improper qualified name (too many dotted names): "no.such.schema"."no.such.insta
 improper qualified name (too many dotted names): "no.such.schema"."no.such.event.trigger"
 -- again, but with current database and dotted schema qualifications.
 \dt regression."no.such.schema"."no.such.table.relation"
-      List of relations
+        List of tables
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
@@ -6677,31 +6685,31 @@ improper qualified name (too many dotted names): "no.such.schema"."no.such.event
 (0 rows)
 
 \di regression."no.such.schema"."no.such.index.relation"
-          List of relations
+           List of indexes
  Schema | Name | Type | Owner | Table 
 --------+------+------+-------+-------
 (0 rows)
 
 \dm regression."no.such.schema"."no.such.materialized.view"
-      List of relations
+  List of materialized views
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
 
 \ds regression."no.such.schema"."no.such.relation"
-      List of relations
+      List of sequences
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
 
 \dt regression."no.such.schema"."no.such.relation"
-      List of relations
+        List of tables
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)
 
 \dv regression."no.such.schema"."no.such.relation"
-      List of relations
+        List of views
  Schema | Name | Type | Owner 
 --------+------+------+-------
 (0 rows)

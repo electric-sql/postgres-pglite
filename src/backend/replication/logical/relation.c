@@ -27,6 +27,7 @@
 #include "replication/logicalrelation.h"
 #include "replication/worker_internal.h"
 #include "utils/inval.h"
+#include "utils/lsyscache.h"
 #include "utils/syscache.h"
 
 
@@ -237,7 +238,7 @@ logicalrep_get_attrs_str(LogicalRepRelation *remoterel, Bitmapset *atts)
 	{
 		attcnt++;
 		if (attcnt > 1)
-			appendStringInfo(&attsbuf, _(", "));
+			appendStringInfoString(&attsbuf, _(", "));
 
 		appendStringInfo(&attsbuf, _("\"%s\""), remoterel->attnames[i]);
 	}
@@ -835,7 +836,10 @@ IsIndexUsableForReplicaIdentityFull(Relation idxrel, AttrMap *attrmap)
 	/* Ensure that the index has a valid equal strategy for each key column */
 	for (int i = 0; i < idxrel->rd_index->indnkeyatts; i++)
 	{
-		if (get_equal_strategy_number(indclass->values[i]) == InvalidStrategy)
+		Oid			opfamily;
+
+		opfamily = get_opclass_family(indclass->values[i]);
+		if (IndexAmTranslateCompareType(COMPARE_EQ, idxrel->rd_rel->relam, opfamily, true) == InvalidStrategy)
 			return false;
 	}
 

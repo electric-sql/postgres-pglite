@@ -117,7 +117,9 @@ CATALOG(pg_attribute,1249,AttributeRelationId) BKI_BOOTSTRAP BKI_ROWTYPE_OID(75,
 	 */
 	char		attcompression BKI_DEFAULT('\0');
 
-	/* This flag represents the "NOT NULL" constraint */
+	/*
+	 * Whether a (possibly invalid) not-null constraint exists for the column
+	 */
 	bool		attnotnull;
 
 	/* Has DEFAULT value or not */
@@ -225,6 +227,7 @@ MAKE_SYSCACHE(ATTNUM, pg_attribute_relid_attnum_index, 128);
 #define		  ATTRIBUTE_IDENTITY_BY_DEFAULT 'd'
 
 #define		  ATTRIBUTE_GENERATED_STORED	's'
+#define		  ATTRIBUTE_GENERATED_VIRTUAL	'v'
 
 #endif							/* EXPOSE_TO_CLIENT_CODE */
 

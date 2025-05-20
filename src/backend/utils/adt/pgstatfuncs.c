@@ -106,6 +106,34 @@ PG_STAT_GET_RELENTRY_INT64(tuples_updated)
 /* pg_stat_get_vacuum_count */
 PG_STAT_GET_RELENTRY_INT64(vacuum_count)
 
+#define PG_STAT_GET_RELENTRY_FLOAT8(stat)						\
+Datum															\
+CppConcat(pg_stat_get_,stat)(PG_FUNCTION_ARGS)					\
+{																\
+	Oid			relid = PG_GETARG_OID(0);						\
+	double		result;											\
+	PgStat_StatTabEntry *tabentry;								\
+																\
+	if ((tabentry = pgstat_fetch_stat_tabentry(relid)) == NULL)	\
+		result = 0;												\
+	else														\
+		result = (double) (tabentry->stat);						\
+																\
+	PG_RETURN_FLOAT8(result);									\
+}
+
+/* pg_stat_get_total_vacuum_time */
+PG_STAT_GET_RELENTRY_FLOAT8(total_vacuum_time)
+
+/* pg_stat_get_total_autovacuum_time */
+PG_STAT_GET_RELENTRY_FLOAT8(total_autovacuum_time)
+
+/* pg_stat_get_total_analyze_time */
+PG_STAT_GET_RELENTRY_FLOAT8(total_analyze_time)
+
+/* pg_stat_get_total_autoanalyze_time */
+PG_STAT_GET_RELENTRY_FLOAT8(total_autoanalyze_time)
+
 #define PG_STAT_GET_RELENTRY_TIMESTAMPTZ(stat)					\
 Datum															\
 CppConcat(pg_stat_get_,stat)(PG_FUNCTION_ARGS)					\
@@ -365,6 +393,9 @@ pg_stat_get_activity(PG_FUNCTION_ARGS)
 
 			switch (beentry->st_state)
 			{
+				case STATE_STARTING:
+					values[4] = CStringGetTextDatum("starting");
+					break;
 				case STATE_IDLE:
 					values[4] = CStringGetTextDatum("idle");
 					break;
@@ -1548,44 +1579,16 @@ pg_stat_get_backend_io(PG_FUNCTION_ARGS)
 	ReturnSetInfo *rsinfo;
 	BackendType bktype;
 	int			pid;
-	PGPROC	   *proc;
-	ProcNumber	procNumber;
 	PgStat_Backend *backend_stats;
 	PgStat_BktypeIO *bktype_stats;
-	PgBackendStatus *beentry;
 
 	InitMaterializedSRF(fcinfo, 0);
 	rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 
 	pid = PG_GETARG_INT32(0);
-	proc = BackendPidGetProc(pid);
+	backend_stats = pgstat_fetch_stat_backend_by_pid(pid, &bktype);
 
-	/*
-	 * This could be an auxiliary process but these do not report backend
-	 * statistics due to pgstat_tracks_backend_bktype(), so there is no need
-	 * for an extra call to AuxiliaryPidGetProc().
-	 */
-	if (!proc)
-		return (Datum) 0;
-
-	procNumber = GetNumberFromPGProc(proc);
-
-	beentry = pgstat_get_beentry_by_proc_number(procNumber);
-	if (!beentry)
-		return (Datum) 0;
-
-	backend_stats = pgstat_fetch_stat_backend(procNumber);
 	if (!backend_stats)
-		return (Datum) 0;
-
-	bktype = beentry->st_backendType;
-
-	/* if PID does not match, leave */
-	if (beentry->st_procpid != pid)
-		return (Datum) 0;
-
-	/* backend may be gone, so recheck in case */
-	if (bktype == B_INVALID)
 		return (Datum) 0;
 
 	bktype_stats = &backend_stats->io_stats;
@@ -1604,20 +1607,23 @@ pg_stat_get_backend_io(PG_FUNCTION_ARGS)
 }
 
 /*
- * Returns statistics of WAL activity
+ * pg_stat_wal_build_tuple
+ *
+ * Helper routine for pg_stat_get_wal() and pg_stat_get_backend_wal()
+ * returning one tuple based on the contents of wal_counters.
  */
-Datum
-pg_stat_get_wal(PG_FUNCTION_ARGS)
+static Datum
+pg_stat_wal_build_tuple(PgStat_WalCounters wal_counters,
+						TimestampTz stat_reset_timestamp)
 {
-#define PG_STAT_GET_WAL_COLS	9
+#define PG_STAT_WAL_COLS	5
 	TupleDesc	tupdesc;
-	Datum		values[PG_STAT_GET_WAL_COLS] = {0};
-	bool		nulls[PG_STAT_GET_WAL_COLS] = {0};
+	Datum		values[PG_STAT_WAL_COLS] = {0};
+	bool		nulls[PG_STAT_WAL_COLS] = {0};
 	char		buf[256];
-	PgStat_WalStats *wal_stats;
 
 	/* Initialise attributes information in the tuple descriptor */
-	tupdesc = CreateTemplateTupleDesc(PG_STAT_GET_WAL_COLS);
+	tupdesc = CreateTemplateTupleDesc(PG_STAT_WAL_COLS);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 1, "wal_records",
 					   INT8OID, -1, 0);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 2, "wal_fpi",
@@ -1626,45 +1632,68 @@ pg_stat_get_wal(PG_FUNCTION_ARGS)
 					   NUMERICOID, -1, 0);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 4, "wal_buffers_full",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 5, "wal_write",
-					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 6, "wal_sync",
-					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 7, "wal_write_time",
-					   FLOAT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 8, "wal_sync_time",
-					   FLOAT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 9, "stats_reset",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 5, "stats_reset",
 					   TIMESTAMPTZOID, -1, 0);
 
 	BlessTupleDesc(tupdesc);
 
-	/* Get statistics about WAL activity */
-	wal_stats = pgstat_fetch_stat_wal();
-
 	/* Fill values and NULLs */
-	values[0] = Int64GetDatum(wal_stats->wal_records);
-	values[1] = Int64GetDatum(wal_stats->wal_fpi);
+	values[0] = Int64GetDatum(wal_counters.wal_records);
+	values[1] = Int64GetDatum(wal_counters.wal_fpi);
 
 	/* Convert to numeric. */
-	snprintf(buf, sizeof buf, UINT64_FORMAT, wal_stats->wal_bytes);
+	snprintf(buf, sizeof buf, UINT64_FORMAT, wal_counters.wal_bytes);
 	values[2] = DirectFunctionCall3(numeric_in,
 									CStringGetDatum(buf),
 									ObjectIdGetDatum(0),
 									Int32GetDatum(-1));
 
-	values[3] = Int64GetDatum(wal_stats->wal_buffers_full);
-	values[4] = Int64GetDatum(wal_stats->wal_write);
-	values[5] = Int64GetDatum(wal_stats->wal_sync);
+	values[3] = Int64GetDatum(wal_counters.wal_buffers_full);
 
-	/* Convert counters from microsec to millisec for display */
-	values[6] = Float8GetDatum(((double) wal_stats->wal_write_time) / 1000.0);
-	values[7] = Float8GetDatum(((double) wal_stats->wal_sync_time) / 1000.0);
-
-	values[8] = TimestampTzGetDatum(wal_stats->stat_reset_timestamp);
+	if (stat_reset_timestamp != 0)
+		values[4] = TimestampTzGetDatum(stat_reset_timestamp);
+	else
+		nulls[4] = true;
 
 	/* Returns the record as Datum */
 	PG_RETURN_DATUM(HeapTupleGetDatum(heap_form_tuple(tupdesc, values, nulls)));
+}
+
+/*
+ * Returns WAL statistics for a backend with given PID.
+ */
+Datum
+pg_stat_get_backend_wal(PG_FUNCTION_ARGS)
+{
+	int			pid;
+	PgStat_Backend *backend_stats;
+	PgStat_WalCounters bktype_stats;
+
+	pid = PG_GETARG_INT32(0);
+	backend_stats = pgstat_fetch_stat_backend_by_pid(pid, NULL);
+
+	if (!backend_stats)
+		PG_RETURN_NULL();
+
+	bktype_stats = backend_stats->wal_counters;
+
+	/* save tuples with data from this PgStat_WalCounters */
+	return (pg_stat_wal_build_tuple(bktype_stats, backend_stats->stat_reset_timestamp));
+}
+
+/*
+ * Returns statistics of WAL activity
+ */
+Datum
+pg_stat_get_wal(PG_FUNCTION_ARGS)
+{
+	PgStat_WalStats *wal_stats;
+
+	/* Get statistics about WAL activity */
+	wal_stats = pgstat_fetch_stat_wal();
+
+	return (pg_stat_wal_build_tuple(wal_stats->wal_counters,
+									wal_stats->stat_reset_timestamp));
 }
 
 /*
@@ -1915,19 +1944,30 @@ Datum
 pg_stat_reset_backend_stats(PG_FUNCTION_ARGS)
 {
 	PGPROC	   *proc;
+	PgBackendStatus *beentry;
+	ProcNumber	procNumber;
 	int			backend_pid = PG_GETARG_INT32(0);
 
 	proc = BackendPidGetProc(backend_pid);
 
-	/*
-	 * This could be an auxiliary process but these do not report backend
-	 * statistics due to pgstat_tracks_backend_bktype(), so there is no need
-	 * for an extra call to AuxiliaryPidGetProc().
-	 */
+	/* This could be an auxiliary process */
+	if (!proc)
+		proc = AuxiliaryPidGetProc(backend_pid);
+
 	if (!proc)
 		PG_RETURN_VOID();
 
-	pgstat_reset(PGSTAT_KIND_BACKEND, InvalidOid, GetNumberFromPGProc(proc));
+	procNumber = GetNumberFromPGProc(proc);
+
+	beentry = pgstat_get_beentry_by_proc_number(procNumber);
+	if (!beentry)
+		PG_RETURN_VOID();
+
+	/* Check if the backend type tracks statistics */
+	if (!pgstat_tracks_backend_bktype(beentry->st_backendType))
+		PG_RETURN_VOID();
+
+	pgstat_reset(PGSTAT_KIND_BACKEND, InvalidOid, procNumber);
 
 	PG_RETURN_VOID();
 }
@@ -2131,7 +2171,7 @@ pg_stat_get_replication_slot(PG_FUNCTION_ARGS)
 Datum
 pg_stat_get_subscription_stats(PG_FUNCTION_ARGS)
 {
-#define PG_STAT_GET_SUBSCRIPTION_STATS_COLS	10
+#define PG_STAT_GET_SUBSCRIPTION_STATS_COLS	11
 	Oid			subid = PG_GETARG_OID(0);
 	TupleDesc	tupdesc;
 	Datum		values[PG_STAT_GET_SUBSCRIPTION_STATS_COLS] = {0};
@@ -2163,7 +2203,9 @@ pg_stat_get_subscription_stats(PG_FUNCTION_ARGS)
 					   INT8OID, -1, 0);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 9, "confl_delete_missing",
 					   INT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 10, "stats_reset",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 10, "confl_multiple_unique_conflicts",
+					   INT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 11, "stats_reset",
 					   TIMESTAMPTZOID, -1, 0);
 	BlessTupleDesc(tupdesc);
 

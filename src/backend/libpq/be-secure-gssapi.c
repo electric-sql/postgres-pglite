@@ -93,7 +93,7 @@ static uint32 PqGSSMaxPktSize;	/* Maximum size we can encrypt and fit the
  * failure if necessary, and then return an errno indicating connection loss.
  */
 ssize_t
-be_gssapi_write(Port *port, void *ptr, size_t len)
+be_gssapi_write(Port *port, const void *ptr, size_t len)
 {
 	OM_uint32	major,
 				minor;
@@ -500,7 +500,7 @@ secure_open_gssapi(Port *port)
 				minor;
 	gss_cred_id_t delegated_creds;
 
-	INJECTION_POINT("backend-gssapi-startup");
+	INJECTION_POINT("backend-gssapi-startup", NULL);
 
 	/*
 	 * Allocate subsidiary Port data for GSSAPI operations.
@@ -641,7 +641,7 @@ secure_open_gssapi(Port *port)
 				return -1;
 			}
 
-			memcpy(PqGSSSendBuffer, (char *) &netlen, sizeof(uint32));
+			memcpy(PqGSSSendBuffer, &netlen, sizeof(uint32));
 			PqGSSSendLength += sizeof(uint32);
 
 			memcpy(PqGSSSendBuffer + PqGSSSendLength, output.value, output.length);

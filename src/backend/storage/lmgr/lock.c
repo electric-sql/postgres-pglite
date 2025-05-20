@@ -39,6 +39,7 @@
 #include "access/xlogutils.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
+#include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/spin.h"
@@ -48,8 +49,9 @@
 #include "utils/resowner.h"
 
 
-/* This configuration variable is used to set the lock table size */
-int			max_locks_per_xact; /* set by guc.c */
+/* GUC variables */
+int			max_locks_per_xact; /* used to set the lock table size */
+bool		log_lock_failure = false;
 
 #define NLOCKENTS() \
 	mul_size(max_locks_per_xact, add_size(MaxBackends, max_prepared_xacts))
@@ -208,9 +210,12 @@ int			FastPathLockGroupsPerBackend = 0;
  *
  * The selected constant (49157) is a prime not too close to 2^k, and it's
  * small enough to not cause overflows (in 64-bit).
+ *
+ * We can assume that FastPathLockGroupsPerBackend is a power-of-two per
+ * InitializeFastPathLocks().
  */
 #define FAST_PATH_REL_GROUP(rel) \
-	(((uint64) (rel) * 49157) % FastPathLockGroupsPerBackend)
+	(((uint64) (rel) * 49157) & (FastPathLockGroupsPerBackend - 1))
 
 /*
  * Given the group/slot indexes, calculate the slot index in the whole array
@@ -226,10 +231,10 @@ int			FastPathLockGroupsPerBackend = 0;
  * the FAST_PATH_SLOT macro, split it into group and index (in the group).
  */
 #define FAST_PATH_GROUP(index)	\
-	(AssertMacro((uint32) (index) < FP_LOCK_SLOTS_PER_BACKEND), \
+	(AssertMacro((uint32) (index) < FastPathLockSlotsPerBackend()), \
 	 ((index) / FP_LOCK_SLOTS_PER_GROUP))
 #define FAST_PATH_INDEX(index)	\
-	(AssertMacro((uint32) (index) < FP_LOCK_SLOTS_PER_BACKEND), \
+	(AssertMacro((uint32) (index) < FastPathLockSlotsPerBackend()), \
 	 ((index) % FP_LOCK_SLOTS_PER_GROUP))
 
 /* Macros for manipulating proc->fpLockBits */
@@ -242,7 +247,7 @@ int			FastPathLockGroupsPerBackend = 0;
 #define FAST_PATH_BIT_POSITION(n, l) \
 	(AssertMacro((l) >= FAST_PATH_LOCKNUMBER_OFFSET), \
 	 AssertMacro((l) < FAST_PATH_BITS_PER_SLOT+FAST_PATH_LOCKNUMBER_OFFSET), \
-	 AssertMacro((n) < FP_LOCK_SLOTS_PER_BACKEND), \
+	 AssertMacro((n) < FastPathLockSlotsPerBackend()), \
 	 ((l) - FAST_PATH_LOCKNUMBER_OFFSET + FAST_PATH_BITS_PER_SLOT * (FAST_PATH_INDEX(n))))
 #define FAST_PATH_SET_LOCKMODE(proc, n, l) \
 	 FAST_PATH_BITS(proc, n) |= UINT64CONST(1) << FAST_PATH_BIT_POSITION(n, l)
@@ -806,7 +811,7 @@ LockAcquire(const LOCKTAG *locktag,
 			bool dontWait)
 {
 	return LockAcquireExtended(locktag, lockmode, sessionLock, dontWait,
-							   true, NULL);
+							   true, NULL, false);
 }
 
 /*
@@ -822,6 +827,9 @@ LockAcquire(const LOCKTAG *locktag,
  *
  * If locallockp isn't NULL, *locallockp receives a pointer to the LOCALLOCK
  * table entry if a lock is successfully acquired, or NULL if not.
+ *
+ * logLockFailure indicates whether to log details when a lock acquisition
+ * fails with dontWait = true.
  */
 LockAcquireResult
 LockAcquireExtended(const LOCKTAG *locktag,
@@ -829,7 +837,8 @@ LockAcquireExtended(const LOCKTAG *locktag,
 					bool sessionLock,
 					bool dontWait,
 					bool reportMemoryError,
-					LOCALLOCK **locallockp)
+					LOCALLOCK **locallockp,
+					bool logLockFailure)
 {
 	LOCKMETHODID lockmethodid = locktag->locktag_lockmethodid;
 	LockMethod	lockMethodTable;
@@ -1145,6 +1154,47 @@ LockAcquireExtended(const LOCKTAG *locktag,
 
 		if (dontWait)
 		{
+			/*
+			 * Log lock holders and waiters as a detail log message if
+			 * logLockFailure = true and lock acquisition fails with dontWait
+			 * = true
+			 */
+			if (logLockFailure)
+			{
+				StringInfoData buf,
+							lock_waiters_sbuf,
+							lock_holders_sbuf;
+				const char *modename;
+				int			lockHoldersNum = 0;
+
+				initStringInfo(&buf);
+				initStringInfo(&lock_waiters_sbuf);
+				initStringInfo(&lock_holders_sbuf);
+
+				DescribeLockTag(&buf, &locallock->tag.lock);
+				modename = GetLockmodeName(locallock->tag.lock.locktag_lockmethodid,
+										   lockmode);
+
+				/* Gather a list of all lock holders and waiters */
+				LWLockAcquire(partitionLock, LW_SHARED);
+				GetLockHoldersAndWaiters(locallock, &lock_holders_sbuf,
+										 &lock_waiters_sbuf, &lockHoldersNum);
+				LWLockRelease(partitionLock);
+
+				ereport(LOG,
+						(errmsg("process %d could not obtain %s on %s",
+								MyProcPid, modename, buf.data),
+						 errdetail_log_plural(
+											  "Process holding the lock: %s, Wait queue: %s.",
+											  "Processes holding the lock: %s, Wait queue: %s.",
+											  lockHoldersNum,
+											  lock_holders_sbuf.data,
+											  lock_waiters_sbuf.data)));
+
+				pfree(buf.data);
+				pfree(lock_holders_sbuf.data);
+				pfree(lock_waiters_sbuf.data);
+			}
 			if (locallockp)
 				*locallockp = NULL;
 			return LOCKACQUIRE_NOT_AVAIL;
@@ -1323,7 +1373,7 @@ SetupLockInTable(LockMethod lockMethodTable, PGPROC *proc,
 		 * on our own behalf, in which case our group leader isn't changing
 		 * because the group leader for a process can only ever be changed by
 		 * the process itself; or else we are transferring a fast-path lock to
-		 * the main lock table, in which case that process can't change it's
+		 * the main lock table, in which case that process can't change its
 		 * lock group leader without first releasing all of its locks (and in
 		 * particular the one we are currently transferring).
 		 */
@@ -1847,6 +1897,15 @@ LOCALLOCK *
 GetAwaitedLock(void)
 {
 	return awaitedLock;
+}
+
+/*
+ * ResetAwaitedLock -- Forget that we are waiting on a lock.
+ */
+void
+ResetAwaitedLock(void)
+{
+	awaitedLock = NULL;
 }
 
 /*
@@ -2691,7 +2750,7 @@ static bool
 FastPathGrantRelationLock(Oid relid, LOCKMODE lockmode)
 {
 	uint32		i;
-	uint32		unused_slot = FP_LOCK_SLOTS_PER_BACKEND;
+	uint32		unused_slot = FastPathLockSlotsPerBackend();
 
 	/* fast-path group the lock belongs to */
 	uint32		group = FAST_PATH_REL_GROUP(relid);
@@ -2713,7 +2772,7 @@ FastPathGrantRelationLock(Oid relid, LOCKMODE lockmode)
 	}
 
 	/* If no existing entry, use any empty slot. */
-	if (unused_slot < FP_LOCK_SLOTS_PER_BACKEND)
+	if (unused_slot < FastPathLockSlotsPerBackend())
 	{
 		MyProc->fpRelId[unused_slot] = relid;
 		FAST_PATH_SET_LOCKMODE(MyProc, unused_slot, lockmode);
@@ -2774,6 +2833,9 @@ FastPathTransferRelationLocks(LockMethod lockMethodTable, const LOCKTAG *locktag
 	Oid			relid = locktag->locktag_field2;
 	uint32		i;
 
+	/* fast-path group the lock belongs to */
+	uint32		group = FAST_PATH_REL_GROUP(relid);
+
 	/*
 	 * Every PGPROC that can potentially hold a fast-path lock is present in
 	 * ProcGlobal->allProcs.  Prepared transactions are not, but any
@@ -2783,8 +2845,7 @@ FastPathTransferRelationLocks(LockMethod lockMethodTable, const LOCKTAG *locktag
 	for (i = 0; i < ProcGlobal->allProcCount; i++)
 	{
 		PGPROC	   *proc = &ProcGlobal->allProcs[i];
-		uint32		j,
-					group;
+		uint32		j;
 
 		LWLockAcquire(&proc->fpInfoLock, LW_EXCLUSIVE);
 
@@ -2802,15 +2863,15 @@ FastPathTransferRelationLocks(LockMethod lockMethodTable, const LOCKTAG *locktag
 		 * less clear that our backend is certain to have performed a memory
 		 * fencing operation since the other backend set proc->databaseId.  So
 		 * for now, we test it after acquiring the LWLock just to be safe.
+		 *
+		 * Also skip groups without any registered fast-path locks.
 		 */
-		if (proc->databaseId != locktag->locktag_field1)
+		if (proc->databaseId != locktag->locktag_field1 ||
+			proc->fpLockBits[group] == 0)
 		{
 			LWLockRelease(&proc->fpInfoLock);
 			continue;
 		}
-
-		/* fast-path group the lock belongs to */
-		group = FAST_PATH_REL_GROUP(relid);
 
 		for (j = 0; j < FP_LOCK_SLOTS_PER_GROUP; j++)
 		{
@@ -3027,6 +3088,9 @@ GetLockConflicts(const LOCKTAG *locktag, LOCKMODE lockmode, int *countp)
 		Oid			relid = locktag->locktag_field2;
 		VirtualTransactionId vxid;
 
+		/* fast-path group the lock belongs to */
+		uint32		group = FAST_PATH_REL_GROUP(relid);
+
 		/*
 		 * Iterate over relevant PGPROCs.  Anything held by a prepared
 		 * transaction will have been transferred to the primary lock table,
@@ -3040,8 +3104,7 @@ GetLockConflicts(const LOCKTAG *locktag, LOCKMODE lockmode, int *countp)
 		for (i = 0; i < ProcGlobal->allProcCount; i++)
 		{
 			PGPROC	   *proc = &ProcGlobal->allProcs[i];
-			uint32		j,
-						group;
+			uint32		j;
 
 			/* A backend never blocks itself */
 			if (proc == MyProc)
@@ -3056,15 +3119,15 @@ GetLockConflicts(const LOCKTAG *locktag, LOCKMODE lockmode, int *countp)
 			 *
 			 * See FastPathTransferRelationLocks() for discussion of why we do
 			 * this test after acquiring the lock.
+			 *
+			 * Also skip groups without any registered fast-path locks.
 			 */
-			if (proc->databaseId != locktag->locktag_field1)
+			if (proc->databaseId != locktag->locktag_field1 ||
+				proc->fpLockBits[group] == 0)
 			{
 				LWLockRelease(&proc->fpInfoLock);
 				continue;
 			}
-
-			/* fast-path group the lock belongs to */
-			group = FAST_PATH_REL_GROUP(relid);
 
 			for (j = 0; j < FP_LOCK_SLOTS_PER_GROUP; j++)
 			{

@@ -307,7 +307,7 @@ static TupleDesc GetPgClassDescriptor(void);
 static TupleDesc GetPgIndexDescriptor(void);
 static void AttrDefaultFetch(Relation relation, int ndef);
 static int	AttrDefaultCmp(const void *a, const void *b);
-static void CheckConstraintFetch(Relation relation);
+static void CheckNNConstraintFetch(Relation relation);
 static int	CheckConstraintCmp(const void *a, const void *b);
 static void InitIndexAmRoutine(Relation relation);
 static void IndexSupportInitialize(oidvector *indclass,
@@ -371,14 +371,13 @@ ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic)
 	pg_class_desc = table_open(RelationRelationId, AccessShareLock);
 
 	/*
-	 * The caller might need a tuple that's newer than the one the historic
-	 * snapshot; currently the only case requiring to do so is looking up the
-	 * relfilenumber of non mapped system relations during decoding. That
-	 * snapshot can't change in the midst of a relcache build, so there's no
-	 * need to register the snapshot.
+	 * The caller might need a tuple that's newer than what's visible to the
+	 * historic snapshot; currently the only case requiring to do so is
+	 * looking up the relfilenumber of non mapped system relations during
+	 * decoding.
 	 */
 	if (force_non_historic)
-		snapshot = GetNonHistoricCatalogSnapshot(RelationRelationId);
+		snapshot = RegisterSnapshot(GetNonHistoricCatalogSnapshot(RelationRelationId));
 
 	pg_class_scan = systable_beginscan(pg_class_desc, ClassOidIndexId,
 									   indexOK && criticalRelcachesBuilt,
@@ -395,6 +394,10 @@ ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic)
 
 	/* all done */
 	systable_endscan(pg_class_scan);
+
+	if (snapshot)
+		UnregisterSnapshot(snapshot);
+
 	table_close(pg_class_desc, AccessShareLock);
 
 	return pg_class_tuple;
@@ -592,6 +595,8 @@ RelationBuildTupleDesc(Relation relation)
 			constr->has_not_null = true;
 		if (attp->attgenerated == ATTRIBUTE_GENERATED_STORED)
 			constr->has_generated_stored = true;
+		if (attp->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
+			constr->has_generated_virtual = true;
 		if (attp->atthasdef)
 			ndef++;
 
@@ -674,10 +679,13 @@ RelationBuildTupleDesc(Relation relation)
 	 */
 	if (constr->has_not_null ||
 		constr->has_generated_stored ||
+		constr->has_generated_virtual ||
 		ndef > 0 ||
 		attrmiss ||
 		relation->rd_rel->relchecks > 0)
 	{
+		bool		is_catalog = IsCatalogRelation(relation);
+
 		relation->rd_att->constr = constr;
 
 		if (ndef > 0)			/* DEFAULTs */
@@ -687,9 +695,33 @@ RelationBuildTupleDesc(Relation relation)
 
 		constr->missing = attrmiss;
 
-		if (relation->rd_rel->relchecks > 0)	/* CHECKs */
-			CheckConstraintFetch(relation);
-		else
+		/* CHECK and NOT NULLs */
+		if (relation->rd_rel->relchecks > 0 ||
+			(!is_catalog && constr->has_not_null))
+			CheckNNConstraintFetch(relation);
+
+		/*
+		 * Any not-null constraint that wasn't marked invalid by
+		 * CheckNNConstraintFetch must necessarily be valid; make it so in the
+		 * CompactAttribute array.
+		 */
+		if (!is_catalog)
+		{
+			for (int i = 0; i < relation->rd_rel->relnatts; i++)
+			{
+				CompactAttribute *attr;
+
+				attr = TupleDescCompactAttr(relation->rd_att, i);
+
+				if (attr->attnullability == ATTNULLABLE_UNKNOWN)
+					attr->attnullability = ATTNULLABLE_VALID;
+				else
+					Assert(attr->attnullability == ATTNULLABLE_INVALID ||
+						   attr->attnullability == ATTNULLABLE_UNRESTRICTED);
+			}
+		}
+
+		if (relation->rd_rel->relchecks == 0)
 			constr->num_check = 0;
 	}
 	else
@@ -1925,6 +1957,7 @@ formrdesc(const char *relationName, Oid relationReltype,
 	relation->rd_rel->relpages = 0;
 	relation->rd_rel->reltuples = -1;
 	relation->rd_rel->relallvisible = 0;
+	relation->rd_rel->relallfrozen = 0;
 	relation->rd_rel->relkind = RELKIND_RELATION;
 	relation->rd_rel->relnatts = (int16) natts;
 
@@ -2023,6 +2056,23 @@ formrdesc(const char *relationName, Oid relationReltype,
 	relation->rd_isvalid = true;
 }
 
+#ifdef USE_ASSERT_CHECKING
+/*
+ *		AssertCouldGetRelation
+ *
+ *		Check safety of calling RelationIdGetRelation().
+ *
+ *		In code that reads catalogs in the event of a cache miss, call this
+ *		before checking the cache.
+ */
+void
+AssertCouldGetRelation(void)
+{
+	Assert(IsTransactionState());
+	AssertBufferLocksPermitCatalogRead();
+}
+#endif
+
 
 /* ----------------------------------------------------------------
  *				 Relation Descriptor Lookup Interface
@@ -2050,8 +2100,7 @@ RelationIdGetRelation(Oid relationId)
 {
 	Relation	rd;
 
-	/* Make sure we're in an xact, even if this ends up being a cache hit */
-	Assert(IsTransactionState());
+	AssertCouldGetRelation();
 
 	/*
 	 * first try to find reldesc in the cache
@@ -2340,8 +2389,7 @@ RelationReloadNailed(Relation relation)
 	Assert(relation->rd_isnailed);
 	/* nailed indexes are handled by RelationReloadIndexInfo() */
 	Assert(relation->rd_rel->relkind == RELKIND_RELATION);
-	/* can only reread catalog contents in a transaction */
-	Assert(IsTransactionState());
+	AssertCouldGetRelation();
 
 	/*
 	 * Redo RelationInitPhysicalAddr in case it is a mapped relation whose
@@ -2537,8 +2585,7 @@ static void
 RelationRebuildRelation(Relation relation)
 {
 	Assert(!RelationHasReferenceCountZero(relation));
-	/* rebuilding requires access to the catalogs */
-	Assert(IsTransactionState());
+	AssertCouldGetRelation();
 	/* there is no reason to ever rebuild a dropped relation */
 	Assert(relation->rd_droppedSubid == InvalidSubTransactionId);
 
@@ -3568,6 +3615,14 @@ RelationBuildLocalRelation(const char *relname,
 		datt->attnotnull = satt->attnotnull;
 		has_not_null |= satt->attnotnull;
 		populate_compact_attribute(rel->rd_att, i);
+
+		if (satt->attnotnull)
+		{
+			CompactAttribute *scatt = TupleDescCompactAttr(tupDesc, i);
+			CompactAttribute *dcatt = TupleDescCompactAttr(rel->rd_att, i);
+
+			dcatt->attnullability = scatt->attnullability;
+		}
 	}
 
 	if (has_not_null)
@@ -3882,6 +3937,7 @@ RelationSetNewRelfilenumber(Relation relation, char persistence)
 			classform->relpages = 0;	/* it's empty until further notice */
 			classform->reltuples = -1;
 			classform->relallvisible = 0;
+			classform->relallfrozen = 0;
 		}
 		classform->relfrozenxid = freezeXid;
 		classform->relminmxid = minmulti;
@@ -4525,13 +4581,14 @@ AttrDefaultCmp(const void *a, const void *b)
 }
 
 /*
- * Load any check constraints for the relation.
+ * Load any check constraints for the relation, and update not-null validity
+ * of invalid constraints.
  *
  * As with defaults, if we don't find the expected number of them, just warn
  * here.  The executor should throw an error if an INSERT/UPDATE is attempted.
  */
 static void
-CheckConstraintFetch(Relation relation)
+CheckNNConstraintFetch(Relation relation)
 {
 	ConstrCheck *check;
 	int			ncheck = relation->rd_rel->relchecks;
@@ -4541,10 +4598,13 @@ CheckConstraintFetch(Relation relation)
 	HeapTuple	htup;
 	int			found = 0;
 
-	/* Allocate array with room for as many entries as expected */
-	check = (ConstrCheck *)
-		MemoryContextAllocZero(CacheMemoryContext,
-							   ncheck * sizeof(ConstrCheck));
+	/* Allocate array with room for as many entries as expected, if needed */
+	if (ncheck > 0)
+		check = (ConstrCheck *)
+			MemoryContextAllocZero(CacheMemoryContext,
+								   ncheck * sizeof(ConstrCheck));
+	else
+		check = NULL;
 
 	/* Search pg_constraint for relevant entries */
 	ScanKeyInit(&skey[0],
@@ -4562,7 +4622,31 @@ CheckConstraintFetch(Relation relation)
 		Datum		val;
 		bool		isnull;
 
-		/* We want check constraints only */
+		/*
+		 * If this is a not-null constraint, then only look at it if it's
+		 * invalid, and if so, mark the TupleDesc entry as known invalid.
+		 * Otherwise move on.  We'll mark any remaining columns that are still
+		 * in UNKNOWN state as known valid later.  This allows us not to have
+		 * to extract the attnum from this constraint tuple in the vast
+		 * majority of cases.
+		 */
+		if (conform->contype == CONSTRAINT_NOTNULL)
+		{
+			if (!conform->convalidated)
+			{
+				AttrNumber	attnum;
+
+				attnum = extractNotNullColumn(htup);
+				Assert(relation->rd_att->compact_attrs[attnum - 1].attnullability ==
+					   ATTNULLABLE_UNKNOWN);
+				relation->rd_att->compact_attrs[attnum - 1].attnullability =
+					ATTNULLABLE_INVALID;
+			}
+
+			continue;
+		}
+
+		/* For what follows, consider check constraints only */
 		if (conform->contype != CONSTRAINT_CHECK)
 			continue;
 
@@ -4658,11 +4742,6 @@ RelationGetFKeyList(Relation relation)
 	if (relation->rd_fkeyvalid)
 		return relation->rd_fkeylist;
 
-	/* Fast path: non-partitioned tables without triggers can't have FKs */
-	if (!relation->rd_rel->relhastriggers &&
-		relation->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
-		return NIL;
-
 	/*
 	 * We build the list we intend to return (in the caller's context) while
 	 * doing the scan.  After successfully completing the scan, we copy that
@@ -4694,6 +4773,7 @@ RelationGetFKeyList(Relation relation)
 		info->conoid = constraint->oid;
 		info->conrelid = constraint->conrelid;
 		info->confrelid = constraint->confrelid;
+		info->conenforced = constraint->conenforced;
 
 		DeconstructFkConstraintRow(htup, &info->nkeys,
 								   info->conkey,

@@ -11,7 +11,6 @@
 #ifndef COPY_FILE_H
 #define COPY_FILE_H
 
-#include "c.h"
 #include "common/checksum_helper.h"
 
 /*
@@ -25,6 +24,7 @@ typedef enum CopyMethod
 #ifdef WIN32
 	COPY_METHOD_COPYFILE,
 #endif
+	COPY_METHOD_LINK,
 } CopyMethod;
 
 extern void copy_file(const char *src, const char *dst,

@@ -29,7 +29,10 @@
 #include "utils/rel.h"
 #include "utils/varlena.h"
 
-PG_MODULE_MAGIC;
+PG_MODULE_MAGIC_EXT(
+					.name = "pageinspect",
+					.version = PG_VERSION
+);
 
 static bytea *get_raw_page_internal(text *relname, ForkNumber forknum,
 									BlockNumber blkno);
@@ -357,7 +360,7 @@ page_checksum_internal(PG_FUNCTION_ARGS, enum pageinspect_version ext_version)
 	if (PageIsNew(page))
 		PG_RETURN_NULL();
 
-	PG_RETURN_INT16(pg_checksum_page((char *) page, blkno));
+	PG_RETURN_INT16(pg_checksum_page(page, blkno));
 }
 
 Datum

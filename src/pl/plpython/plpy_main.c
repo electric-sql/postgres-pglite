@@ -18,7 +18,7 @@
 #include "plpy_plpymodule.h"
 #include "plpy_procedure.h"
 #include "plpy_subxactobject.h"
-#include "plpython.h"
+#include "plpy_util.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -28,7 +28,10 @@
  * exported functions
  */
 
-PG_MODULE_MAGIC;
+PG_MODULE_MAGIC_EXT(
+					.name = "plpython",
+					.version = PG_VERSION
+);
 
 PG_FUNCTION_INFO_V1(plpython3_validator);
 PG_FUNCTION_INFO_V1(plpython3_call_handler);

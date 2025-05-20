@@ -61,7 +61,7 @@
 #include <time.h>
 
 #ifdef HAVE_SHM_OPEN
-#include "sys/mman.h"
+#include <sys/mman.h>
 #endif
 
 #include "access/xlog_internal.h"
@@ -168,6 +168,7 @@ static bool data_checksums = true;
 static char *xlog_dir = NULL;
 static int	wal_segment_size_mb = (DEFAULT_XLOG_SEG_SIZE) / (1024 * 1024);
 static DataDirSyncMethod sync_method = DATA_DIR_SYNC_METHOD_FSYNC;
+static bool sync_data_files = true;
 
 
 /* internal vars */
@@ -883,6 +884,8 @@ static const struct tsearch_config_match tsearch_config_languages[] =
 	{"english", "POSIX"},
 	{"english", "en"},
 	{"english", "English"},
+	{"estonian", "et"},
+	{"estonian", "Estonian"},
 	{"finnish", "fi"},
 	{"finnish", "Finnish"},
 	{"french", "fr"},
@@ -1125,15 +1128,14 @@ test_config_settings(void)
 	 * for a given max_connections value.  Note that it has been carefully
 	 * crafted to provide specific values for the associated values in
 	 * trial_conns.  We want it to return autovacuum_worker_slots's initial
-	 * default value (16) for the maximum value in trial_conns (100), and we
-	 * want it to return close to the minimum value we'd consider (3, which is
-	 * the default of autovacuum_max_workers) for the minimum value in
-	 * trial_conns (25).
+	 * default value (16) for the maximum value in trial_conns[] (100), while
+	 * it mustn't return less than the default value of autovacuum_max_workers
+	 * (3) for the minimum value in trial_conns[].
 	 */
 #define AV_SLOTS_FOR_CONNS(nconns)	((nconns) / 6)
 
 	static const int trial_conns[] = {
-		100, 50, 40, 30, 25
+		100, 50, 40, 30, 20
 	};
 	static const int trial_bufs[] = {
 		16384, 8192, 4096, 3584, 3072, 2560, 2048, 1536,
@@ -1182,13 +1184,6 @@ test_config_settings(void)
 	n_connections = trial_conns[i];
 
 	printf("%d\n", n_connections);
-
-	/*
-	 * We chose the default for autovacuum_worker_slots during the
-	 * max_connections tests above, but we print a progress message anyway.
-	 */
-	printf(_("selecting default \"autovacuum_worker_slots\" ... %d\n"),
-		   n_av_slots);
 
 	printf(_("selecting default \"shared_buffers\" ... "));
 	fflush(stdout);
@@ -1397,11 +1392,6 @@ setup_config(void)
 			 DEFAULT_CHECKPOINT_FLUSH_AFTER * (BLCKSZ / 1024));
 	conflines = replace_guc_value(conflines, "checkpoint_flush_after",
 								  repltok, true);
-#endif
-
-#ifndef USE_PREFETCH
-	conflines = replace_guc_value(conflines, "effective_io_concurrency",
-								  "0", true);
 #endif
 
 #ifdef WIN32
@@ -1622,9 +1612,9 @@ bootstrap_template1(void)
 	printfPQExpBuffer(&cmd, "\"%s\" --boot %s %s", backend_exec, boot_options, extra_options);
 	appendPQExpBuffer(&cmd, " -X %d", wal_segment_size_mb * (1024 * 1024));
 	if (data_checksums)
-		appendPQExpBuffer(&cmd, " -k");
+		appendPQExpBufferStr(&cmd, " -k");
 	if (debug)
-		appendPQExpBuffer(&cmd, " -d 5");
+		appendPQExpBufferStr(&cmd, " -d 5");
 
 
 	PG_CMD_OPEN(cmd.data);
@@ -2489,6 +2479,8 @@ setlocales(void)
 		else if (strcmp(datlocale, "C.UTF-8") == 0 ||
 				 strcmp(datlocale, "C.UTF8") == 0)
 			canonname = "C.UTF-8";
+		else if (strcmp(datlocale, "PG_UNICODE_FAST") == 0)
+			canonname = "PG_UNICODE_FAST";
 		else
 			pg_fatal("invalid locale name \"%s\" for builtin provider",
 					 datlocale);
@@ -2562,6 +2554,7 @@ usage(const char *progname)
 	printf(_("  -L DIRECTORY              where to find the input files\n"));
 	printf(_("  -n, --no-clean            do not clean up after errors\n"));
 	printf(_("  -N, --no-sync             do not wait for changes to be written safely to disk\n"));
+	printf(_("      --no-sync-data-files  do not sync files within database directories\n"));
 	printf(_("      --no-instructions     do not print instructions for next steps\n"));
 	printf(_("  -s, --show                show internal settings, then exit\n"));
 	printf(_("      --sync-method=METHOD  set method for syncing files to disk\n"));
@@ -2782,7 +2775,9 @@ setup_locale_encoding(void)
 
 	if (locale_provider == COLLPROVIDER_BUILTIN)
 	{
-		if (strcmp(datlocale, "C.UTF-8") == 0 && encodingid != PG_UTF8)
+		if ((strcmp(datlocale, "C.UTF-8") == 0 ||
+			 strcmp(datlocale, "PG_UNICODE_FAST") == 0) &&
+			encodingid != PG_UTF8)
 			pg_fatal("builtin provider locale \"%s\" requires encoding \"%s\"",
 					 datlocale, "UTF-8");
 	}
@@ -2874,27 +2869,18 @@ setup_text_search(void)
 void
 setup_signals(void)
 {
-	/* some of these are not valid on Windows */
-#ifdef SIGHUP
-	pqsignal(SIGHUP, trapsig);
-#endif
-#ifdef SIGINT
 	pqsignal(SIGINT, trapsig);
-#endif
-#ifdef SIGQUIT
-	pqsignal(SIGQUIT, trapsig);
-#endif
-#ifdef SIGTERM
 	pqsignal(SIGTERM, trapsig);
-#endif
+
+	/* the following are not valid on Windows */
+#ifndef WIN32
+	pqsignal(SIGHUP, trapsig);
+	pqsignal(SIGQUIT, trapsig);
 
 	/* Ignore SIGPIPE when writing to backend, so we can clean up */
-#ifdef SIGPIPE
 	pqsignal(SIGPIPE, SIG_IGN);
-#endif
 
 	/* Prevent SIGSYS so we can probe for kernel calls that might not work */
-#ifdef SIGSYS
 	pqsignal(SIGSYS, SIG_IGN);
 #endif
 }
@@ -3211,6 +3197,7 @@ main(int argc, char *argv[])
 		{"icu-rules", required_argument, NULL, 18},
 		{"sync-method", required_argument, NULL, 19},
 		{"no-data-checksums", no_argument, NULL, 20},
+		{"no-sync-data-files", no_argument, NULL, 21},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -3405,6 +3392,9 @@ main(int argc, char *argv[])
 			case 20:
 				data_checksums = false;
 				break;
+			case 21:
+				sync_data_files = false;
+				break;
 			default:
 				/* getopt_long already emitted a complaint */
 				pg_log_error_hint("Try \"%s --help\" for more information.", progname);
@@ -3456,7 +3446,7 @@ main(int argc, char *argv[])
 
 		fputs(_("syncing data to disk ... "), stdout);
 		fflush(stdout);
-		sync_pgdata(pg_data, PG_VERSION_NUM, sync_method);
+		sync_pgdata(pg_data, PG_VERSION_NUM, sync_method, sync_data_files);
 		check_ok();
 		return 0;
 	}
@@ -3519,7 +3509,7 @@ main(int argc, char *argv[])
 	{
 		fputs(_("syncing data to disk ... "), stdout);
 		fflush(stdout);
-		sync_pgdata(pg_data, PG_VERSION_NUM, sync_method);
+		sync_pgdata(pg_data, PG_VERSION_NUM, sync_method, sync_data_files);
 		check_ok();
 	}
 	else

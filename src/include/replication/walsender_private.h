@@ -96,11 +96,11 @@ typedef struct
 	XLogRecPtr	lsn[NUM_SYNC_REP_WAIT_MODE];
 
 	/*
-	 * Are any sync standbys defined?  Waiting backends can't reload the
-	 * config file safely, so checkpointer updates this value as needed.
-	 * Protected by SyncRepLock.
+	 * Status of data related to the synchronous standbys.  Waiting backends
+	 * can't reload the config file safely, so checkpointer updates this value
+	 * as needed. Protected by SyncRepLock.
 	 */
-	bool		sync_standbys_defined;
+	bits8		sync_standbys_status;
 
 	/* used as a registry of physical / logical walsenders to wake */
 	ConditionVariable wal_flush_cv;
@@ -116,6 +116,21 @@ typedef struct
 	WalSnd		walsnds[FLEXIBLE_ARRAY_MEMBER];
 } WalSndCtlData;
 
+/* Flags for WalSndCtlData->sync_standbys_status */
+
+/*
+ * Is the synchronous standby data initialized from the GUC?  This is set the
+ * first time synchronous_standby_names is processed by the checkpointer.
+ */
+#define SYNC_STANDBY_INIT			(1 << 0)
+
+/*
+ * Is the synchronous standby data defined?  This is set when
+ * synchronous_standby_names has some data, after being processed by the
+ * checkpointer.
+ */
+#define SYNC_STANDBY_DEFINED		(1 << 1)
+
 extern PGDLLIMPORT WalSndCtlData *WalSndCtl;
 
 
@@ -130,13 +145,11 @@ union YYSTYPE;
 #define YY_TYPEDEF_YY_SCANNER_T
 typedef void *yyscan_t;
 #endif
-extern int	replication_yyparse(yyscan_t yyscanner);
+extern int	replication_yyparse(Node **replication_parse_result_p, yyscan_t yyscanner);
 extern int	replication_yylex(union YYSTYPE *yylval_param, yyscan_t yyscanner);
-extern void replication_yyerror(yyscan_t yyscanner, const char *message) pg_attribute_noreturn();
+pg_noreturn extern void replication_yyerror(Node **replication_parse_result_p, yyscan_t yyscanner, const char *message);
 extern void replication_scanner_init(const char *str, yyscan_t *yyscannerp);
 extern void replication_scanner_finish(yyscan_t yyscanner);
 extern bool replication_scanner_is_replication_command(yyscan_t yyscanner);
-
-extern PGDLLIMPORT Node *replication_parse_result;
 
 #endif							/* _WALSENDER_PRIVATE_H */

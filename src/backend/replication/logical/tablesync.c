@@ -139,8 +139,7 @@ static StringInfo copybuf = NULL;
 /*
  * Exit routine for synchronization worker.
  */
-static void
-pg_attribute_noreturn()
+pg_noreturn static void
 finish_sync_worker(void)
 {
 	/*
@@ -941,15 +940,15 @@ fetch_remote_table_info(char *nspname, char *relname, LogicalRepRelation *lrel,
 	 * Now fetch column names and types.
 	 */
 	resetStringInfo(&cmd);
-	appendStringInfo(&cmd,
-					 "SELECT a.attnum,"
-					 "       a.attname,"
-					 "       a.atttypid,"
-					 "       a.attnum = ANY(i.indkey)");
+	appendStringInfoString(&cmd,
+						   "SELECT a.attnum,"
+						   "       a.attname,"
+						   "       a.atttypid,"
+						   "       a.attnum = ANY(i.indkey)");
 
 	/* Generated columns can be replicated since version 18. */
 	if (server_version >= 180000)
-		appendStringInfo(&cmd, ", a.attgenerated != ''");
+		appendStringInfoString(&cmd, ", a.attgenerated != ''");
 
 	appendStringInfo(&cmd,
 					 "  FROM pg_catalog.pg_attribute a"

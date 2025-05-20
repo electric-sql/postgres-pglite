@@ -38,4 +38,7 @@ extern void error_view_not_updatable(Relation view,
 									 List *mergeActionList,
 									 const char *detail);
 
+extern Node *expand_generated_columns_in_expr(Node *node, Relation rel, int rt_index);
+extern Node *build_generation_expression(Relation rel, int attrno);
+
 #endif							/* REWRITEHANDLER_H */

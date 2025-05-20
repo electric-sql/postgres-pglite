@@ -1903,7 +1903,7 @@ cost_tuplesort(Cost *startup_cost, Cost *run_cost,
 	double		input_bytes = relation_byte_size(tuples, width);
 	double		output_bytes;
 	double		output_tuples;
-	long		sort_mem_bytes = sort_mem * 1024L;
+	int64		sort_mem_bytes = sort_mem * (int64) 1024;
 
 	/*
 	 * We want to be sure the cost of a sort is never estimated as zero, even
@@ -2488,7 +2488,7 @@ cost_material(Path *path,
 	Cost		startup_cost = input_startup_cost;
 	Cost		run_cost = input_total_cost - input_startup_cost;
 	double		nbytes = relation_byte_size(tuples, width);
-	long		work_mem_bytes = work_mem * 1024L;
+	double		work_mem_bytes = work_mem * (Size) 1024;
 
 	path->rows = tuples;
 
@@ -2690,13 +2690,12 @@ cost_agg(Path *path, PlannerInfo *root,
 	double		output_tuples;
 	Cost		startup_cost;
 	Cost		total_cost;
-	AggClauseCosts dummy_aggcosts;
+	const AggClauseCosts dummy_aggcosts = {0};
 
 	/* Use all-zero per-aggregate costs if NULL is passed */
 	if (aggcosts == NULL)
 	{
 		Assert(aggstrategy == AGG_HASHED);
-		MemSet(&dummy_aggcosts, 0, sizeof(AggClauseCosts));
 		aggcosts = &dummy_aggcosts;
 	}
 
@@ -3543,6 +3542,7 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
  * 'inner_path' is the inner input to the join
  * 'outersortkeys' is the list of sort keys for the outer path
  * 'innersortkeys' is the list of sort keys for the inner path
+ * 'outer_presorted_keys' is the number of presorted keys of the outer path
  * 'extra' contains miscellaneous information about the join
  *
  * Note: outersortkeys and innersortkeys should be NIL if no explicit
@@ -3554,6 +3554,7 @@ initial_cost_mergejoin(PlannerInfo *root, JoinCostWorkspace *workspace,
 					   List *mergeclauses,
 					   Path *outer_path, Path *inner_path,
 					   List *outersortkeys, List *innersortkeys,
+					   int outer_presorted_keys,
 					   JoinPathExtraData *extra)
 {
 	int			disabled_nodes;
@@ -3609,7 +3610,7 @@ initial_cost_mergejoin(PlannerInfo *root, JoinCostWorkspace *workspace,
 		/* debugging check */
 		if (opathkey->pk_opfamily != ipathkey->pk_opfamily ||
 			opathkey->pk_eclass->ec_collation != ipathkey->pk_eclass->ec_collation ||
-			opathkey->pk_strategy != ipathkey->pk_strategy ||
+			opathkey->pk_cmptype != ipathkey->pk_cmptype ||
 			opathkey->pk_nulls_first != ipathkey->pk_nulls_first)
 			elog(ERROR, "left and right pathkeys do not match in mergejoin");
 
@@ -3684,27 +3685,33 @@ initial_cost_mergejoin(PlannerInfo *root, JoinCostWorkspace *workspace,
 
 	if (outersortkeys)			/* do we need to sort outer? */
 	{
-		bool		use_incremental_sort = false;
-		int			presorted_keys;
+		/*
+		 * We can assert that the outer path is not already ordered
+		 * appropriately for the mergejoin; otherwise, outersortkeys would
+		 * have been set to NIL.
+		 */
+		Assert(!pathkeys_contained_in(outersortkeys, outer_path->pathkeys));
 
 		/*
 		 * We choose to use incremental sort if it is enabled and there are
 		 * presorted keys; otherwise we use full sort.
 		 */
-		if (enable_incremental_sort)
+		if (enable_incremental_sort && outer_presorted_keys > 0)
 		{
-			bool		is_sorted PG_USED_FOR_ASSERTS_ONLY;
-
-			is_sorted = pathkeys_count_contained_in(outersortkeys,
-													outer_path->pathkeys,
-													&presorted_keys);
-			Assert(!is_sorted);
-
-			if (presorted_keys > 0)
-				use_incremental_sort = true;
+			cost_incremental_sort(&sort_path,
+								  root,
+								  outersortkeys,
+								  outer_presorted_keys,
+								  outer_path->disabled_nodes,
+								  outer_path->startup_cost,
+								  outer_path->total_cost,
+								  outer_path_rows,
+								  outer_path->pathtarget->width,
+								  0.0,
+								  work_mem,
+								  -1.0);
 		}
-
-		if (!use_incremental_sort)
+		else
 		{
 			cost_sort(&sort_path,
 					  root,
@@ -3717,21 +3724,7 @@ initial_cost_mergejoin(PlannerInfo *root, JoinCostWorkspace *workspace,
 					  work_mem,
 					  -1.0);
 		}
-		else
-		{
-			cost_incremental_sort(&sort_path,
-								  root,
-								  outersortkeys,
-								  presorted_keys,
-								  outer_path->disabled_nodes,
-								  outer_path->startup_cost,
-								  outer_path->total_cost,
-								  outer_path_rows,
-								  outer_path->pathtarget->width,
-								  0.0,
-								  work_mem,
-								  -1.0);
-		}
+
 		disabled_nodes += sort_path.disabled_nodes;
 		startup_cost += sort_path.startup_cost;
 		startup_cost += (sort_path.total_cost - sort_path.startup_cost)
@@ -3751,6 +3744,13 @@ initial_cost_mergejoin(PlannerInfo *root, JoinCostWorkspace *workspace,
 
 	if (innersortkeys)			/* do we need to sort inner? */
 	{
+		/*
+		 * We can assert that the inner path is not already ordered
+		 * appropriately for the mergejoin; otherwise, innersortkeys would
+		 * have been set to NIL.
+		 */
+		Assert(!pathkeys_contained_in(innersortkeys, inner_path->pathkeys));
+
 		/*
 		 * We do not consider incremental sort for inner path, because
 		 * incremental sort does not support mark/restore.
@@ -4028,7 +4028,7 @@ final_cost_mergejoin(PlannerInfo *root, MergePath *path,
 	else if (enable_material && innersortkeys != NIL &&
 			 relation_byte_size(inner_path_rows,
 								inner_path->pathtarget->width) >
-			 (work_mem * 1024L))
+			 work_mem * (Size) 1024)
 		path->materialize_inner = true;
 	else
 		path->materialize_inner = false;
@@ -4094,7 +4094,7 @@ cached_scansel(PlannerInfo *root, RestrictInfo *rinfo, PathKey *pathkey)
 		cache = (MergeScanSelCache *) lfirst(lc);
 		if (cache->opfamily == pathkey->pk_opfamily &&
 			cache->collation == pathkey->pk_eclass->ec_collation &&
-			cache->strategy == pathkey->pk_strategy &&
+			cache->cmptype == pathkey->pk_cmptype &&
 			cache->nulls_first == pathkey->pk_nulls_first)
 			return cache;
 	}
@@ -4103,7 +4103,7 @@ cached_scansel(PlannerInfo *root, RestrictInfo *rinfo, PathKey *pathkey)
 	mergejoinscansel(root,
 					 (Node *) rinfo->clause,
 					 pathkey->pk_opfamily,
-					 pathkey->pk_strategy,
+					 pathkey->pk_cmptype,
 					 pathkey->pk_nulls_first,
 					 &leftstartsel,
 					 &leftendsel,
@@ -4116,7 +4116,7 @@ cached_scansel(PlannerInfo *root, RestrictInfo *rinfo, PathKey *pathkey)
 	cache = (MergeScanSelCache *) palloc(sizeof(MergeScanSelCache));
 	cache->opfamily = pathkey->pk_opfamily;
 	cache->collation = pathkey->pk_eclass->ec_collation;
-	cache->strategy = pathkey->pk_strategy;
+	cache->cmptype = pathkey->pk_cmptype;
 	cache->nulls_first = pathkey->pk_nulls_first;
 	cache->leftstartsel = leftstartsel;
 	cache->leftendsel = leftendsel;
@@ -4339,9 +4339,19 @@ final_cost_hashjoin(PlannerInfo *root, HashPath *path,
 	}
 	else
 	{
+		List	   *otherclauses;
+
 		innerbucketsize = 1.0;
 		innermcvfreq = 1.0;
-		foreach(hcl, hashclauses)
+
+		/* At first, try to estimate bucket size using extended statistics. */
+		otherclauses = estimate_multivariate_bucketsize(root,
+														inner_path->parent,
+														hashclauses,
+														&innerbucketsize);
+
+		/* Pass through the remaining clauses */
+		foreach(hcl, otherclauses)
 		{
 			RestrictInfo *restrictinfo = lfirst_node(RestrictInfo, hcl);
 			Selectivity thisbucketsize;
@@ -4663,7 +4673,7 @@ cost_rescan(PlannerInfo *root, Path *path,
 				Cost		run_cost = cpu_tuple_cost * path->rows;
 				double		nbytes = relation_byte_size(path->rows,
 														path->pathtarget->width);
-				long		work_mem_bytes = work_mem * 1024L;
+				double		work_mem_bytes = work_mem * (Size) 1024;
 
 				if (nbytes > work_mem_bytes)
 				{
@@ -4690,7 +4700,7 @@ cost_rescan(PlannerInfo *root, Path *path,
 				Cost		run_cost = cpu_operator_cost * path->rows;
 				double		nbytes = relation_byte_size(path->rows,
 														path->pathtarget->width);
-				long		work_mem_bytes = work_mem * 1024L;
+				double		work_mem_bytes = work_mem * (Size) 1024;
 
 				if (nbytes > work_mem_bytes)
 				{
@@ -5839,7 +5849,8 @@ get_foreign_key_join_selectivity(PlannerInfo *root,
 				if (ec && ec->ec_has_const)
 				{
 					EquivalenceMember *em = fkinfo->fk_eclass_member[i];
-					RestrictInfo *rinfo = find_derived_clause_for_ec_member(ec,
+					RestrictInfo *rinfo = find_derived_clause_for_ec_member(root,
+																			ec,
 																			em);
 
 					if (rinfo)
@@ -6496,7 +6507,7 @@ compute_bitmap_pages(PlannerInfo *root, RelOptInfo *baserel,
 	double		pages_fetched;
 	double		tuples_fetched;
 	double		heap_pages;
-	long		maxentries;
+	double		maxentries;
 
 	/*
 	 * Fetch total cost of obtaining the bitmap, as well as its total
@@ -6527,7 +6538,7 @@ compute_bitmap_pages(PlannerInfo *root, RelOptInfo *baserel,
 	 * the bitmap at one time.)
 	 */
 	heap_pages = Min(pages_fetched, baserel->pages);
-	maxentries = tbm_calculate_entries(work_mem * 1024L);
+	maxentries = tbm_calculate_entries(work_mem * (Size) 1024);
 
 	if (loop_count > 1)
 	{

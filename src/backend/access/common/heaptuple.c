@@ -787,7 +787,7 @@ heap_copytuple(HeapTuple tuple)
 	newTuple->t_self = tuple->t_self;
 	newTuple->t_tableOid = tuple->t_tableOid;
 	newTuple->t_data = (HeapTupleHeader) ((char *) newTuple + HEAPTUPLESIZE);
-	memcpy((char *) newTuple->t_data, (char *) tuple->t_data, tuple->t_len);
+	memcpy(newTuple->t_data, tuple->t_data, tuple->t_len);
 	return newTuple;
 }
 
@@ -813,7 +813,7 @@ heap_copytuple_with_tuple(HeapTuple src, HeapTuple dest)
 	dest->t_self = src->t_self;
 	dest->t_tableOid = src->t_tableOid;
 	dest->t_data = (HeapTupleHeader) palloc(src->t_len);
-	memcpy((char *) dest->t_data, (char *) src->t_data, src->t_len);
+	memcpy(dest->t_data, src->t_data, src->t_len);
 }
 
 /*
@@ -1097,7 +1097,7 @@ heap_copy_tuple_as_datum(HeapTuple tuple, TupleDesc tupleDesc)
 	 * the given tuple came from disk, rather than from heap_form_tuple).
 	 */
 	td = (HeapTupleHeader) palloc(tuple->t_len);
-	memcpy((char *) td, (char *) tuple->t_data, tuple->t_len);
+	memcpy(td, tuple->t_data, tuple->t_len);
 
 	HeapTupleHeaderSetDatumLength(td, tuple->t_len);
 	HeapTupleHeaderSetTypeId(td, tupleDesc->tdtypeid);
@@ -1452,15 +1452,19 @@ heap_freetuple(HeapTuple htup)
 MinimalTuple
 heap_form_minimal_tuple(TupleDesc tupleDescriptor,
 						const Datum *values,
-						const bool *isnull)
+						const bool *isnull,
+						Size extra)
 {
 	MinimalTuple tuple;			/* return tuple */
+	char	   *mem;
 	Size		len,
 				data_len;
 	int			hoff;
 	bool		hasnull = false;
 	int			numberOfAttributes = tupleDescriptor->natts;
 	int			i;
+
+	Assert(extra == MAXALIGN(extra));
 
 	if (numberOfAttributes > MaxTupleAttributeNumber)
 		ereport(ERROR,
@@ -1497,7 +1501,9 @@ heap_form_minimal_tuple(TupleDesc tupleDescriptor,
 	/*
 	 * Allocate and zero the space needed.
 	 */
-	tuple = (MinimalTuple) palloc0(len);
+	mem = palloc0(len + extra);
+	memset(mem, 0, extra);
+	tuple = (MinimalTuple) (mem + extra);
 
 	/*
 	 * And fill in the information.
@@ -1533,11 +1539,15 @@ heap_free_minimal_tuple(MinimalTuple mtup)
  * The result is allocated in the current memory context.
  */
 MinimalTuple
-heap_copy_minimal_tuple(MinimalTuple mtup)
+heap_copy_minimal_tuple(MinimalTuple mtup, Size extra)
 {
 	MinimalTuple result;
+	char	   *mem;
 
-	result = (MinimalTuple) palloc(mtup->t_len);
+	Assert(extra == MAXALIGN(extra));
+	mem = palloc(mtup->t_len + extra);
+	memset(mem, 0, extra);
+	result = (MinimalTuple) (mem + extra);
 	memcpy(result, mtup, mtup->t_len);
 	return result;
 }
@@ -1574,15 +1584,20 @@ heap_tuple_from_minimal_tuple(MinimalTuple mtup)
  * The result is allocated in the current memory context.
  */
 MinimalTuple
-minimal_tuple_from_heap_tuple(HeapTuple htup)
+minimal_tuple_from_heap_tuple(HeapTuple htup, Size extra)
 {
 	MinimalTuple result;
+	char	   *mem;
 	uint32		len;
 
+	Assert(extra == MAXALIGN(extra));
 	Assert(htup->t_len > MINIMAL_TUPLE_OFFSET);
 	len = htup->t_len - MINIMAL_TUPLE_OFFSET;
-	result = (MinimalTuple) palloc(len);
+	mem = palloc(len + extra);
+	memset(mem, 0, extra);
+	result = (MinimalTuple) (mem + extra);
 	memcpy(result, (char *) htup->t_data + MINIMAL_TUPLE_OFFSET, len);
+
 	result->t_len = len;
 	return result;
 }

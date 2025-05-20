@@ -86,9 +86,18 @@ struct XidCache
  */
 extern PGDLLIMPORT int FastPathLockGroupsPerBackend;
 
+/*
+ * Define the maximum number of fast-path locking groups per backend.
+ * This must be a power-of-two value.  The actual number of fast-path
+ * lock groups is calculated in InitializeFastPathLocks() based on
+ * max_locks_per_transaction.  1024 is an arbitrary upper limit (matching
+ * max_locks_per_transaction = 16k).  Values over 1024 are unlikely to be
+ * beneficial as there are bottlenecks we'll hit way before that.
+ */
 #define		FP_LOCK_GROUPS_PER_BACKEND_MAX	1024
 #define		FP_LOCK_SLOTS_PER_GROUP		16	/* don't change */
-#define		FP_LOCK_SLOTS_PER_BACKEND	(FP_LOCK_SLOTS_PER_GROUP * FastPathLockGroupsPerBackend)
+#define		FastPathLockSlotsPerBackend() \
+	(FP_LOCK_SLOTS_PER_GROUP * FastPathLockGroupsPerBackend)
 
 /*
  * Flags for PGPROC.delayChkptFlags
@@ -109,10 +118,10 @@ extern PGDLLIMPORT int FastPathLockGroupsPerBackend;
  * is inserted prior to the new redo point, the corresponding data changes will
  * also be flushed to disk before the checkpoint can complete. (In the
  * extremely common case where the data being modified is in shared buffers
- * and we acquire an exclusive content lock on the relevant buffers before
- * writing WAL, this mechanism is not needed, because phase 2 will block
- * until we release the content lock and then flush the modified data to
- * disk.)
+ * and we acquire an exclusive content lock and MarkBufferDirty() on the
+ * relevant buffers before writing WAL, this mechanism is not needed, because
+ * phase 2 will block until we release the content lock and then flush the
+ * modified data to disk.  See transam/README and SyncOneBuffer().)
  *
  * Setting DELAY_CHKPT_COMPLETE prevents the system from moving from phase 2
  * to phase 3. This is useful if we are performing a WAL-logged operation that
@@ -448,7 +457,9 @@ extern PGDLLIMPORT PGPROC *PreparedXactProcs;
  * 2 slots, but WAL writer is launched only after startup has exited, so we
  * only need 6 slots.
  */
-#define NUM_AUXILIARY_PROCS		6
+#define MAX_IO_WORKERS          32
+#define NUM_AUXILIARY_PROCS		(6 + MAX_IO_WORKERS)
+
 
 /* configurable options */
 extern PGDLLIMPORT int DeadlockTimeout;
@@ -488,6 +499,10 @@ extern void ProcWakeup(PGPROC *proc, ProcWaitStatus waitStatus);
 extern void ProcLockWakeup(LockMethod lockMethodTable, LOCK *lock);
 extern void CheckDeadLockAlert(void);
 extern void LockErrorCleanup(void);
+extern void GetLockHoldersAndWaiters(LOCALLOCK *locallock,
+									 StringInfo lock_holders_sbuf,
+									 StringInfo lock_waiters_sbuf,
+									 int *lockHoldersNum);
 
 extern void ProcWaitForSignal(uint32 wait_event_info);
 extern void ProcSendSignal(ProcNumber procNumber);

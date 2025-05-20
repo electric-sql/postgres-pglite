@@ -127,7 +127,7 @@ static AclMode convert_tablespace_priv_string(text *priv_type_text);
 static Oid	convert_type_name(text *typename);
 static AclMode convert_type_priv_string(text *priv_type_text);
 static AclMode convert_parameter_priv_string(text *priv_text);
-static AclMode convert_largeobject_priv_string(text *priv_text);
+static AclMode convert_largeobject_priv_string(text *priv_type_text);
 static AclMode convert_role_priv_string(text *priv_type_text);
 static AclResult pg_role_aclcheck(Oid role_oid, Oid roleid, AclMode mode);
 
@@ -5432,24 +5432,6 @@ select_best_admin(Oid member, Oid role)
 	return admin_role;
 }
 
-
-/* does what it says ... */
-static int
-count_one_bits(AclMode mask)
-{
-	int			nbits = 0;
-
-	/* this code relies on AclMode being an unsigned type */
-	while (mask)
-	{
-		if (mask & 1)
-			nbits++;
-		mask >>= 1;
-	}
-	return nbits;
-}
-
-
 /*
  * Select the effective grantor ID for a GRANT or REVOKE operation.
  *
@@ -5532,7 +5514,7 @@ select_best_grantor(Oid roleId, AclMode privileges,
 		 */
 		if (otherprivs != ACL_NO_RIGHTS)
 		{
-			int			nnewrights = count_one_bits(otherprivs);
+			int			nnewrights = pg_popcount64(otherprivs);
 
 			if (nnewrights > nrights)
 			{

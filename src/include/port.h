@@ -53,6 +53,7 @@ extern char *first_path_var_separator(const char *pathlist);
 extern void join_path_components(char *ret_path,
 								 const char *head, const char *tail);
 extern void canonicalize_path(char *path);
+extern void canonicalize_path_enc(char *path, int encoding);
 extern void make_native_path(char *filename);
 extern void cleanup_path(char *path);
 extern bool path_contains_parent_reference(const char *path);
@@ -463,6 +464,10 @@ extern size_t strnlen(const char *str, size_t maxlen);
 extern char *strsep(char **stringp, const char *delim);
 #endif
 
+#if !HAVE_DECL_TIMINGSAFE_BCMP
+extern int	timingsafe_bcmp(const void *b1, const void *b2, size_t len);
+#endif
+
 /*
  * Callers should use the qsort() macro defined below instead of calling
  * pg_qsort() directly.
@@ -485,6 +490,12 @@ extern void *bsearch_arg(const void *key, const void *base0,
 						 size_t nmemb, size_t size,
 						 int (*compar) (const void *, const void *, void *),
 						 void *arg);
+
+/* port/pg_localeconv_r.c */
+extern int	pg_localeconv_r(const char *lc_monetary,
+							const char *lc_numeric,
+							struct lconv *output);
+extern void pg_localeconv_free(struct lconv *lconv);
 
 /* port/chklocale.c */
 extern int	pg_get_encoding_from_locale(const char *ctype, bool write_message);
@@ -520,7 +531,7 @@ extern int	pg_mkdir_p(char *path, int omode);
 #define pqsignal pqsignal_be
 #endif
 typedef void (*pqsigfunc) (SIGNAL_ARGS);
-extern pqsigfunc pqsignal(int signo, pqsigfunc func);
+extern void pqsignal(int signo, pqsigfunc func);
 
 /* port/quotes.c */
 extern char *escape_single_quotes_ascii(const char *src);

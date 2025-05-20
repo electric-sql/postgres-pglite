@@ -208,19 +208,22 @@ pgstat_drop_relation(Relation rel)
  */
 void
 pgstat_report_vacuum(Oid tableoid, bool shared,
-					 PgStat_Counter livetuples, PgStat_Counter deadtuples)
+					 PgStat_Counter livetuples, PgStat_Counter deadtuples,
+					 TimestampTz starttime)
 {
 	PgStat_EntryRef *entry_ref;
 	PgStatShared_Relation *shtabentry;
 	PgStat_StatTabEntry *tabentry;
 	Oid			dboid = (shared ? InvalidOid : MyDatabaseId);
 	TimestampTz ts;
+	PgStat_Counter elapsedtime;
 
 	if (!pgstat_track_counts)
 		return;
 
 	/* Store the data in the table's hash table entry. */
 	ts = GetCurrentTimestamp();
+	elapsedtime = TimestampDifferenceMilliseconds(starttime, ts);
 
 	/* block acquiring lock for the same reason as pgstat_report_autovac() */
 	entry_ref = pgstat_get_entry_ref_locked(PGSTAT_KIND_RELATION,
@@ -248,11 +251,13 @@ pgstat_report_vacuum(Oid tableoid, bool shared,
 	{
 		tabentry->last_autovacuum_time = ts;
 		tabentry->autovacuum_count++;
+		tabentry->total_autovacuum_time += elapsedtime;
 	}
 	else
 	{
 		tabentry->last_vacuum_time = ts;
 		tabentry->vacuum_count++;
+		tabentry->total_vacuum_time += elapsedtime;
 	}
 
 	pgstat_unlock_entry(entry_ref);
@@ -264,7 +269,7 @@ pgstat_report_vacuum(Oid tableoid, bool shared,
 	 * VACUUM command has processed all tables and committed.
 	 */
 	pgstat_flush_io(false);
-	pgstat_flush_backend(false, PGSTAT_BACKEND_FLUSH_IO);
+	(void) pgstat_flush_backend(false, PGSTAT_BACKEND_FLUSH_IO);
 }
 
 /*
@@ -276,12 +281,14 @@ pgstat_report_vacuum(Oid tableoid, bool shared,
 void
 pgstat_report_analyze(Relation rel,
 					  PgStat_Counter livetuples, PgStat_Counter deadtuples,
-					  bool resetcounter)
+					  bool resetcounter, TimestampTz starttime)
 {
 	PgStat_EntryRef *entry_ref;
 	PgStatShared_Relation *shtabentry;
 	PgStat_StatTabEntry *tabentry;
 	Oid			dboid = (rel->rd_rel->relisshared ? InvalidOid : MyDatabaseId);
+	TimestampTz ts;
+	PgStat_Counter elapsedtime;
 
 	if (!pgstat_track_counts)
 		return;
@@ -315,6 +322,10 @@ pgstat_report_analyze(Relation rel,
 		deadtuples = Max(deadtuples, 0);
 	}
 
+	/* Store the data in the table's hash table entry. */
+	ts = GetCurrentTimestamp();
+	elapsedtime = TimestampDifferenceMilliseconds(starttime, ts);
+
 	/* block acquiring lock for the same reason as pgstat_report_autovac() */
 	entry_ref = pgstat_get_entry_ref_locked(PGSTAT_KIND_RELATION, dboid,
 											RelationGetRelid(rel),
@@ -338,20 +349,22 @@ pgstat_report_analyze(Relation rel,
 
 	if (AmAutoVacuumWorkerProcess())
 	{
-		tabentry->last_autoanalyze_time = GetCurrentTimestamp();
+		tabentry->last_autoanalyze_time = ts;
 		tabentry->autoanalyze_count++;
+		tabentry->total_autoanalyze_time += elapsedtime;
 	}
 	else
 	{
-		tabentry->last_analyze_time = GetCurrentTimestamp();
+		tabentry->last_analyze_time = ts;
 		tabentry->analyze_count++;
+		tabentry->total_analyze_time += elapsedtime;
 	}
 
 	pgstat_unlock_entry(entry_ref);
 
 	/* see pgstat_report_vacuum() */
 	pgstat_flush_io(false);
-	pgstat_flush_backend(false, PGSTAT_BACKEND_FLUSH_IO);
+	(void) pgstat_flush_backend(false, PGSTAT_BACKEND_FLUSH_IO);
 }
 
 /*
@@ -793,8 +806,8 @@ pgstat_twophase_postabort(TransactionId xid, uint16 info,
 /*
  * Flush out pending stats for the entry
  *
- * If nowait is true, this function returns false if lock could not
- * immediately acquired, otherwise true is returned.
+ * If nowait is true and the lock could not be immediately acquired, returns
+ * false without flushing the entry.  Otherwise returns true.
  *
  * Some of the stats are copied to the corresponding pending database stats
  * entry when successfully flushing.
@@ -855,7 +868,16 @@ pgstat_relation_flush_cb(PgStat_EntryRef *entry_ref, bool nowait)
 	tabentry->live_tuples += lstats->counts.delta_live_tuples;
 	tabentry->dead_tuples += lstats->counts.delta_dead_tuples;
 	tabentry->mod_since_analyze += lstats->counts.changed_tuples;
+
+	/*
+	 * Using tuples_inserted to update ins_since_vacuum does mean that we'll
+	 * track aborted inserts too.  This isn't ideal, but otherwise probably
+	 * not worth adding an extra field for.  It may just amount to autovacuums
+	 * triggering for inserts more often than they maybe should, which is
+	 * probably not going to be common enough to be too concerned about here.
+	 */
 	tabentry->ins_since_vacuum += lstats->counts.tuples_inserted;
+
 	tabentry->blocks_fetched += lstats->counts.blocks_fetched;
 	tabentry->blocks_hit += lstats->counts.blocks_hit;
 

@@ -748,16 +748,22 @@ get_memoize_path(PlannerInfo *root, RelOptInfo *innerrel,
 	 *
 	 * Lateral vars needn't be considered here as they're not considered when
 	 * determining if the join is unique.
-	 *
-	 * XXX this could be enabled if the remaining join quals were made part of
-	 * the inner scan's filter instead of the join filter.  Maybe it's worth
-	 * considering doing that?
 	 */
-	if (extra->inner_unique &&
-		(inner_path->param_info == NULL ||
-		 bms_num_members(inner_path->param_info->ppi_serials) <
-		 list_length(extra->restrictlist)))
-		return NULL;
+	if (extra->inner_unique)
+	{
+		Bitmapset  *ppi_serials;
+
+		if (inner_path->param_info == NULL)
+			return NULL;
+
+		ppi_serials = inner_path->param_info->ppi_serials;
+
+		foreach_node(RestrictInfo, rinfo, extra->restrictlist)
+		{
+			if (!bms_is_member(rinfo->rinfo_serial, ppi_serials))
+				return NULL;
+		}
+	}
 
 	/*
 	 * We can't use a memoize node if there are volatile functions in the
@@ -1036,6 +1042,7 @@ try_mergejoin_path(PlannerInfo *root,
 				   bool is_partial)
 {
 	Relids		required_outer;
+	int			outer_presorted_keys = 0;
 	JoinCostWorkspace workspace;
 
 	if (is_partial)
@@ -1081,9 +1088,16 @@ try_mergejoin_path(PlannerInfo *root,
 	/*
 	 * If the given paths are already well enough ordered, we can skip doing
 	 * an explicit sort.
+	 *
+	 * We need to determine the number of presorted keys of the outer path to
+	 * decide whether explicit incremental sort can be applied when
+	 * outersortkeys is not NIL.  We do not need to do the same for the inner
+	 * path though, as incremental sort currently does not support
+	 * mark/restore.
 	 */
 	if (outersortkeys &&
-		pathkeys_contained_in(outersortkeys, outer_path->pathkeys))
+		pathkeys_count_contained_in(outersortkeys, outer_path->pathkeys,
+									&outer_presorted_keys))
 		outersortkeys = NIL;
 	if (innersortkeys &&
 		pathkeys_contained_in(innersortkeys, inner_path->pathkeys))
@@ -1095,6 +1109,7 @@ try_mergejoin_path(PlannerInfo *root,
 	initial_cost_mergejoin(root, &workspace, jointype, mergeclauses,
 						   outer_path, inner_path,
 						   outersortkeys, innersortkeys,
+						   outer_presorted_keys,
 						   extra);
 
 	if (add_path_precheck(joinrel, workspace.disabled_nodes,
@@ -1114,7 +1129,8 @@ try_mergejoin_path(PlannerInfo *root,
 									   required_outer,
 									   mergeclauses,
 									   outersortkeys,
-									   innersortkeys));
+									   innersortkeys,
+									   outer_presorted_keys));
 	}
 	else
 	{
@@ -1140,6 +1156,7 @@ try_partial_mergejoin_path(PlannerInfo *root,
 						   JoinType jointype,
 						   JoinPathExtraData *extra)
 {
+	int			outer_presorted_keys = 0;
 	JoinCostWorkspace workspace;
 
 	/*
@@ -1153,9 +1170,16 @@ try_partial_mergejoin_path(PlannerInfo *root,
 	/*
 	 * If the given paths are already well enough ordered, we can skip doing
 	 * an explicit sort.
+	 *
+	 * We need to determine the number of presorted keys of the outer path to
+	 * decide whether explicit incremental sort can be applied when
+	 * outersortkeys is not NIL.  We do not need to do the same for the inner
+	 * path though, as incremental sort currently does not support
+	 * mark/restore.
 	 */
 	if (outersortkeys &&
-		pathkeys_contained_in(outersortkeys, outer_path->pathkeys))
+		pathkeys_count_contained_in(outersortkeys, outer_path->pathkeys,
+									&outer_presorted_keys))
 		outersortkeys = NIL;
 	if (innersortkeys &&
 		pathkeys_contained_in(innersortkeys, inner_path->pathkeys))
@@ -1167,6 +1191,7 @@ try_partial_mergejoin_path(PlannerInfo *root,
 	initial_cost_mergejoin(root, &workspace, jointype, mergeclauses,
 						   outer_path, inner_path,
 						   outersortkeys, innersortkeys,
+						   outer_presorted_keys,
 						   extra);
 
 	if (!add_partial_path_precheck(joinrel, workspace.disabled_nodes,
@@ -1187,7 +1212,8 @@ try_partial_mergejoin_path(PlannerInfo *root,
 										   NULL,
 										   mergeclauses,
 										   outersortkeys,
-										   innersortkeys));
+										   innersortkeys,
+										   outer_presorted_keys));
 }
 
 /*

@@ -58,7 +58,8 @@ ALTER TABLE [ IF EXISTS ] <replaceable class="parameter">name</replaceable>
     ALTER [ COLUMN ] <replaceable class="parameter">column_name</replaceable> SET COMPRESSION <replaceable class="parameter">compression_method</replaceable>
     ADD <replaceable class="parameter">table_constraint</replaceable> [ NOT VALID ]
     ADD <replaceable class="parameter">table_constraint_using_index</replaceable>
-    ALTER CONSTRAINT <replaceable class="parameter">constraint_name</replaceable> [ DEFERRABLE | NOT DEFERRABLE ] [ INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+    ALTER CONSTRAINT <replaceable class="parameter">constraint_name</replaceable> [ DEFERRABLE | NOT DEFERRABLE ] [ INITIALLY DEFERRED | INITIALLY IMMEDIATE ] [ ENFORCED | NOT ENFORCED ]
+    ALTER CONSTRAINT <replaceable class="parameter">constraint_name</replaceable> [ INHERIT | NO INHERIT ]
     VALIDATE CONSTRAINT <replaceable class="parameter">constraint_name</replaceable>
     DROP CONSTRAINT [ IF EXISTS ]  <replaceable class="parameter">constraint_name</replaceable> [ RESTRICT | CASCADE ]
     DISABLE TRIGGER [ <replaceable class="parameter">trigger_name</replaceable> | ALL | USER ]
@@ -102,7 +103,7 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
   NULL |
   CHECK ( <replaceable class="parameter">expression</replaceable> ) [ NO INHERIT ] |
   DEFAULT <replaceable>default_expr</replaceable> |
-  GENERATED ALWAYS AS ( <replaceable>generation_expr</replaceable> ) STORED |
+  GENERATED ALWAYS AS ( <replaceable>generation_expr</replaceable> ) [ STORED | VIRTUAL ] |
   GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY [ ( <replaceable>sequence_options</replaceable> ) ] |
   UNIQUE [ NULLS [ NOT ] DISTINCT ] <replaceable class="parameter">index_parameters</replaceable> |
   PRIMARY KEY <replaceable class="parameter">index_parameters</replaceable> |
@@ -242,6 +243,8 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
       entire table; however, if a valid <literal>CHECK</literal> constraint is
       found which proves no <literal>NULL</literal> can exist, then the
       table scan is skipped.
+      If a column has an invalid not-null constraint,
+      <literal>SET NOT NULL</literal> validates it.
      </para>
 
      <para>
@@ -264,8 +267,8 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
     <listitem>
      <para>
       This form replaces the expression of a generated column.  Existing data
-      in the column is rewritten and all the future changes will apply the new
-      generation expression.
+      in a stored generated column is rewritten and all the future changes
+      will apply the new generation expression.
      </para>
     </listitem>
    </varlistentry>
@@ -280,9 +283,14 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
      </para>
 
      <para>
+      This form is currently only supported for stored generated columns (not
+      virtual ones).
+     </para>
+
+     <para>
       If <literal>DROP EXPRESSION IF EXISTS</literal> is specified and the
-      column is not a stored generated column, no error is thrown.  In this
-      case a notice is issued instead.
+      column is not a generated column, no error is thrown.  In this case a
+      notice is issued instead.
      </para>
     </listitem>
    </varlistentry>
@@ -452,8 +460,8 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
      <para>
       This form adds a new constraint to a table using the same constraint
       syntax as <link linkend="sql-createtable"><command>CREATE TABLE</command></link>, plus the option <literal>NOT
-      VALID</literal>, which is currently only allowed for foreign key
-      and CHECK constraints.
+      VALID</literal>, which is currently only allowed for foreign key,
+      <literal>CHECK</literal> constraints and not-null constraints.
      </para>
 
      <para>
@@ -486,8 +494,6 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
      <para>
       Additional restrictions apply when unique or primary key constraints
       are added to partitioned tables; see <link linkend="sql-createtable"><command>CREATE TABLE</command></link>.
-      Also, foreign key constraints on partitioned
-      tables may not be declared <literal>NOT VALID</literal> at present.
      </para>
 
     </listitem>
@@ -553,19 +559,40 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
     <listitem>
      <para>
       This form alters the attributes of a constraint that was previously
-      created. Currently only foreign key constraints may be altered.
+      created. Currently only foreign key constraints may be altered in
+      this fashion, but see below.
      </para>
     </listitem>
    </varlistentry>
+
+   <varlistentry id="sql-altertable-desc-alter-constraint-inherit">
+    <term><literal>ALTER CONSTRAINT ... INHERIT</literal></term>
+    <term><literal>ALTER CONSTRAINT ... NO INHERIT</literal></term>
+    <listitem>
+     <para>
+      These forms modify a inheritable constraint so that it becomes not
+      inheritable, or vice-versa. Only not-null constraints may be altered
+      in this fashion at present.
+      In addition to changing the inheritability status of the constraint,
+      in the case where a non-inheritable constraint is being marked
+      inheritable, if the table has children, an equivalent constraint
+      will be added to them. If marking an inheritable constraint as
+      non-inheritable on a table with children, then the corresponding
+      constraint on children will be marked as no longer inherited,
+      but not removed.
+      </para>
+     </listitem>
+    </varlistentry>
 
    <varlistentry id="sql-altertable-desc-validate-constraint">
     <term><literal>VALIDATE CONSTRAINT</literal></term>
     <listitem>
      <para>
-      This form validates a foreign key or check constraint that was
+      This form validates a foreign key, check, or not-null constraint that was
       previously created as <literal>NOT VALID</literal>, by scanning the
       table to ensure there are no rows for which the constraint is not
-      satisfied.  Nothing happens if the constraint is already marked valid.
+      satisfied.  If the constraint is not enforced, an error is thrown.
+      Nothing happens if the constraint is already marked valid.
       (See <xref linkend="sql-altertable-notes"/> below for an explanation
       of the usefulness of this command.)
      </para>
@@ -1397,30 +1424,45 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
 
    <para>
     When a column is added with <literal>ADD COLUMN</literal> and a
-    non-volatile <literal>DEFAULT</literal> is specified, the default is
+    non-volatile <literal>DEFAULT</literal> is specified, the default value is
     evaluated at the time of the statement and the result stored in the
-    table's metadata.  That value will be used for the column for all existing
-    rows.  If no <literal>DEFAULT</literal> is specified, NULL is used.  In
-    neither case is a rewrite of the table required.
+    table's metadata, where it will be returned when any existing rows are
+    accessed.  The value will be only applied when the table is rewritten,
+    making the <command>ALTER TABLE</command> very fast even on large tables.
+    If no column constraints are specified, NULL is used as the
+    <literal>DEFAULT</literal>.  In neither case is a rewrite of the table
+    required.
    </para>
 
    <para>
-    Adding a column with a volatile <literal>DEFAULT</literal> or
-    changing the type of an existing column will require the entire table and
-    its indexes to be rewritten. As an exception, when changing the type of an
-    existing column, if the <literal>USING</literal> clause does not change
-    the column contents and the old type is either binary coercible to the new
-    type or an unconstrained domain over the new type, a table rewrite is not
-    needed. However, indexes must always be rebuilt unless the system can
-    verify that the new index would be logically equivalent to the existing
-    one.  For example, if the collation for a column has been changed, an index
-    rebuild is always required because the new sort order might be different.
-    However, in the absence of a collation change, a column can be changed
-    from <type>text</type> to <type>varchar</type> (or vice versa) without
-    rebuilding the indexes because these data types sort identically.
-    Table and/or index rebuilds may take a
-    significant amount of time for a large table; and will temporarily require
-    as much as double the disk space.
+    Adding a column with a volatile <literal>DEFAULT</literal>
+    (e.g., <function>clock_timestamp()</function>), a stored generated column,
+    an identity column, or a column with a domain data type that has
+    constraints will cause the entire table and its indexes to be rewritten.
+    Adding a virtual generated column never requires a rewrite.
+   </para>
+
+   <para>
+    Changing the type of an existing column will normally cause the entire table
+    and its indexes to be rewritten.
+    As an exception, when changing the type of an existing column,
+    if the <literal>USING</literal> clause does not change the column
+    contents and the old type is either binary coercible to the new type
+    or an unconstrained domain over the new type, a table rewrite is not
+    needed.  However, indexes will still be rebuilt unless the system
+    can verify that the new index would be logically equivalent to the
+    existing one.  For example, if the collation for a column has been
+    changed, an index rebuild is required because the new sort
+    order might be different.  However, in the absence of a collation
+    change, a column can be changed from <type>text</type> to
+    <type>varchar</type> (or vice versa) without rebuilding the indexes
+    because these data types sort identically.
+   </para>
+
+   <para>
+    Table and/or index
+    rebuilds may take a significant amount of time for a large table,
+    and will temporarily require as much as double the disk space.
    </para>
 
    <para>

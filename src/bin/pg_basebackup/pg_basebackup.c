@@ -667,7 +667,8 @@ StartLogStreamer(char *startpos, uint32 timeline, char *sysidentifier,
 	if (temp_replication_slot || create_slot)
 	{
 		if (!CreateReplicationSlot(param->bgconn, replication_slot, NULL,
-								   temp_replication_slot, true, true, false, false))
+								   temp_replication_slot, true, true, false,
+								   false, false))
 			exit(1);
 
 		if (verbose)
@@ -1818,7 +1819,7 @@ BaseBackup(char *compression_algorithm, char *compression_detail,
 	if (writerecoveryconf)
 		recoveryconfcontents = GenerateRecoveryConfig(conn,
 													  replication_slot,
-													  GetDbnameFromConnectionOptions());
+													  GetDbnameFromConnectionOptions(connection_string));
 
 	/*
 	 * Run IDENTIFY_SYSTEM so we can get the timeline
@@ -2310,7 +2311,7 @@ BaseBackup(char *compression_algorithm, char *compression_detail,
 		}
 		else
 		{
-			(void) sync_pgdata(basedir, serverVersion, sync_method);
+			(void) sync_pgdata(basedir, serverVersion, sync_method, true);
 		}
 	}
 

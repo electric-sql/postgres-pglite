@@ -161,7 +161,7 @@ static void SnapBuildFreeSnapshot(Snapshot snap);
 
 static void SnapBuildSnapIncRefcount(Snapshot snap);
 
-static void SnapBuildDistributeNewCatalogSnapshot(SnapBuild *builder, XLogRecPtr lsn);
+static void SnapBuildDistributeSnapshotAndInval(SnapBuild *builder, XLogRecPtr lsn, TransactionId xid);
 
 static inline bool SnapBuildXidHasCatalogChanges(SnapBuild *builder, TransactionId xid,
 												 uint32 xinfo);
@@ -173,7 +173,7 @@ static void SnapBuildWaitSnapshot(xl_running_xacts *running, TransactionId cutof
 /* serialization functions */
 static void SnapBuildSerialize(SnapBuild *builder, XLogRecPtr lsn);
 static bool SnapBuildRestore(SnapBuild *builder, XLogRecPtr lsn);
-static void SnapBuildRestoreContents(int fd, char *dest, Size size, const char *path);
+static void SnapBuildRestoreContents(int fd, void *dest, Size size, const char *path);
 
 /*
  * Allocate a new snapshot builder.
@@ -720,15 +720,15 @@ SnapBuildProcessNewCid(SnapBuild *builder, TransactionId xid,
 }
 
 /*
- * Add a new Snapshot to all transactions we're decoding that currently are
- * in-progress so they can see new catalog contents made by the transaction
- * that just committed. This is necessary because those in-progress
- * transactions will use the new catalog's contents from here on (at the very
- * least everything they do needs to be compatible with newer catalog
- * contents).
+ * Add a new Snapshot and invalidation messages to all transactions we're
+ * decoding that currently are in-progress so they can see new catalog contents
+ * made by the transaction that just committed. This is necessary because those
+ * in-progress transactions will use the new catalog's contents from here on
+ * (at the very least everything they do needs to be compatible with newer
+ * catalog contents).
  */
 static void
-SnapBuildDistributeNewCatalogSnapshot(SnapBuild *builder, XLogRecPtr lsn)
+SnapBuildDistributeSnapshotAndInval(SnapBuild *builder, XLogRecPtr lsn, TransactionId xid)
 {
 	dlist_iter	txn_i;
 	ReorderBufferTXN *txn;
@@ -736,7 +736,8 @@ SnapBuildDistributeNewCatalogSnapshot(SnapBuild *builder, XLogRecPtr lsn)
 	/*
 	 * Iterate through all toplevel transactions. This can include
 	 * subtransactions which we just don't yet know to be that, but that's
-	 * fine, they will just get an unnecessary snapshot queued.
+	 * fine, they will just get an unnecessary snapshot and invalidations
+	 * queued.
 	 */
 	dlist_foreach(txn_i, &builder->reorder->toplevel_by_lsn)
 	{
@@ -749,6 +750,15 @@ SnapBuildDistributeNewCatalogSnapshot(SnapBuild *builder, XLogRecPtr lsn)
 		 * transaction which in turn implies we don't yet need a snapshot at
 		 * all. We'll add a snapshot when the first change gets queued.
 		 *
+		 * Similarly, we don't need to add invalidations to a transaction
+		 * whose base snapshot is not yet set. Once a base snapshot is built,
+		 * it will include the xids of committed transactions that have
+		 * modified the catalog, thus reflecting the new catalog contents. The
+		 * existing catalog cache will have already been invalidated after
+		 * processing the invalidations in the transaction that modified
+		 * catalogs, ensuring that a fresh cache is constructed during
+		 * decoding.
+		 *
 		 * NB: This works correctly even for subtransactions because
 		 * ReorderBufferAssignChild() takes care to transfer the base snapshot
 		 * to the top-level transaction, and while iterating the changequeue
@@ -758,13 +768,13 @@ SnapBuildDistributeNewCatalogSnapshot(SnapBuild *builder, XLogRecPtr lsn)
 			continue;
 
 		/*
-		 * We don't need to add snapshot to prepared transactions as they
-		 * should not see the new catalog contents.
+		 * We don't need to add snapshot or invalidations to prepared
+		 * transactions as they should not see the new catalog contents.
 		 */
-		if (rbtxn_prepared(txn) || rbtxn_skip_prepared(txn))
+		if (rbtxn_is_prepared(txn))
 			continue;
 
-		elog(DEBUG2, "adding a new snapshot to %u at %X/%X",
+		elog(DEBUG2, "adding a new snapshot and invalidations to %u at %X/%X",
 			 txn->xid, LSN_FORMAT_ARGS(lsn));
 
 		/*
@@ -774,6 +784,33 @@ SnapBuildDistributeNewCatalogSnapshot(SnapBuild *builder, XLogRecPtr lsn)
 		SnapBuildSnapIncRefcount(builder->snapshot);
 		ReorderBufferAddSnapshot(builder->reorder, txn->xid, lsn,
 								 builder->snapshot);
+
+		/*
+		 * Add invalidation messages to the reorder buffer of in-progress
+		 * transactions except the current committed transaction, for which we
+		 * will execute invalidations at the end.
+		 *
+		 * It is required, otherwise, we will end up using the stale catcache
+		 * contents built by the current transaction even after its decoding,
+		 * which should have been invalidated due to concurrent catalog
+		 * changing transaction.
+		 */
+		if (txn->xid != xid)
+		{
+			uint32		ninvalidations;
+			SharedInvalidationMessage *msgs = NULL;
+
+			ninvalidations = ReorderBufferGetInvalidations(builder->reorder,
+														   xid, &msgs);
+
+			if (ninvalidations > 0)
+			{
+				Assert(msgs != NULL);
+
+				ReorderBufferAddInvalidations(builder->reorder, txn->xid, lsn,
+											  ninvalidations, msgs);
+			}
+		}
 	}
 }
 
@@ -1045,8 +1082,11 @@ SnapBuildCommitTxn(SnapBuild *builder, XLogRecPtr lsn, TransactionId xid,
 		/* refcount of the snapshot builder for the new snapshot */
 		SnapBuildSnapIncRefcount(builder->snapshot);
 
-		/* add a new catalog snapshot to all currently running transactions */
-		SnapBuildDistributeNewCatalogSnapshot(builder, lsn);
+		/*
+		 * Add a new catalog snapshot and invalidations messages to all
+		 * currently running transactions.
+		 */
+		SnapBuildDistributeSnapshotAndInval(builder, lsn, xid);
 	}
 }
 
@@ -1691,12 +1731,17 @@ out:
  * If 'missing_ok' is true, will not throw an error if the file is not found.
  */
 bool
-SnapBuildRestoreSnapshot(SnapBuildOnDisk *ondisk, const char *path,
+SnapBuildRestoreSnapshot(SnapBuildOnDisk *ondisk, XLogRecPtr lsn,
 						 MemoryContext context, bool missing_ok)
 {
 	int			fd;
 	pg_crc32c	checksum;
 	Size		sz;
+	char		path[MAXPGPATH];
+
+	sprintf(path, "%s/%X-%X.snap",
+			PG_LOGICAL_SNAPSHOTS_DIR,
+			LSN_FORMAT_ARGS(lsn));
 
 	fd = OpenTransientFile(path, O_RDONLY | PG_BINARY);
 
@@ -1722,7 +1767,7 @@ SnapBuildRestoreSnapshot(SnapBuildOnDisk *ondisk, const char *path,
 	fsync_fname(PG_LOGICAL_SNAPSHOTS_DIR, true);
 
 	/* read statically sized portion of snapshot */
-	SnapBuildRestoreContents(fd, (char *) ondisk, SnapBuildOnDiskConstantSize, path);
+	SnapBuildRestoreContents(fd, ondisk, SnapBuildOnDiskConstantSize, path);
 
 	if (ondisk->magic != SNAPBUILD_MAGIC)
 		ereport(ERROR,
@@ -1742,7 +1787,7 @@ SnapBuildRestoreSnapshot(SnapBuildOnDisk *ondisk, const char *path,
 				SnapBuildOnDiskConstantSize - SnapBuildOnDiskNotChecksummedSize);
 
 	/* read SnapBuild */
-	SnapBuildRestoreContents(fd, (char *) &ondisk->builder, sizeof(SnapBuild), path);
+	SnapBuildRestoreContents(fd, &ondisk->builder, sizeof(SnapBuild), path);
 	COMP_CRC32C(checksum, &ondisk->builder, sizeof(SnapBuild));
 
 	/* restore committed xacts information */
@@ -1750,7 +1795,7 @@ SnapBuildRestoreSnapshot(SnapBuildOnDisk *ondisk, const char *path,
 	{
 		sz = sizeof(TransactionId) * ondisk->builder.committed.xcnt;
 		ondisk->builder.committed.xip = MemoryContextAllocZero(context, sz);
-		SnapBuildRestoreContents(fd, (char *) ondisk->builder.committed.xip, sz, path);
+		SnapBuildRestoreContents(fd, ondisk->builder.committed.xip, sz, path);
 		COMP_CRC32C(checksum, ondisk->builder.committed.xip, sz);
 	}
 
@@ -1759,7 +1804,7 @@ SnapBuildRestoreSnapshot(SnapBuildOnDisk *ondisk, const char *path,
 	{
 		sz = sizeof(TransactionId) * ondisk->builder.catchange.xcnt;
 		ondisk->builder.catchange.xip = MemoryContextAllocZero(context, sz);
-		SnapBuildRestoreContents(fd, (char *) ondisk->builder.catchange.xip, sz, path);
+		SnapBuildRestoreContents(fd, ondisk->builder.catchange.xip, sz, path);
 		COMP_CRC32C(checksum, ondisk->builder.catchange.xip, sz);
 	}
 
@@ -1788,18 +1833,13 @@ static bool
 SnapBuildRestore(SnapBuild *builder, XLogRecPtr lsn)
 {
 	SnapBuildOnDisk ondisk;
-	char		path[MAXPGPATH];
 
 	/* no point in loading a snapshot if we're already there */
 	if (builder->state == SNAPBUILD_CONSISTENT)
 		return false;
 
-	sprintf(path, "%s/%X-%X.snap",
-			PG_LOGICAL_SNAPSHOTS_DIR,
-			LSN_FORMAT_ARGS(lsn));
-
 	/* validate and restore the snapshot to 'ondisk' */
-	if (!SnapBuildRestoreSnapshot(&ondisk, path, builder->context, true))
+	if (!SnapBuildRestoreSnapshot(&ondisk, lsn, builder->context, true))
 		return false;
 
 	/*
@@ -1882,7 +1922,7 @@ snapshot_not_interesting:
  * Read the contents of the serialized snapshot to 'dest'.
  */
 static void
-SnapBuildRestoreContents(int fd, char *dest, Size size, const char *path)
+SnapBuildRestoreContents(int fd, void *dest, Size size, const char *path)
 {
 	int			readBytes;
 

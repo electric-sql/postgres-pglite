@@ -66,7 +66,7 @@ AuxiliaryProcessMainCommon(void)
 
 	BaseInit();
 
-	ProcSignalInit(false, 0);
+	ProcSignalInit(NULL, 0);
 
 	/*
 	 * Auxiliary processes don't run transactions, but they may need a
@@ -78,7 +78,8 @@ AuxiliaryProcessMainCommon(void)
 
 	/* Initialize backend status information */
 	pgstat_beinit();
-	pgstat_bestart();
+	pgstat_bestart_initial();
+	pgstat_bestart_final();
 
 	/* register a before-shutdown callback for LWLock cleanup */
 	before_shmem_exit(ShutdownAuxiliaryProcess, 0);
