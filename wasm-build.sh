@@ -1,5 +1,4 @@
 #!/bin/bash
-
 export PG_VERSION=${PG_VERSION:-17.4}
 
 #set -x;
@@ -33,6 +32,7 @@ export PG_DIST_EXT="${PG_DIST}/extensions-emsdk"
 export PGL_DIST_JS="${PG_DIST}/pglite-js"
 
 export PGL_DIST_NATIVE="${PG_DIST}/pglite-native"
+export PGL_DIST_C="${PG_DIST}/pglite-native"
 export PGL_DIST_WEB="${PG_DIST}/pglite-web"
 
 export DEBUG=${DEBUG:-true}
@@ -47,6 +47,7 @@ export PGUSER=${PGUSER:-postgres}
 export WASI=${WASI:-false}
 export WASI_SDK=${WASI_SDK:-25.0}
 export PYBUILD=${PYBUILD:-3.13}
+export NATIVE=${NATIVE:-false}
 
 
 if $WASI
@@ -64,9 +65,17 @@ else
     BUILD=emscripten
     if $DEBUG
     then
-        # clang default to O0 but specifying -O0 may trigger memory start address bug in emsdk
-        export COPTS="-g3 --no-wasm-opt"
-        export LOPTS=${LOPTS:-"-g3 --no-wasm-opt -sASSERTIONS=1"}
+        # clang default to O0 but specifying -O0 may trigger align bug in emsdk
+        if [ -f /alpine ]
+        then
+            # dev debug
+            export COPTS="-O2 -g3 --no-wasm-opt"
+            export LOPTS=${LOPTS:-"-O2 -g3 --no-wasm-opt -sASSERTIONS=1"}
+        else
+            # docker debug ( exepected to be ide friendly )
+            export COPTS="-g3 --no-wasm-opt"
+            export LOPTS=${LOPTS:-"-g3 --no-wasm-opt -sASSERTIONS=1"}
+        fi
     else
         # DO NOT CHANGE COPTS - optimized wasm corruption fix
         export COPTS="-O2 -g3 --no-wasm-opt"
@@ -195,6 +204,21 @@ fi
 
 # also used for non make (linking and pgl_main)
 export CC_PGLITE="-DPYDK=1 -DPG_PREFIX=${PGROOT} -I${PGROOT}/include ${CC_PGLITE}"
+
+
+
+echo "
+    ----------------------------------------
+"
+env|grep PG |grep -v BUILD
+env|grep BUILD|grep -v PG
+env|grep WA
+env|grep PY
+
+echo "
+    ----------------------------------------
+"
+
 
 
 
@@ -497,9 +521,9 @@ then
 "
     else
 
-        if echo " $*"|grep -q " extra"
-        then
-            for extra_ext in  ${EXTRA_EXT:-"vector"}
+#        if echo " $*"|grep -q " extra"
+#        then
+            for extra_ext in vector pg_ivm
             do
                 if $CI
                 then
@@ -524,7 +548,7 @@ then
 
                 python3 ${PORTABLE}/pack_extension.py
             done
-        fi
+#        fi
 
         # this is for initial emscripten MEMFS
         export PGPRELOAD="\
@@ -565,8 +589,14 @@ then
     cp ${PGL_DIST_WEB}/pglite.* pglite/packages/pglite/release/
     pushd pglite
         export HOME=$PG_BUILD
-        [ -f $HOME/.local/share/pnpm/pnpm ] || wget -qO- https://get.pnpm.io/install.sh | ENV="$HOME/.bashrc" SHELL="$(which bash)" bash -
-        . $HOME/.bashrc
+        if [ -f ${PG_BUILD}/share/pnpm/pnpm ]
+        then
+            echo "assuming pnpm install done"
+            source $PG_BUILD/.bashrc
+        else
+            [ -f \$HOME/.local/share/pnpm/pnpm ] || wget -qO- https://get.pnpm.io/install.sh | ENV="$PG_BUILD/.bashrc" SHELL="\$(which bash)" bash -
+        fi
+        export PATH=$PATH:${PG_BUILD}/share/pnpm:\$(pwd)/node_modules/.pnpm/node_modules/.bin
         pnpm install -g npm vitest
         pnpm install
         pnpm run ts:build

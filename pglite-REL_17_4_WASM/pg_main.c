@@ -1,5 +1,5 @@
 
-// for handling REVOKIE ex in initdb
+// for handling REVOKE exception in initdb
 #if defined(__wasi__)
 #define FIXME 1
 #else
