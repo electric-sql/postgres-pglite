@@ -521,9 +521,9 @@ then
 "
     else
 
-#        if echo " $*"|grep -q " extra"
-#        then
-            for extra_ext in vector pg_ivm
+        if echo " $*"|grep -q " extra"
+        then
+            for extra_ext in vector
             do
                 if $CI
                 then
@@ -548,7 +548,7 @@ then
 
                 python3 ${PORTABLE}/pack_extension.py
             done
-#        fi
+        fi
 
         # this is for initial emscripten MEMFS
         export PGPRELOAD="\
