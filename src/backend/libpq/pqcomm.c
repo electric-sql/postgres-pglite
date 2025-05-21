@@ -135,6 +135,11 @@ volatile int querylen = 0;
 volatile FILE* queryfp = NULL;
 #endif
 
+/* pglite specific */
+extern int cma_rsize;
+extern bool sockfiles;
+
+
 /*
  * Message status
  */
@@ -284,7 +289,7 @@ pq_init(ClientSocket *client_sock)
 		(void) pq_settcpusertimeout(tcp_user_timeout, port);
 	}
 #endif /* WASM */
-PDEBUG("# 285:" __FILE__);
+PDEBUG("# 287:" __FILE__);
 	/* initialize state variables */
 	PqSendBufferSize = PQ_SEND_BUFFER_SIZE;
 	PqSendBuffer = MemoryContextAlloc(TopMemoryContext, PqSendBufferSize);
@@ -322,9 +327,7 @@ PDEBUG("# 285:" __FILE__);
 	AddWaitEventToSet(FeBeWaitSet, WL_POSTMASTER_DEATH, PGINVALID_SOCKET,
 					  NULL, NULL);
 #else /* WASM */
-    PDEBUG("# 323: FIXME: socketfile");
-    #pragma message "FIXME: use socketfile when overflowing PqRecvBuffer_static"
-    /* because we fill before starting reading message */
+    /* because we may fill before starting reading message */
     PqRecvBuffer = &PqRecvBuffer_static[0];
 #endif /* WASM */
 	/*
@@ -1177,7 +1180,6 @@ pq_recvbuf_fill(FILE* fp, int packetlen) {
         queryfp = fp;
         querylen = packetlen - got;
         PqRecvLength = got;
-PDEBUG("# 1178: input overflow");
     } else {
         fread( PqRecvBuffer, packetlen, 1, fp);
         PqRecvLength = packetlen;
@@ -1186,8 +1188,9 @@ PDEBUG("# 1178: input overflow");
     }
     PqRecvPointer = 0;
 }
+
 #endif
-extern int cma_rsize;
+
 static char * PqSendBuffer_save;
 void
 pq_startmsgread(void)
@@ -1202,7 +1205,12 @@ pq_startmsgread(void)
 				 errmsg("terminating connection because protocol synchronization was lost")));
 #if defined(__EMSCRIPTEN__) || defined(__wasi__)
     if (!pq_buffer_remaining_data()) {
-        if (cma_rsize) {
+        if (sockfiles) {
+            PqRecvBuffer = &PqRecvBuffer_static[0];
+            if (PqSendBuffer_save)
+                PqSendBuffer=PqSendBuffer_save;
+            PqSendBufferSize = PQ_SEND_BUFFER_SIZE;
+        } else {
             PqRecvPointer = 0;
             PqRecvLength = cma_rsize;
             PqRecvBuffer = (char*)0x1;
@@ -1211,15 +1219,10 @@ pq_startmsgread(void)
             PqSendBuffer_save = PqSendBuffer;
             PqSendBuffer = 2 + (char*)(cma_rsize);
             PqSendBufferSize = (CMA_MB*1024*1024) - (int)(&PqSendBuffer[0]);
-        } else {
-            PqRecvBuffer = &PqRecvBuffer_static[0];
-            if (PqSendBuffer_save)
-                PqSendBuffer=PqSendBuffer_save;
-            PqSendBufferSize = PQ_SEND_BUFFER_SIZE;
         }
     }
 #if PDEBUG
-        printf("# 1199: pq_startmsgread cma_rsize=%d PqRecvLength=%d buf=%p reply=%p\n", cma_rsize, PqRecvLength, &PqRecvBuffer[0], &PqSendBuffer[0]);
+        printf("# 1225: pq_startmsgread cma_rsize=%d PqRecvLength=%d buf=%p reply=%p\n", cma_rsize, PqRecvLength, &PqRecvBuffer[0], &PqSendBuffer[0]);
 #endif
 
 #endif
@@ -1350,21 +1353,17 @@ extern FILE* SOCKET_FILE;
 extern int SOCKET_DATA;
 static int
 internal_putbytes(const char *s, size_t len) {
-	if (PqSendPointer >= PqSendBufferSize) {
-        fprintf(stderr, "# 1329: overflow %zu >= %d cma_rsize=%d CMA=%d\n", PqSendPointer, PqSendBufferSize,cma_rsize, CMA_MB);
-    }
-
-    if (!cma_rsize) {
-        int wc=      fwrite(s, 1, len, SOCKET_FILE);
-        SOCKET_DATA+=wc;
-    } else {
-	    size_t		amount;
+    size_t amount;
+    if (!sockfiles) {
 	    while (len > 0) {
-		    /* If buffer is full, then flush it out */
+		    /* If buffer is full, then flush it out from cma to file and continue from there */
 		    if (PqSendPointer >= PqSendBufferSize) {
-			    socket_set_nonblocking(false);
-			    if (internal_flush())
-				    return EOF;
+                int redirected = fwrite(PqSendBuffer, 1, PqSendPointer, SOCKET_FILE);
+                sockfiles = true;
+#if PGDEBUG
+                fprintf(stderr, "# 1364: overflow %zu >= %d redirect=%d cma_rsize=%d CMA_MB=%d \n", PqSendPointer, PqSendBufferSize, redirected, cma_rsize, CMA_MB);
+#endif
+                break;
 		    }
 		    amount = PqSendBufferSize - PqSendPointer;
 		    if (amount > len)
@@ -1375,6 +1374,11 @@ internal_putbytes(const char *s, size_t len) {
 		    len -= amount;
             SOCKET_DATA+=amount;
 	    }
+    }
+
+    if (sockfiles) {
+        int wc=      fwrite(s, 1, len, SOCKET_FILE);
+        SOCKET_DATA+=wc;
     }
     return 0;
 }
@@ -1387,7 +1391,7 @@ socket_flush(void) {
 static int
 internal_flush(void) {
     /*  no flush for raw wire */
-    if (!cma_rsize) {
+    if (sockfiles) {
     	PqSendStart = PqSendPointer = 0;
     }
 	return 0;

@@ -1,4 +1,10 @@
+
+// for handling REVOKIE ex in initdb
+#if defined(__wasi__)
+#define FIXME 1
+#else
 #define FIXME 0
+#endif
 
 #define PGL_MAIN
 #define PGL_INITDB_MAIN

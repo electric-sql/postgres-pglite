@@ -52,8 +52,7 @@ Folders :
      build : $BUILD_PATH
     target : $PGROOT
   retarget : ${PGL_DIST_C}
-    native : ${PGL_DIST_NATIVE}
-
+    native : ${PGL_DIST_NATIVE} build $(arch) : ${NATIVE}
 
     CPOPTS : $COPTS
     DEBUG  : $DEBUG
@@ -108,6 +107,7 @@ ________________________________________________________
             cat > ${PGL_BUILD_NATIVE}/pglite-native.sh <<END
 mkdir -p ${PGL_BUILD_NATIVE} ${PGL_DIST_NATIVE}
 pushd ${PGL_BUILD_NATIVE}
+$(cat /tmp/portable.opts)
     export WORKSPACE=${WORKSPACE}
     export WASM2C=pglite
     export PYBUILD=3.13
@@ -122,16 +122,21 @@ pushd ${PGL_BUILD_NATIVE}
     export PYMAJOR=$PYMAJOR
     export PYMINOR=$PYMINOR
 
-    time ${WORKSPACE}/pglite-wasm/native.sh
+    time ${WORKSPACE}/pglite-${PG_BRANCH}/native.sh
     mv -v *.so ${PGL_DIST_NATIVE}/
 popd
 END
             chmod +x ${PGL_BUILD_NATIVE}/pglite-native.sh
-            echo "
+            if $NATIVE
+            then
+                ${PGL_BUILD_NATIVE}/pglite-native.sh
+            else
+                    echo "
 
     * native build here : ${PGL_BUILD_NATIVE}/pglite-native.sh
 
 "
+            fi
         else
             echo "linking libpglite ${BUILD} failed in $(pwd)"
         fi
