@@ -1,6 +1,6 @@
 #!/bin/bash
 
-mkdir -p build src
+. wasm-build/extension.sh
 
 pushd build
     # [ -d pgvector ] || git clone --no-tags --depth 1 --single-branch --branch master https://github.com/pgvector/pgvector
@@ -15,26 +15,13 @@ pushd build
     fi
 popd
 
-
-
-if which emcc
-then
-    echo -n
-else
-    reset;
-    . ${SDKROOT:-/tmp/sdk}/wasm32-bi-emscripten-shell.sh
-    export PGROOT=${PGROOT:-/tmp/pglite}
-    export PATH=${PGROOT}/bin:$PATH
-fi
-
-
 pushd build/vector
     # path for wasm-shared already set to (pwd:pg build dir)/bin
     # OPTFLAGS="" turns off arch optim (sse/neon).
-    PG_CONFIG=${PGROOT}/bin/pg_config emmake make OPTFLAGS="" install || exit 33
+    PG_CONFIG=${PGROOT}/bin/pg_config emmake make OPTFLAGS="" install || exit 21
 
     cp sql/vector--0.8.0.sql ${PGROOT}/share/postgresql/extension/
-    rm ${PGROOT}/share/postgresql/extension/vector--?.?.?--?.?.?.sql ${PGROOT}/share/postgresql/extension/vector.sql
+    rm ${PGROOT}/share/postgresql/extension/vector--?.?.?--?.?.?.sql
 popd
 
 

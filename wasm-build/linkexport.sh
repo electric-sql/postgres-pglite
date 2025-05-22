@@ -1,40 +1,40 @@
 # this only runs when wasm-objdump is working and OBJDUMP not set to false
 
-echo "============= link export : begin ==============="
+mkdir -p ${PGL_DIST_LINK}/exports ${PGL_DIST_LINK}/imports ${PGL_DIST_LINK}/dumps
 
-# -O0 -sEXPORT_ALL should make all symbols visible without any mangling.
-COPT="-O0 -g3" \
- emcc \
- $EMCC_WEB -fPIC -sMAIN_MODULE=1 -sEXPORT_ALL -sERROR_ON_UNDEFINED_SYMBOLS -sASSERTIONS=0 \
- -DPREFIX=${PGROOT} -lnodefs.js -lidbfs.js \
- -sEXPORTED_RUNTIME_METHODS=FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,ccall,cwrap,callMain \
- $PGPRELOAD \
- -o postgres.html $PG_O $PG_L || exit 14
+echo "============= link export to ${PGL_DIST_LINK}/exports : begin ==============="
 
-echo "FULL:" > ${WORKSPACE}/build/sizes.log
-du -hs postgres.wasm >> ${WORKSPACE}/build/sizes.log
-echo >> ${WORKSPACE}/build/sizes.log
+echo "FULL:" > ${PGL_DIST_LINK}/sizes.log
+du -hs ${PGL_DIST_JS}/pglite-js.* >> ${PGL_DIST_LINK}/sizes.log
+echo >> ${PGL_DIST_LINK}/sizes.log
 
 
-echo "getting wasm exports lists"
-wasm-objdump -x $(realpath postgres.wasm) > ${WORKSPACE}/patches/exports/pgcore.wasm-objdump
-
-
-pushd ${WORKSPACE}
-    echo "getting postgres exports lists"
-    cat $(find build/postgres -type f |grep /exports) \
-     | grep -v ^\ local \
-     | grep -v ^{\ global \
-     | sort | uniq > ${WORKSPACE}/patches/exports/pgcore.exports
-
-    echo "
-    Merging wasm pg core symbols and postgres exports lists
-     into ${WORKSPACE} patches/exports/pgcore
+echo "
+    * getting wasm exports lists
 "
 
-    OBJDUMP=patches/exports/pgcore.wasm-objdump \
-     PGDUMP=patches/exports/pgcore.exports \
-     python3 wasm-build/getsyms.py exports > patches/exports/pgcore
+pushd $(realpath ${PGL_DIST_JS})
+    wasmtime --dir / --dir $(pwd)::. -- $(which wasm-objdump).wasi -x pglite-js.wasm > ${PGL_DIST_LINK}/exports/pgcore.wasm-objdump
+popd
+
+
+pushd ${PGL_DIST_LINK}
+    echo "
+    * getting postgres exports lists from ${BUILD_PATH}
+"
+    cat $(find ${BUILD_PATH} -type f |grep /exports) \
+     | grep -v ^\ local \
+     | grep -v ^{\ global \
+     | sort | uniq > ${PGL_DIST_LINK}/exports/pgcore.exports
+
+    echo "
+    * Merging wasm pg core symbols and postgres exports lists
+       into ${PGL_DIST_LINK}/exports/pgcore
+"
+
+    OBJDUMP=${PGL_DIST_LINK}/exports/pgcore.wasm-objdump \
+     PGDUMP=${PGL_DIST_LINK}/exports/pgcore.exports \
+     python3 ${WORKSPACE}/wasm-build/getsyms.py exports > ${PGL_DIST_LINK}/exports/pgcore
 popd
 
 echo "============= link export : end ==============="
