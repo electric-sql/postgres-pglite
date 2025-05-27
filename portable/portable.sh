@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-export PG_VERSION=${PG_BRANCH:-17.4}
+export PG_VERSION=${PG_VERSION:-17.4}
 export PG_BRANCH=${PG_BRANCH:-REL_17_4_WASM}
 export PORTABLE=$(realpath $(dirname $0))
 export ROOT=$(realpath $(pwd))
 export SDKROOT=${SDKROOT:-/tmp/sdk}
+export WASI=${WASI:-false}
 
 echo "
+
 ==================================================================================================
 ==================================================================================================
 
@@ -16,6 +18,7 @@ PG_BRANCH=$PG_BRANCH
 SDKROOT=$SDKROOT
 DEBUG=$DEBUG
 USE_ICU=$USE_ICU
+WASI=$WASI
 
 ==================================================================================================
 ==================================================================================================
@@ -24,15 +27,16 @@ USE_ICU=$USE_ICU
 
 
 
-
 export PATH=$PORTABLE:$PATH
 export WORKDIR=${ROOT}
 export CONTAINER_PATH=${CONTAINER_PATH:-/tmp/fs}
 export HOME=/tmp
-export PROOT=${PORTABLE}/proot
+export PROOT=${PORTABLE}/proot.$(arch)
+export ALPINEPROOT_NO_PULSE=true
 
-# git remove empty dirs
-mkdir -p ${WORKDIR}/sdk/dist
+
+# git would remove empty dirs
+mkdir -p ${WORKDIR}/dist-${PG_BRANCH} ${WORKDIR}/build-${PG_BRANCH}
 
 # --------------------------------------------------------
 # "docker emulation"
@@ -191,7 +195,7 @@ __get_container_url() {
 }
 
 __start() {
-	proot -0 rm -rf $CONTAINER_PATH/proc
+	$PROOT -0 rm -rf $CONTAINER_PATH/proc
 	mkdir $CONTAINER_PATH/proc
 
 	# Proceed make fake /proc/version
@@ -371,11 +375,13 @@ __start() {
 	COMMANDS+=" -b /proc/self/fd/1:/dev/stdout"
 	COMMANDS+=" -b /proc/self/fd/2:/dev/stderr"
     COMMANDS+=" -b ${WORKDIR}:/workspace"
-    COMMANDS+=" -b ${WORKDIR}/dist:/tmp/sdk/dist"
+    COMMANDS+=" -b ${WORKDIR}/build-${PG_BRANCH}:/tmp/sdk/build"
+    COMMANDS+=" -b ${WORKDIR}/dist-${PG_BRANCH}:/tmp/sdk/dist"
 	for f in stat version loadavg vmstat uptime
     do
 		[ -f "$CONTAINER_PATH/proc/.$f" ] && COMMANDS+=" -b $CONTAINER_PATH/proc/.$f:/proc/$f"
 	done
+# --change-id=uid:gid
 	COMMANDS+=" -r $CONTAINER_PATH -0 -w /root"
 	COMMANDS+=" -b $CONTAINER_PATH/root:/dev/shm"
 
@@ -407,7 +413,10 @@ __start() {
 }
 
 
-if git checkout ${PG_BRANCH}-pglite
+
+
+# git checkout ${PG_BRANCH}
+if cd ${WORKDIR}/postgresql-${PG_BRANCH}
 then
     if [ -f postgresql-${PG_BRANCH}.patched ]
     then
@@ -417,12 +426,13 @@ then
 
     Patching branch ${PG_BRANCH} with :
 
-$(find patches-${PG_BRANCH}/postgresql-*)
+$(find ${WORKDIR}/patches-${PG_BRANCH}/postgresql-*)
 
 
 
 "
-        # these don't exist in a released postgres.
+
+        # these initially don't exist in a released postgres.
         touch ./src/template/emscripten \
          ./src/include/port/emscripten.h \
          ./src/include/port/wasm_common.h \
@@ -434,9 +444,9 @@ $(find patches-${PG_BRANCH}/postgresql-*)
             postgresql-wasi \
             postgresql-pglite
         do
-            if [ -d patches-${PG_BRANCH}/$patchdir ]
+            if [ -d ${WORKDIR}/patches-${PG_BRANCH}/$patchdir ]
             then
-                for one in patches-${PG_BRANCH}/$patchdir/*.diff
+                for one in ${WORKDIR}/patches-${PG_BRANCH}/$patchdir/*.diff
                 do
                     if cat $one | patch -p1
                     then
@@ -446,7 +456,7 @@ $(find patches-${PG_BRANCH}/postgresql-*)
 
 Fatal: failed to apply patch : $one
 "
-                        exit 366
+                        exit 457
                     fi
                 done
             fi
@@ -454,20 +464,52 @@ Fatal: failed to apply patch : $one
         touch postgresql-${PG_BRANCH}.patched
     fi
 
+
     if [ -d $CONTAINER_PATH/${SDKROOT} ]
     then
-        echo using cached version
+        echo "
+            * using cached sdk version from $CONTAINER_PATH/${SDKROOT}
+"
     else
-        SDK_URL=https://github.com/pygame-web/portable-sdk/releases/download/3.1.74.7bi/python3.13-wasm-sdk-alpine-3.21.tar.lz4
-        echo "setting up sdk $SDK_URL"
+        # SDK_URL=https://github.com/pygame-web/portable-sdk/releases/download/3.1.74.7bi/python3.13-wasm-sdk-alpine-3.21.tar.lz4
+        SDK_URL=https://github.com/pygame-web/portable-sdk/releases/download/3.1.61.8/python3.12-wasm-sdk-debian12-$(arch).tar.lz4
+        echo "
+
+            * Setting up emsdk+wasi sdk from $SDK_URL
+
+"
         pushd $CONTAINER_PATH
-            mkdir -p /tmp/sdk
-            tmpfile=/tmp/sdk/python3.13-wasm-sdk-alpine-3.21.tar.lz4
-            [ -f /opt/python3.13-wasm-sdk-alpine-3.21.tar.lz4 ] && cp -f /opt/python3.13-wasm-sdk-alpine-3.21.tar.lz4 $tmpfile
-            [ -f /tmp/sdk/python3.13-wasm-sdk-alpine-3.21.tar.lz4 ] || wget -q $SDK_URL -O$tmpfile
+            mkdir -p tmp
+            tmpfile=tmp/python-wasm-sdk-alpine-3.21.tar.lz4
+            # local cache
+            [ -f $PORTABLE/python-wasm-sdk-alpine-3.21.tar.lz4 ] && cp -f $PORTABLE/python-wasm-sdk-alpine-3.21.tar.lz4 $tmpfile
+            [ -f $tmpfile ] || wget -q $SDK_URL -O$tmpfile
             cat $tmpfile | tar x --use-compress-program=lz4
+
+            # unpack wasi sdk  (common)
+            tar xf $PORTABLE/wasi-sdk-25.tar.xz
+            # unpack wasi sdk ( binary )
+            tar xf $PORTABLE/wasi-sdk-25.0-$(arch)-linux.tar.xz
+
+            # install arch binaries to sdk wasi sdk root
+            mv tmp/sdk/wasisdk/wasi-sdk-25.0-$(arch)-linux/* tmp/sdk/wasisdk/upstream/
+
+            if [ -f $CONTAINER_PATH/usr/bin/python3 ]
+            then
+                echo "system python found"
+            else
+                if [ -L $CONTAINER_PATH/usr/bin/python3 ]
+                then
+                    echo "linked python for build found"
+                else
+                    echo "Setting python for build as system python3"
+                    mkdir -p $CONTAINER_PATH/usr/bin
+                    ln -s $SDKROOT/devices/$(arch)/usr/bin/python3 $CONTAINER_PATH/usr/bin/python3
+                fi
+            fi
         popd
     fi
+
 
     # prevent erasing
     touch ${CONTAINER_PATH}${SDKROOT}/dev
@@ -479,5 +521,5 @@ Fatal: failed to apply patch : $one
         alpineproot "apk add bash;/bin/bash --init-file /initrc"
     fi
 else
-    echo Error need PG_BRANCH=$PG_BRANCH set to a valid branch
+    echo "Error need PG_BRANCH=$PG_BRANCH set to a valid postgres-pglite WASM branch"
 fi
