@@ -22,7 +22,7 @@ pushd ${PGL_DIST_LINK}
     echo "
     * getting postgres exports lists from ${BUILD_PATH}
 "
-    cat $(find ${BUILD_PATH} -type f |grep /exports) \
+    cat $(find ${BUILD_PATH} -type f |grep /exports|grep -v /interfaces/libpq/) \
      | grep -v ^\ local \
      | grep -v ^{\ global \
      | sort | uniq > ${PGL_DIST_LINK}/exports/pgcore.exports

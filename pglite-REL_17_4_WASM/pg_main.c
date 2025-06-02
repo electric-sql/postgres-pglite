@@ -1,9 +1,9 @@
 
 // for handling REVOKE exception in initdb
-#if defined(__wasi__)
-#define FIXME 1
+#if defined(__wasi__) || defined(__EMSCRIPTEN__)
+#   define FIXME 1
 #else
-#define FIXME 0
+#   define FIXME 0
 #endif
 
 #define PGL_MAIN

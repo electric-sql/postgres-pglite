@@ -65,6 +65,27 @@ then
         export LOPTS=${LOPTS:-"-Oz -g0"}
     fi
 else
+    if grep -q __emscripten_tempret_get ${SDKROOT}/emsdk/upstream/emscripten/src/library_dylink.js
+    then
+        echo -n
+    else
+        pushd ${SDKROOT}/emsdk
+        patch -p1 <<END
+--- emsdk/upstream/emscripten/src/library_dylink.js
++++ emsdk.fix/upstream/emscripten/src/library_dylink.js
+@@ -724,6 +724,8 @@
+             stubs[prop] = (...args) => {
+               resolved ||= resolveSymbol(prop);
+               if (!resolved) {
++                if (prop==='getTempRet0')
++                    return __emscripten_tempret_get(...args);
+                 throw new Error(\`Dynamic linking error: cannot resolve symbol \${prop}\`);
+               }
+               return resolved(...args);
+END
+        popd
+    fi
+
     BUILD=emscripten
     if $DEBUG
     then
@@ -82,7 +103,7 @@ else
     else
         # DO NOT CHANGE COPTS - optimized wasm corruption fix
         export COPTS="-O2 -g3 --no-wasm-opt"
-        export LOPTS=${LOPTS:-"-Oz -g0 --closure=0 --closure-args=--externs=/tmp/externs.js -sASSERTIONS=0"}
+        export LOPTS=${LOPTS:-"-Os -g0 --closure=0 -sASSERTIONS=0"}
     fi
 fi
 
@@ -197,15 +218,12 @@ else
 
 "
 
-    # custom code for node/web builds that modify pg main/tools behaviour
-    # this used by both node/linkweb build stages
-
     # pass the "kernel" contiguous memory zone size to the C compiler.
     CC_PGLITE="-DCMA_MB=${CMA_MB}"
 
 fi
 
-# also used for non make (linking and pgl_main)
+# also used for not makefile (manual linking and pgl_main)
 export CC_PGLITE="-DPYDK=1 -DPG_PREFIX=${PGROOT} -I${PGROOT}/include ${CC_PGLITE}"
 
 
@@ -467,9 +485,9 @@ export PATH=${WORKSPACE}/${BUILD_PATH}/bin:${PGROOT}/bin:$PATH
 # ===========================================================================
 # ===========================================================================
 
-if echo " $*"|grep -q " contrib"
+if true
 then
-    mkdir -p ${PGL_DIST_LINK}/dumps
+    mkdir -p ${PGL_DIST_LINK}/dumps ${PGL_DIST_LINK}/imports
 
     if $WASI
     then
@@ -629,14 +647,9 @@ then
         cp ${PGL_DIST_WEB}/pglite.* pglite/packages/pglite/release/
         pushd pglite
             export HOME=$PG_BUILD
-            if [ -f ${PG_BUILD}/share/pnpm/pnpm ]
-            then
-                echo "assuming pnpm install done"
-                source $PG_BUILD/.bashrc
-            else
-                [ -f \$HOME/.local/share/pnpm/pnpm ] || wget -qO- https://get.pnpm.io/install.sh | ENV="$PG_BUILD/.bashrc" SHELL="\$(which bash)" bash -
-            fi
-            export PATH=$PATH:${PG_BUILD}/share/pnpm:\$(pwd)/node_modules/.pnpm/node_modules/.bin
+            export PNPM_HOME=$PG_BUILD
+            export PATH=$(echo -n ${SDKROOT}/emsdk/node/*.*.*/bin):$PNPM_HOME:$PATH
+            which pnpm || npm install -g pnpm
             pnpm install -g npm vitest
             pnpm install
             pnpm run ts:build

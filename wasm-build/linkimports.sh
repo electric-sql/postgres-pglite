@@ -120,12 +120,24 @@ _PQsetSingleRowMode
 _PQsocket
 _PQstatus
 _pgresStatus
+
+_PQbackendPID
+_PQconninfo
+_PQconninfoFree
+_PQconninfoParse
+_PQendcopy
+_PQescapeIdentifier
 """.splitlines():
     if sym and sym in matches:
         dbg(f"\t* Removed symbol '{sym}'")
         matches.remove(sym)
 
 # matches.append('')
+
+if not '_getTempRet0' in matches:
+    matches.append('_getTempRet0')
+if not 'getTempRet0' in matches:
+    matches.append('getTempRet0')
 
 for sym in matches:
     print(sym)

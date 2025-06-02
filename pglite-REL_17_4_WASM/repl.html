@@ -307,9 +307,51 @@ pglite.wasi + filesystem: <a href=pglite-wasi.tar.xz download>Download file</a>
                     break
 
                 case 1:
-                    //data = "SELECT now(), current_database(), session_user, current_user;"
-                    data = "SELECT REPEAT('0123456789abcdef', 64*1024), block FROM generate_series(1,8) AS block;"
+                    data = "SELECT now(), current_database(), session_user, current_user;"
+//                    data = "SELECT REPEAT('0123456789abcdef', 64*1024), block FROM generate_series(1,8) AS block;"
                     break
+
+                case 2:
+                      data = `
+CREATE TABLE IF NOT EXISTS test (
+      id SERIAL PRIMARY KEY,
+      number INT
+    );
+    INSERT INTO test (number) VALUES (42);
+`
+                    break
+
+                case 3:
+                    data = `
+CREATE EXTENSION IF NOT EXISTS pg_ivm;
+`
+                    break
+
+// CREATE MATERIALIZED VIEW myview AS SELECT * FROM test;
+// SELECT pgivm.create_immv('myview', 'SELECT * FROM test');
+                case 4:
+                    data = `
+SELECT pgivm.create_immv('myview', 'SELECT * FROM test');
+`
+                    break
+
+                case 5:
+                    data = `
+INSERT INTO test VALUES (43);
+SELECT * FROM myview;
+INSERT INTO test VALUES (44);
+`
+                    break
+
+
+//REFRESH MATERIALIZED VIEW myview;
+                case 6:
+                    data = `
+SELECT * FROM myview;
+`
+                    break
+
+
 /*
                 case 2:
                     data = `
@@ -408,6 +450,7 @@ ALTER TABLE test2 OWNER TO ${PGUSER};
         async function delayed_init() {
             await Module.load_package("vector", "vector.tar.gz")
             await Module.load_package("uuid-ossp", "uuid-ossp.tar.gz")
+            await Module.load_package("pg_ivm", "pg_ivm.tar.gz")
 
             // await Module.load_package("pg_stat_statements", "pg_stat_statements.tar.gz")
             // await Module.load_package("postgis", "postgis-3.tar.gz")
@@ -711,8 +754,6 @@ SET ROLE ${PGUSER};
           };
 
 
-        //jsimport("tinytar.min.js")
-
         window.vm = Module
 
         const { WasmTerminal } = await /**/ import("https://pmp-p.ddns.net/pglite-web/vtx.js")
@@ -771,15 +812,15 @@ SET ROLE ${PGUSER};
                     Module._use_wire(1)
                     encodedArray.set(data)
                 } else {
-                    console.log("string data, using repl/no wire")
+                    // console.log("string data, using repl/no wire")
                     Module._use_wire(0)
                     const encoder = new TextEncoder();
                     encodedArray = encoder.encode(data);
                 }
 // sf
-                send_to_pglite(encodedArray, FS, -1)
+//                send_to_pglite(encodedArray, FS, -1)
 // cma
-//                send_to_pglite(encodedArray, FS, Module.cma_port || 1)
+                send_to_pglite(encodedArray, FS, Module.cma_port || 1)
             } else {
                 console.warn("BC(srv):", ev);
             }

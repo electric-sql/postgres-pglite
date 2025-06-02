@@ -720,6 +720,12 @@ wire_flush:
         } else {
             cma_wsize = 0;
             PDEBUG("# 698: no data, send empty ?");
+// TODO: dedup 739
+            if (sockfiles) {
+                fclose(SOCKET_FILE);
+                SOCKET_FILE = NULL;
+                rename(PGS_OLOCK, PGS_OUT);
+            }
         }
     } else {
         pg_prompt();
@@ -729,6 +735,13 @@ wire_flush:
                 puts("# 686: socket has data");
             if (sockfiles)
                 printf("# 688: socket file not flushed -> read(%d) " PGS_OLOCK "->" PGS_OUT"\n", SOCKET_DATA);
+        } else {
+// TODO: dedup 723
+            if (sockfiles) {
+                fclose(SOCKET_FILE);
+                SOCKET_FILE = NULL;
+                rename(PGS_OLOCK, PGS_OUT);
+            }
         }
         if (cma_wsize)
             puts("ERROR: cma was not flushed before socketfile interface");
