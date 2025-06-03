@@ -26,7 +26,7 @@ cat .buildconfig
 mkdir -p dist/pglite dist/extensions-emsdk
 
 # needed to be able to do incremental builds with docker
-mkdir -p ${WORKSPACE}/postgres-pglite/tmp/sdk/build /postgres-pglite/tmp/pglite
+mkdir -p ${WORKSPACE}/postgres-pglite/tmp/sdk/build ${WORKSPACE}/postgres-pglite/tmp/pglite
 
 if echo -n $@|grep -q it$
 then
