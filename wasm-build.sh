@@ -1,5 +1,4 @@
 #!/bin/bash
-
 export PG_VERSION=${PG_VERSION:-17.4}
 
 #set -x;
@@ -31,9 +30,13 @@ export PG_DIST=${DIST:-/tmp/sdk/dist}
 export PG_DIST_EXT="${PG_DIST}/extensions-emsdk"
 
 export PGL_DIST_JS="${PG_DIST}/pglite-js"
+export PGL_DIST_LINK="${PG_DIST}/pglite-link"
 
 export PGL_DIST_NATIVE="${PG_DIST}/pglite-native"
+export PGL_DIST_C="${PG_DIST}/pglite-native"
 export PGL_DIST_WEB="${PG_DIST}/pglite-web"
+
+DIST_ALL="${PGROOT}/bin ${PG_DIST} ${PG_DIST_EXT} ${PGL_DIST_JS} ${PGL_DIST_LINK} ${PGL_DIST_WEB} ${PGL_BUILD_NATIVE}"
 
 export DEBUG=${DEBUG:-true}
 
@@ -47,6 +50,7 @@ export PGUSER=${PGUSER:-postgres}
 export WASI=${WASI:-false}
 export WASI_SDK=${WASI_SDK:-25.0}
 export PYBUILD=${PYBUILD:-3.13}
+export NATIVE=${NATIVE:-false}
 
 
 if $WASI
@@ -61,16 +65,45 @@ then
         export LOPTS=${LOPTS:-"-Oz -g0"}
     fi
 else
+    if grep -q __emscripten_tempret_get ${SDKROOT}/emsdk/upstream/emscripten/src/library_dylink.js
+    then
+        echo -n
+    else
+        pushd ${SDKROOT}/emsdk
+        patch -p1 <<END
+--- emsdk/upstream/emscripten/src/library_dylink.js
++++ emsdk.fix/upstream/emscripten/src/library_dylink.js
+@@ -724,6 +724,8 @@
+             stubs[prop] = (...args) => {
+               resolved ||= resolveSymbol(prop);
+               if (!resolved) {
++                if (prop==='getTempRet0')
++                    return __emscripten_tempret_get(...args);
+                 throw new Error(\`Dynamic linking error: cannot resolve symbol \${prop}\`);
+               }
+               return resolved(...args);
+END
+        popd
+    fi
+
     BUILD=emscripten
     if $DEBUG
     then
-        # clang default to O0 but specifying -O0 may trigger memory start address bug in emsdk
-        export COPTS="-g3 --no-wasm-opt"
-        export LOPTS=${LOPTS:-"-g3 --no-wasm-opt -sASSERTIONS=1"}
+        # clang default to O0 but specifying -O0 may trigger align bug in emsdk
+        if [ -f /alpine ]
+        then
+            # dev debug
+            export COPTS="-O2 -g3 --no-wasm-opt"
+            export LOPTS=${LOPTS:-"-O2 -g3 --no-wasm-opt -sASSERTIONS=1"}
+        else
+            # docker debug ( exepected to be ide friendly )
+            export COPTS="-g3 --no-wasm-opt"
+            export LOPTS=${LOPTS:-"-g3 --no-wasm-opt -sASSERTIONS=1"}
+        fi
     else
         # DO NOT CHANGE COPTS - optimized wasm corruption fix
         export COPTS="-O2 -g3 --no-wasm-opt"
-        export LOPTS=${LOPTS:-"-Oz -g0 --closure=0 --closure-args=--externs=/tmp/externs.js -sASSERTIONS=0"}
+        export LOPTS=${LOPTS:-"-Os -g0 --closure=0 -sASSERTIONS=0"}
     fi
 fi
 
@@ -90,12 +123,12 @@ EOE=true
 
 
 # default to user writeable paths in /tmp/ .
-if mkdir -p ${PGROOT} ${PG_DIST} ${PG_DIST_EXT} ${PGL_DIST_JS} ${PGL_DIST_WEB}
+if mkdir -p $DIST_ALL
 then
     echo "checking for valid prefix ${PGROOT} ${PG_DIST}"
 else
-    sudo mkdir -p ${PGROOT} ${PGROOT}/bin ${PG_DIST} ${PG_DIST_EXT} ${PGL_DIST_WEB}
-    sudo chown $(whoami) -R ${PGROOT} ${PG_DIST}
+    sudo mkdir -p $DIST_ALL
+    sudo chown $(whoami) -R $DIST_ALL
 fi
 
 # TODO: also handle PGPASSFILE hostname:port:database:username:password
@@ -185,16 +218,28 @@ else
 
 "
 
-    # custom code for node/web builds that modify pg main/tools behaviour
-    # this used by both node/linkweb build stages
-
     # pass the "kernel" contiguous memory zone size to the C compiler.
     CC_PGLITE="-DCMA_MB=${CMA_MB}"
 
 fi
 
-# also used for non make (linking and pgl_main)
+# also used for not makefile (manual linking and pgl_main)
 export CC_PGLITE="-DPYDK=1 -DPG_PREFIX=${PGROOT} -I${PGROOT}/include ${CC_PGLITE}"
+
+
+
+echo "
+    ----------------------------------------
+"
+env|grep PG |grep -v BUILD
+env|grep BUILD|grep -v PG
+env|grep WA
+env|grep PY
+
+echo "
+    ----------------------------------------
+"
+
 
 
 
@@ -221,10 +266,45 @@ then
             fi
         else
             echo "
-        ERROR: $(which wasm-objdump) is not working properly ( is wasmtime ok ? )
+        WARNING: $(which wasm-objdump) not working properly, trying alternate syntax
 
     "
-            OBJDUMP=false
+            cat > $WRAPPER <<END
+#!/bin/bash
+LNK="\$(realpath \$0).wasi"
+if [ -f "\$LNK" ]
+then
+    WASM=\$LNK
+else
+    WASM=\$1
+    shift
+    if [ -f "\${WASM}.wasi" ]
+    then
+        WASM="\${WASM}.wasi"
+    fi
+fi
+echo "WASI: \$WASM \$@" > /proc/self/fd/2
+$(which wasmtime) --env PYTHONDONTWRITEBYTECODE=1 --dir / \$WASM \$@
+END
+            chmod +x $WRAPPER
+
+            if $WRAPPER -h $WASIFILE | grep -q 'file format wasm 0x1'
+            then
+                mkdir -p $PGROOT/bin/
+                if cp -f $WRAPPER $WASIFILE $PGROOT/bin/
+                then
+                    echo "wasm-objdump fixed and working, copied to $PGROOT/bin/"
+                else
+                    OBJDUMP=false
+                fi
+            else
+                echo "
+        ERROR: $(which wasm-objdump) not working properly ( is wasmtime ok ? )
+
+    "
+                exit 268
+                OBJDUMP=false
+            fi
         fi
     fi
 else
@@ -301,7 +381,7 @@ END
         [ -f $dest/pg_debug.h ] || cp ${PG_DEBUG_HEADER} $dest/
     done
 
-    # store all pg options that have impact on cmd line initdb/boot
+    # store all options that have impact on cmd line initdb/boot compile+link
     cat > ${PGROOT}/pgopts.sh <<END
 export PG_BRANCH=$PG_BRANCH
 export CMA_MB=$CMA_MB
@@ -321,6 +401,7 @@ export PGL_BUILD_NATIVE=$PGL_BUILD_NATIVE
 export PG_DIST=$PG_DIST
 export PG_DIST_EXT=$PG_DIST_EXT
 export PGL_DIST_JS=$PGL_DIST_JS
+export PGL_DIST_LINK=$PGL_DIST_LINK
 
 export PGL_DIST_NATIVE=$PGL_DIST_NATIVE
 export PGL_DIST_WEB=$PGL_DIST_WEB
@@ -404,9 +485,9 @@ export PATH=${WORKSPACE}/${BUILD_PATH}/bin:${PGROOT}/bin:$PATH
 # ===========================================================================
 # ===========================================================================
 
-if echo " $*"|grep -q " contrib"
+if true
 then
-    mkdir -p ${PGROOT}/dumps
+    mkdir -p ${PGL_DIST_LINK}/dumps ${PGL_DIST_LINK}/imports
 
     if $WASI
     then
@@ -430,7 +511,7 @@ then
 
     for extdir in postgresql-${PG_BRANCH}/contrib/*
     do
-        if [ -f ${PGROOT}/dumps/dump.vector ]
+        if [ -f ${PGL_DIST_LINK}/dumps/dump.vector ]
         then
             echo "
 
@@ -488,7 +569,7 @@ echo "
 
 # only build extra when targeting pglite-wasm .
 
-if [ -f  ${WORKSPACE}/pglite-${PG_BRANCH}/build.sh ]
+if [ -f ${WORKSPACE}/pglite-${PG_BRANCH}/build.sh ]
 then
     if $WASI
     then
@@ -499,30 +580,32 @@ then
 
         if echo " $*"|grep -q " extra"
         then
-            for extra_ext in  ${EXTRA_EXT:-"vector"}
+#            if $CI
+#            then
+#                #if [ -d $PREFIX/include/X11 ]
+#                if true
+#                then
+#                    echo -n
+#                else
+#                    # install EXTRA sdk
+#                    . /etc/lsb-release
+#                    DISTRIB="${DISTRIB_ID}-${DISTRIB_RELEASE}"
+#                    CIVER=${CIVER:-$DISTRIB}
+#                    SDK_URL=https://github.com/pygame-web/python-wasm-sdk-extra/releases/download/$SDK_VERSION/python3.13-emsdk-sdk-extra-${CIVER}.tar.lz4
+#                    echo "Installing extra lib from $SDK_URL"
+#                    curl -sL --retry 5 $SDK_URL | tar xvP --use-compress-program=lz4 | pv -p -l -s 15000 >/dev/null
+#                    chmod +x ./extra/*.sh
+#                fi
+#            fi
+
+            for extra_ext in ./extra/*.sh
             do
-                if $CI
-                then
-                    #if [ -d $PREFIX/include/X11 ]
-                    if true
-                    then
-                        echo -n
-                    else
-                        # install EXTRA sdk
-                        . /etc/lsb-release
-                        DISTRIB="${DISTRIB_ID}-${DISTRIB_RELEASE}"
-                        CIVER=${CIVER:-$DISTRIB}
-                        SDK_URL=https://github.com/pygame-web/python-wasm-sdk-extra/releases/download/$SDK_VERSION/python3.13-emsdk-sdk-extra-${CIVER}.tar.lz4
-                        echo "Installing $SDK_URL"
-                        curl -sL --retry 5 $SDK_URL | tar xvP --use-compress-program=lz4 | pv -p -l -s 15000 >/dev/null
-                        chmod +x ./extra/*.sh
-                    fi
-                fi
-                echo "======================= ${extra_ext} : $(pwd) ==================="
+                LOG=$PG_DIST_EXT/$(basename ${extra_ext}).log
+                echo "======================= ${extra_ext} : $LOG ==================="
 
-                ./extra/${extra_ext}.sh || exit 522
+                ${extra_ext} >  $LOG || exit 552
 
-                python3 ${PORTABLE}/pack_extension.py
+                python3 wasm-build/pack_extension.py
             done
         fi
 
@@ -540,52 +623,57 @@ then
     echo "
     * building + linking pglite-wasm (initdb/loop/transport/repl/backend)
 "
-    if ${WORKSPACE}/pglite-${PG_BRANCH}/build.sh
+
+    if $WASI
     then
-        if $WASI
-        then
-            echo "TODO: wasi pack/tests"
-        else
-            cat > pglite-link.sh <<END
+        echo "TODO: wasi pack/tests"
+    else
+        cat > pglite-link.sh <<END
 . ${PGROOT}/pgopts.sh
 . ${SDKROOT}/wasm32-bi-emscripten-shell.sh
-./pglite-${PG_BRANCH}/build.sh
-
-if [ -d pglite ]
+if ./pglite-${PG_BRANCH}/build.sh
 then
-    mkdir -p pglite/packages/pglite/release
-
-    for archive in ${PG_DIST_EXT}/*.tar
-    do
-        echo "    packing extension \$archive"
-        gzip -f -k -9 \$archive
-        mv \$archive.gz pglite/packages/pglite/release/
-    done
-
-    cp ${PGL_DIST_WEB}/pglite.* pglite/packages/pglite/release/
-    pushd pglite
-        export HOME=$PG_BUILD
-        [ -f $HOME/.local/share/pnpm/pnpm ] || wget -qO- https://get.pnpm.io/install.sh | ENV="$HOME/.bashrc" SHELL="$(which bash)" bash -
-        . $HOME/.bashrc
-        pnpm install -g npm vitest
-        pnpm install
-        pnpm run ts:build
-    popd
-
-    if [ -f /skiptest ]
+    if [ -d pglite ]
     then
-        echo skipping tests
-    else
-        if $CI
+        mkdir -p pglite/packages/pglite/release
+
+        for archive in ${PG_DIST_EXT}/*.tar
+        do
+            echo "    packing extension \$archive"
+            gzip -f -k -9 \$archive
+            mv \$archive.gz pglite/packages/pglite/release/
+        done
+
+        cp ${PGL_DIST_WEB}/pglite.* pglite/packages/pglite/release/
+        pushd pglite
+            export HOME=$PG_BUILD
+            export PNPM_HOME=$PG_BUILD
+            export PATH=$(echo -n ${SDKROOT}/emsdk/node/*.*.*/bin):$PNPM_HOME:$PATH
+            which pnpm || npm install -g pnpm
+            pnpm install -g npm vitest
+            pnpm install
+            pnpm run ts:build
+        popd
+
+        if [ -f /skiptest ]
         then
-            ./runtests.sh || exit 580
+            echo skipping tests
+        else
+            if $CI
+            then
+                ./runtests.sh || exit 580
+            fi
         fi
     fi
+else
+    echo "pglite linking failed"
+    exit 657
 fi
 END
-            chmod +x pglite-link.sh
-            ./pglite-link.sh
+        chmod +x pglite-link.sh
 
+        if ./pglite-link.sh
+        then
             if [ -d pglite ]
             then
                echo -n
@@ -596,11 +684,10 @@ END
                     gzip -f -k -9 $archive
                 done
             fi
-
+        else
+            exit 676
         fi
-    else
-        echo "linking libpglite wasm failed"
-        exit 602
     fi
-
+else
+    echo "linking libpglite skipped"
 fi
