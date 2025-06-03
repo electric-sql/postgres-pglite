@@ -217,6 +217,7 @@ END
         echo configure failed
         exit 218
     fi
+fi
 
     echo "
 
@@ -422,7 +423,7 @@ END
 	echo "TODO: node/wasi cmdline initdb for PGDATA=${PGDATA} "
     popd
 
-fi
+# fi
 
 echo "build-pgcore: end($BUILD)
 

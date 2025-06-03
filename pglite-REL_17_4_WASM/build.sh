@@ -11,7 +11,7 @@ fi
 echo "pglite/build-$BUILD: begin target BUILD_PATH=$BUILD_PATH"
 
 WORKSPACE=$(pwd)
-PGROOT=/tmp/pglite
+PGROOT=${PGROOT:-/tmp/pglite}
 
 if [ -d ${WORKSPACE}/src/fe_utils ]
 then

@@ -25,6 +25,9 @@ cat .buildconfig
 
 mkdir -p dist/pglite dist/extensions-emsdk
 
+# needed to be able to do incremental builds with docker
+mkdir -p ${WORKSPACE}/postgres-pglite/tmp/sdk/build /postgres-pglite/tmp/pglite
+
 if echo -n $@|grep -q it$
 then
     PROMPT="&& bash ) || bash"
@@ -37,6 +40,8 @@ docker run $@ \
   --env-file .buildconfig \
   -e DEBUG=${DEBUG:-false} \
   --workdir=${DOCKER_WORKSPACE} \
+  -v ${WORKSPACE}/postgres-pglite/tmp/sdk/build:/tmp/sdk/build \
+  -v ${WORKSPACE}/postgres-pglite/tmp/pglite:/tmp/pglite \
   -v ${WORKSPACE}/postgres-pglite:${DOCKER_WORKSPACE}:rw \
   -v ${WORKSPACE}/postgres-pglite/dist:/tmp/sdk/dist:rw \
   $IMG_NAME:$IMG_TAG \
