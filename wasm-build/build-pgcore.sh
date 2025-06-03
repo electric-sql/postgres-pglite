@@ -423,8 +423,6 @@ END
 	echo "TODO: node/wasi cmdline initdb for PGDATA=${PGDATA} "
     popd
 
-# fi
-
 echo "build-pgcore: end($BUILD)
 
 
