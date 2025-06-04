@@ -40,8 +40,8 @@ docker run $@ \
   --env-file .buildconfig \
   -e DEBUG=${DEBUG:-false} \
   --workdir=${DOCKER_WORKSPACE} \
-  -v ${WORKSPACE}/postgres-pglite/tmp/sdk/build:/tmp/sdk/build \
-  -v ${WORKSPACE}/postgres-pglite/tmp/pglite:/tmp/pglite \
+  -v ${WORKSPACE}/postgres-pglite/tmp/sdk/build:/tmp/sdk/build:rw \
+  -v ${WORKSPACE}/postgres-pglite/tmp/pglite:/tmp/pglite:rw \
   -v ${WORKSPACE}/postgres-pglite:${DOCKER_WORKSPACE}:rw \
   -v ${WORKSPACE}/postgres-pglite/dist:/tmp/sdk/dist:rw \
   $IMG_NAME:$IMG_TAG \
