@@ -157,39 +157,39 @@ System node/pnpm ( may interfer) :
 # TODO: but may need to adjust $PATH with stock emsdk.
 
 pushd ${SDKROOT}
-if ${WASI}
-then
-    . wasisdk/wasisdk_env.sh
-else
-    if which emcc
+    if ${WASI}
     then
-        echo "emcc found in PATH=$PATH"
+        . wasisdk/wasisdk_env.sh
     else
-        . ${SDKROOT}/wasm32-bi-emscripten-shell.sh
+        if which emcc
+        then
+            echo "emcc found in PATH=$PATH"
+        else
+            . ${SDKROOT}/wasm32-bi-emscripten-shell.sh
+        fi
+
+        if ${PORTABLE}/sdk.sh
+        then
+            echo "$PORTABLE : sdk check passed (emscripten)"
+        else
+            echo emsdk failed
+            exit 176
+        fi
+
+
+        export PG_LINK=${PG_LINK:-$(which emcc)}
+
+        echo "
+
+        Using provided emsdk from $(which emcc)
+        Using PG_LINK=$PG_LINK as linker
+
+            node : $(which node) $($(which node) -v)
+            PNPM : $(which pnpm)
+
+
+        "
     fi
-
-    if ${PORTABLE}/sdk.sh
-    then
-        echo "$PORTABLE : sdk check passed (emscripten)"
-    else
-        echo emsdk failed
-        exit 150
-    fi
-
-
-    export PG_LINK=${PG_LINK:-$(which emcc)}
-
-    echo "
-
-    Using provided emsdk from $(which emcc)
-    Using PG_LINK=$PG_LINK as linker
-
-        node : $(which node) $($(which node) -v)
-        PNPM : $(which pnpm)
-
-
-"
-fi
 popd
 
 # used for not makefile (manual linking and pgl_main)
