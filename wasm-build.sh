@@ -165,16 +165,18 @@ else
     then
         echo "emcc found in PATH=$PATH"
     else
-        if ${PORTABLE}/sdk.sh
-        then
-            echo "$PORTABLE : sdk check passed (emscripten)"
-        else
-            echo emsdk failed
-            exit 150
-        fi
-
         . ${SDKROOT}/wasm32-bi-emscripten-shell.sh
     fi
+
+    if ${PORTABLE}/sdk.sh
+    then
+        echo "$PORTABLE : sdk check passed (emscripten)"
+    else
+        echo emsdk failed
+        exit 150
+    fi
+
+
     export PG_LINK=${PG_LINK:-$(which emcc)}
 
     echo "
