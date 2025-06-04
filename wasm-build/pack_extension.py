@@ -43,10 +43,10 @@ def is_extension(path:Path, fullpath:Path):
     if asp.startswith('/lib/postgresql/'):
         if path.suffix == ".so":
             EXTNAME = path.stem
-            dumpcmd = f"{PGROOT}/bin/wasm-objdump -x {fullpath} > {PGL_DIST_LINK}/dumps/dump.{EXTNAME} 2>/dev/null "
+            dumpcmd = f"{PGROOT}/bin/wasm-objdump -x {fullpath} > {PG_BUILD_DUMPS}/dump.{EXTNAME} 2>/dev/null "
             os.system(dumpcmd)
 
-            os.system(f"OBJDUMP={PGL_DIST_LINK}/dumps/dump.{EXTNAME} python3 wasm-build/getsyms.py imports > {PGL_DIST_LINK}/imports/{EXTNAME}")
+            os.system(f"OBJDUMP={PG_BUILD_DUMPS}/dump.{EXTNAME} python3 wasm-build/getsyms.py imports > {PGL_DIST_LINK}/imports/{EXTNAME}")
             with open(f"{PGL_DIST_LINK}/imports/{EXTNAME}","r") as f:
                 SYMBOLS=f.readlines()
 
@@ -100,6 +100,7 @@ DIST = Path(os.environ.get("PG_DIST_EXT", "/tmp/sdk/dist/extensions-emsdk"))
 BUILD=os.environ.get('BUILD','emscripten')
 PGROOT=Path(os.environ.get('PGROOT',"/tmp/pglite"))
 PGL_DIST_LINK=Path(os.environ.get('PGL_DIST_LINK', "/tmp/sdk/dist/pglite-link"))
+PG_BUILD_DUMPS=Path(os.environ.get('PG_BUILD_DUMPS', "/tmp/sdk/build/dumps"))
 
 INSTALLED = []
 
