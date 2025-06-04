@@ -2,18 +2,28 @@
 
 . wasm-build/extension.sh
 
-pushd build
+pushd $PG_EXTRA
     if [ -d pg_ivm ]
     then
         echo using local pgpg_ivm
     else
-        wget https://github.com/sraoss/pg_ivm/archive/refs/tags/v1.10.tar.gz -O-|tar xfz -
-        mv pg_ivm-* pg_ivm
-        #git clone --recursive --no-tags --depth 1 --single-branch --branch main https://github.com/sraoss/pg_ivm
+#        wget https://github.com/sraoss/pg_ivm/archive/refs/tags/v1.10.tar.gz -O-|tar xfz -
+#        mv pg_ivm-* pg_ivm
+
+        git clone --recursive --no-tags --depth 1 --single-branch --branch main https://github.com/sraoss/pg_ivm
+
+        if $WASI
+        then
+            echo "no patching"
+        else
+            echo "PATCH?"
+
+        fi
+
     fi
 popd
 
-pushd build/pg_ivm
+pushd $PG_EXTRA/pg_ivm
     # path for wasm-shared already set to (pwd:pg build dir)/bin
     # OPTFLAGS="" turns off arch optim (sse/neon).
     PG_CONFIG=${PGROOT}/bin/pg_config emmake make OPTFLAGS="" install || exit 19

@@ -12,7 +12,7 @@ pushd ${WORKSPACE}
 
     for extra_pg_so in $(find $PGROOT/lib/postgresql/|grep \.so$)
     do
-        SOBASE=patches/imports.pgcore/$(basename $extra_pg_so .so)
+        SOBASE=${PG_BUILD_DUMPS}/$(basename $extra_pg_so .so)
         wasm-objdump -x $(realpath $extra_pg_so) > $SOBASE.wasm-objdump
         OBJDUMP=$SOBASE.wasm-objdump \
          PGDUMP=${PGL_DIST_LINK}/exports/pgcore.exports \

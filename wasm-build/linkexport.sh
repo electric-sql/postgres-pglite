@@ -1,6 +1,6 @@
 # this only runs when wasm-objdump is working and OBJDUMP not set to false
 
-mkdir -p ${PGL_DIST_LINK}/exports ${PGL_DIST_LINK}/imports ${PGL_DIST_LINK}/dumps
+mkdir -p ${PGL_DIST_LINK}/exports ${PGL_DIST_LINK}/imports ${PG_BUILD_DUMPS}
 
 echo "============= link export to ${PGL_DIST_LINK}/exports : begin ==============="
 
@@ -14,7 +14,7 @@ echo "
 "
 
 pushd $(realpath ${PGL_DIST_JS})
-    wasmtime --dir / --dir $(pwd)::. -- $(which wasm-objdump).wasi -x pglite-js.wasm > ${PGL_DIST_LINK}/exports/pgcore.wasm-objdump
+    wasmtime --dir / --dir $(pwd)::. -- $(which wasm-objdump).wasi -x pglite-js.wasm > ${PG_BUILD_DUMPS}/pgcore.wasm-objdump
 popd
 
 
@@ -32,7 +32,7 @@ pushd ${PGL_DIST_LINK}
        into ${PGL_DIST_LINK}/exports/pgcore
 "
 
-    OBJDUMP=${PGL_DIST_LINK}/exports/pgcore.wasm-objdump \
+    OBJDUMP=${PG_BUILD_DUMPS}/pgcore.wasm-objdump \
      PGDUMP=${PGL_DIST_LINK}/exports/pgcore.exports \
      python3 ${WORKSPACE}/wasm-build/getsyms.py exports > ${PGL_DIST_LINK}/exports/pgcore
 popd
