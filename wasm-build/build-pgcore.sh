@@ -40,7 +40,7 @@ Fatal: failed to apply patch : $one
             fi
         done
         touch postgresql-${PG_BRANCH}.patched
-        popd
+        popd # postgresql-${PG_BRANCH}
     fi
 
     # either a submodule dir or a symlink.
@@ -311,8 +311,12 @@ END
 
     # same script handle emcc and wasi
 
-    cat > pg-make.sh <<END
-#!/bin/bash
+    echo "#!/bin/bash
+# /tmp/portable.opts
+
+" > pg-make.sh
+    cat /tmp/portable.opts  >> pg-make.sh
+    cat >> pg-make.sh <<END
 if $WASI
 then
     . ${SDKROOT}/wasm32-wasi-shell.sh
@@ -379,18 +383,16 @@ END
         fi
 
         pushd ${PGROOT}
-
-        find . -type f | grep -v plpgsql > ${PGROOT}/pg.${BUILD}.installed
+            find . -type f | grep -v plpgsql > ${PGROOT}/pg.${BUILD}.installed
         popd
 
-        goback=$(pwd)
-        popd
-        python3 wasm-build/pack_extension.py builtin
-        pushd $goback
+        pushd ${WORKSPACE}
 
-        pushd ${PGROOT}
-        find . -type f  > ${PGROOT}/pg.${BUILD}.installed
-        popd
+            python3 wasm-build/pack_extension.py builtin
+
+            pushd ${PGROOT}
+                find . -type f  > ${PGROOT}/pg.${BUILD}.installed
+            popd
 
     else
         cat /tmp/install.log

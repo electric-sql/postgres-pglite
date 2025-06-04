@@ -1,5 +1,31 @@
 #!/bin/bash
-mkdir -p /tmp/sdk
+
+SDKROOT=${SDKROOT:-/tmp/sdk}
+mkdir -p ${SDKROOT}
+
+if grep -q __emscripten_tempret_get ${SDKROOT}/emsdk/upstream/emscripten/src/library_dylink.js
+then
+    echo -n
+else
+    pushd ${SDKROOT}/emsdk
+    patch -p1 <<END
+--- emsdk/upstream/emscripten/src/library_dylink.js
++++ emsdk.fix/upstream/emscripten/src/library_dylink.js
+@@ -724,6 +724,8 @@
+             stubs[prop] = (...args) => {
+               resolved ||= resolveSymbol(prop);
+               if (!resolved) {
++                if (prop==='getTempRet0')
++                    return __emscripten_tempret_get(...args);
+                 throw new Error(\`Dynamic linking error: cannot resolve symbol \${prop}\`);
+               }
+               return resolved(...args);
+END
+    popd
+fi
+
+
+
 if ${NO_SDK_CHECK:-false}
 then
     exit 0

@@ -77,7 +77,7 @@
 config sample expected in options.config :
 
     {
-        "shared_preload_libraries" : ["pg_stat_statements"],
+        "shared_preload_libraries" : ["'pg_stat_statements'"],
         "compute_query_id" : "on",
         "pg_stat_statements.max" : "10000",
         "pg_stat_statements.track": "all",
@@ -87,23 +87,33 @@ config sample expected in options.config :
 
 async function pgl_conf(vm, kv) {
 
-    var lines = vm.os.codec.decode(vm.FS.readFile(vm.PGDATA + "/postgresql.conf")).split('\n');
+    //var lines = vm.os.codec.decode(vm.FS.readFile(vm.PGDATA + "/postgresql.conf")).split('\n');
+    var lines = []
+    for (const line of vm.os.codec.decode(vm.FS.readFile(vm.PGDATA + "/postgresql.conf")).split('\n')) {
+        var testl = line.trimStart().split("#")[0].trimEnd()
+        if (testl.length<4)
+            continue
+        if (testl.startsWith("#"))
+            continue
+        lines.push(testl)
+    }
 
     var buf = []
     var newlines = [];
 
-    //return;
 
     for (var k in kv)
     {
         var old = ""
         for (var line = 0; line < lines.length; line++) {
-            if (lines[line].startsWith(k)) {
-                old = lines[line];
-            } else {
-                buf.push(lines[line])
+            var testl = lines[line];
+            if (testl.startsWith(k)) {
+                old = testl;
+                lines[line] = "# " + testl
+                break
             }
         }
+
         var values = []
         if (kv[k] instanceof Array) {
             // TODO extract array of , from old
@@ -115,24 +125,21 @@ async function pgl_conf(vm, kv) {
             values.push(kv[k].toString())
         }
 
-
-        const newline = `\n${k} = ${values.join(',')}\n`
-
-        if (!old.length) {
-            console.log("NEW :", newline)
-        } else {
-            if (old==newline)
-                console.log("no conf change :", newline)
-            else
-                console.error("EDIT :",old,'->', newline)
-        }
+        const newline = `${k} = ${values.join(',')}`
         newlines.push(newline)
     }
+
     if (newlines.length) {
-        buf.push(...newlines)
-console.log("BUF", buf)
-        vm.FS.writeFile( vm.PGDATA + "/postgresql.conf", buf.join("") )
-        vm.FS.syncfs(false, (e) => { if (e) console.error("pgl_conf error:", e)})
+        lines.push(...newlines)
+        for (const line of lines) {
+            console.log(line)
+        }
+
+        vm.FS.unlink(vm.PGDATA + "/postgresql.conf")
+        vm.FS.writeFile( vm.PGDATA + "/postgresql.conf", lines.join("\n") )
+        vm.FS.syncfs(false, (e) => { if (e) console.error("pgl_conf:", e)})
+
+        console.log("Config file written at :", vm.PGDATA + "/postgresql.conf" )
     }
 }
 
@@ -298,7 +305,7 @@ pglite.wasi + filesystem: <a href=pglite-wasi.tar.xz download>Download file</a>
             return text_codec.decode(  new Uint8Array(ary) )
         }
         window.b_utf8 = b_utf8
-
+//  /tmp/pglite/base/postgresql.conf
         function test_drive(step) {
             var data = null
             switch (test_step) {
@@ -452,10 +459,10 @@ ALTER TABLE test2 OWNER TO ${PGUSER};
             await Module.load_package("uuid-ossp", "uuid-ossp.tar.gz")
             await Module.load_package("pg_ivm", "pg_ivm.tar.gz")
 
-            // await Module.load_package("pg_stat_statements", "pg_stat_statements.tar.gz")
+            await Module.load_package("pg_stat_statements", "pg_stat_statements.tar.gz")
+
             // await Module.load_package("postgis", "postgis-3.tar.gz")
             // await Module.load_package("arrays", "arrays.tar.gz")
-            // await Module.load_package("pg_stat_statements", "pg_stat_statements.tar.gz")
             // vm._setenv(vm.stringToUTF8OnStack("REPL"),vm.stringToUTF8OnStack("Y"),1)
 
             console.warn("calling initdb")
@@ -531,8 +538,10 @@ SET ROLE ${PGUSER};
                 vm.PGDATA = PGDATA
                 if (editconf) {
                     await pgl_conf(vm, {
-                        "shared_preload_libraries" : ["pg_stat_statements"],
+                        "shared_preload_libraries" : ["'pg_stat_statements'"],
+                        "max_connections" : "5",
                         "compute_query_id" : "on",
+                        "shared_buffers" : "128kB",
                         "pg_stat_statements.max" : "10000",
                         "pg_stat_statements.track": "all",
                     })
@@ -724,7 +733,38 @@ SET ROLE ${PGUSER};
                     return
                 }
 
-                if (line.startsWith('pg_dump ')) {
+                const elems = line.trimStart().trimEnd().split(" ")
+                cmd = elems[0]
+                arg = elems.at(-1)
+                console.log("CMD:", cmd, "ARG:", arg)
+
+                switch (cmd) {
+                    case "rx":
+                        var filepath = arg
+                        console.log('getting file:', filepath)
+                        filename = filepath.split("/").at(-1)
+                        const blob = new Blob([vm.FS.readFile(filepath)])
+                        const elem = window.document.createElement('a');
+                        elem.href = window.URL.createObjectURL(blob, { oneTimeOnly: true });
+                        elem.download = filename;
+                        document.body.appendChild(elem);
+                        elem.click();
+                        document.body.removeChild(elem);
+                        return
+
+                    case "cat":
+                        for (const line of os.codec.decode(vm.FS.readFile(arg)).split("\n")) {
+                            vm.vt.xterm.write( line + "\r\n" )
+                        }
+                        return
+
+                }
+
+
+
+
+
+                if (line.startsWith("pg_dump ")) {
                     console.log("RL:", line)
 
                 } else {
