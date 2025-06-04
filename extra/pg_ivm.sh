@@ -7,10 +7,10 @@ pushd $PG_EXTRA
     then
         echo using local pgpg_ivm
     else
-#        wget https://github.com/sraoss/pg_ivm/archive/refs/tags/v1.10.tar.gz -O-|tar xfz -
-#        mv pg_ivm-* pg_ivm
+        wget https://github.com/sraoss/pg_ivm/archive/refs/tags/v1.11.tar.gz -O-|tar xfz -
+        mv pg_ivm-* pg_ivm
 
-        git clone --recursive --no-tags --depth 1 --single-branch --branch main https://github.com/sraoss/pg_ivm
+#        git clone --recursive --no-tags --depth 1 --single-branch --branch main https://github.com/sraoss/pg_ivm
 
         if $WASI
         then
