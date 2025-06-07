@@ -11,7 +11,7 @@ fi
 echo "pglite/build-$BUILD: begin target BUILD_PATH=$BUILD_PATH"
 
 WORKSPACE=$(pwd)
-PGROOT=${PGROOT:-/tmp/pglite}
+PGROOT=/tmp/pglite
 
 if [ -d ${WORKSPACE}/src/fe_utils ]
 then
@@ -174,6 +174,7 @@ else
     then
         # FULL
         LINKER="-sMAIN_MODULE=1 -sEXPORTED_FUNCTIONS=${EXPORTED_FUNCTIONS}"
+        unset EMCC_FORCE_STDLIBS
 #        LINKER="-sMAIN_MODULE=2 -sEXPORTED_FUNCTIONS=@${PGL_DIST_LINK}/exports/pglite"
     else
         # min
@@ -182,11 +183,11 @@ else
 
 #        LINKER="-sMAIN_MODULE=1 -sEXPORTED_FUNCTIONS=${EXPORTED_FUNCTIONS}"
 #        LINKER="-sMAIN_MODULE=1 -sEXPORTED_FUNCTIONS=@${PGL_DIST_LINK}/exports/pglite"
+
         # tailored
         LINKER="-sMAIN_MODULE=2 -sEXPORTED_FUNCTIONS=@${PGL_DIST_LINK}/exports/pglite"
+        EMCC_FORCE_STDLIBS=1
 
-        # LINKER="-sMAIN_MODULE=1 -sEXPORTED_FUNCTIONS=@${PGL_DIST_LINK}/exports/pglite"
-        #export LOPTS="-O2 -g2 --no-wasm-opt -sASSERTIONS=0"
     fi
 
     echo "
@@ -278,7 +279,7 @@ ________________________________________________________
 
 # LOPTS="-Os -g0"
 #
-        if EMCC_FORCE_STDLIBS=1 COPTS="$LOPTS" ${CC} ${CC_PGLITE} -o ${PGL_DIST_WEB}/pglite.html --shell-file ${WORKSPACE}/pglite-${PG_BRANCH}/repl.html \
+        if EMCC_FORCE_STDLIBS=$EMCC_FORCE_STDLIBS COPTS="$LOPTS" ${CC} ${CC_PGLITE} -o ${PGL_DIST_WEB}/pglite.html --shell-file ${WORKSPACE}/pglite-${PG_BRANCH}/repl.html \
          $PGPRELOAD \
          -sGLOBAL_BASE=${CMA_MB}MB -ferror-limit=1 \
          -sFORCE_FILESYSTEM=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web \
