@@ -186,7 +186,7 @@ else
 
         # tailored
         LINKER="-sMAIN_MODULE=2 -sEXPORTED_FUNCTIONS=@${PGL_DIST_LINK}/exports/pglite"
-        EMCC_FORCE_STDLIBS=1
+        export EMCC_FORCE_STDLIBS=1
 
     fi
 
@@ -279,7 +279,7 @@ ________________________________________________________
 
 # LOPTS="-Os -g0"
 #
-        if EMCC_FORCE_STDLIBS=$EMCC_FORCE_STDLIBS COPTS="$LOPTS" ${CC} ${CC_PGLITE} -o ${PGL_DIST_WEB}/pglite.html --shell-file ${WORKSPACE}/pglite-${PG_BRANCH}/repl.html \
+        if COPTS="$LOPTS" ${CC} ${CC_PGLITE} -o ${PGL_DIST_WEB}/pglite.html --shell-file ${WORKSPACE}/pglite-${PG_BRANCH}/repl.html \
          $PGPRELOAD \
          -sGLOBAL_BASE=${CMA_MB}MB -ferror-limit=1 \
          -sFORCE_FILESYSTEM=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web \
