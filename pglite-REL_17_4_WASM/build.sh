@@ -163,8 +163,9 @@ else
 
 
     EXPORTED_FUNCTIONS="_main,_use_wire,_pgl_initdb,_pgl_backend,_pgl_shutdown,_interactive_write,_interactive_read,_interactive_one"
+    EXPORTED_FUNCTIONS="$EXPORTED_FUNCTIONS,_get_channel,_get_buffer_size,_get_buffer_addr"
 
-    EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,FS_mount,FS_syncfs,FS_analyzePath,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
+#    EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,FS_mount,FS_syncfs,FS_analyzePath,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
     EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 
 
@@ -173,13 +174,20 @@ else
     then
         # FULL
         LINKER="-sMAIN_MODULE=1 -sEXPORTED_FUNCTIONS=${EXPORTED_FUNCTIONS}"
+        unset EMCC_FORCE_STDLIBS
+#        LINKER="-sMAIN_MODULE=2 -sEXPORTED_FUNCTIONS=@${PGL_DIST_LINK}/exports/pglite"
     else
         # min
         # LINKER="-sMAIN_MODULE=2"
 
+
+#        LINKER="-sMAIN_MODULE=1 -sEXPORTED_FUNCTIONS=${EXPORTED_FUNCTIONS}"
+#        LINKER="-sMAIN_MODULE=1 -sEXPORTED_FUNCTIONS=@${PGL_DIST_LINK}/exports/pglite"
+
         # tailored
-        LINKER="-sMAIN_MODULE=2 -sEXPORTED_FUNCTIONS=@exports"
-LINKER="-sMAIN_MODULE=1 -sEXPORTED_FUNCTIONS=${EXPORTED_FUNCTIONS}"
+        LINKER="-sMAIN_MODULE=2 -sEXPORTED_FUNCTIONS=@${PGL_DIST_LINK}/exports/pglite"
+        export EMCC_FORCE_STDLIBS=1
+
     fi
 
     echo "
@@ -231,39 +239,72 @@ ________________________________________________________
     if ${CC} ${CC_PGLITE} ${PGINC} -o ${BUILD_PATH}/pglite.o -c ${WORKSPACE}/pglite-${PG_BRANCH}/pg_main.c \
      -Wno-incompatible-pointer-types-discards-qualifiers
     then
-        echo "  * linking node raw version of pglite ${PG_BRANCH}"
+        echo "  * linking node raw version of pglite ${PG_BRANCH} (with all symbols)"
 
-        COPTS="$LOPTS" ${CC} ${CC_PGLITE} ${PGINC} -o ${PGL_DIST_JS}/pglite-js.js \
+        if COPTS="-O2 -g3 --no-wasm-opt" ${CC} ${CC_PGLITE} ${PGINC} -o ${PGL_DIST_JS}/pglite-js.js \
          -sGLOBAL_BASE=${CMA_MB}MB -ferror-limit=1  \
-         -sFORCE_FILESYSTEM=1 $EMCC_NODE \
+         -sFORCE_FILESYSTEM=1 $EMCC_NODE -sMAIN_MODULE=1 -sEXPORT_ALL -sASSERTIONS=0 \
              -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS \
              -sEXPORTED_RUNTIME_METHODS=${EXPORTED_RUNTIME_METHODS} \
          ${BUILD_PATH}/pglite.o \
-         $LINKER $LIBPGCORE \
+         $LIBPGCORE \
          $LINK_ICU \
          -lnodefs.js -lidbfs.js -lxml2 -lz
+        then
+            ./wasm-build/linkexport.sh
+            ./wasm-build/linkimports.sh
+        else
+            echo "
+    *   linking node raw version of pglite failed"; exit 250
 
-        echo "  * linking web version of pglite ( with .data initial filesystem, and html repl)"
-        COPTS="$LOPTS" ${CC} ${CC_PGLITE} -o ${PGL_DIST_WEB}/pglite.html --shell-file ${WORKSPACE}/pglite-${PG_BRANCH}/repl.html \
+        fi
+
+
+        echo "
+
+    * linking  version of pglite ( with .data initial filesystem, and html repl) (required symbols)
+
+        BUILD_PATH=${BUILD_PATH}
+        LINKER=$LINKER
+        LIBPGCORE=$LIBPGCORE
+
+
+"
+
+#   function from :
+#        ${BUILD_PATH}/src/interfaces/libpq/libpq.a
+#   required are to be found in  :
+#       pglite.o
+#
+
+# LOPTS="-Os -g0"
+#
+        if COPTS="$LOPTS" ${CC} ${CC_PGLITE} -o ${PGL_DIST_WEB}/pglite.html --shell-file ${WORKSPACE}/pglite-${PG_BRANCH}/repl.html \
          $PGPRELOAD \
          -sGLOBAL_BASE=${CMA_MB}MB -ferror-limit=1 \
          -sFORCE_FILESYSTEM=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web \
+         $LINKER \
          -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=Module \
-             -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS \
+             -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=1 \
              -sEXPORTED_RUNTIME_METHODS=${EXPORTED_RUNTIME_METHODS} \
          ${PGINC} ${BUILD_PATH}/pglite.o \
-         $LINKER $LIBPGCORE \
+         $LIBPGCORE \
          $LINK_ICU \
          -lnodefs.js -lidbfs.js -lxml2 -lz
-
+        then
+            du -hs du -hs ${PG_DIST}/*
+            touch ${WORKSPACE}/done
+        else
+            echo "
+    * linking web version of pglite failed"; exit 272
+        fi
     else
-        echo "compilation of libpglite ${PG_BRANCH} failed"
-        exit 220
+        echo "compilation of libpglite ${PG_BRANCH} failed"; exit 275
     fi
 fi
 
 
-du -hs ${PG_DIST}/*
+
 
 echo "pglite/build($BUILD): end"
 

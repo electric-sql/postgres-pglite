@@ -1,5 +1,4 @@
 #!/bin/bash
-
 export PG_VERSION=${PG_VERSION:-17.4}
 
 #set -x;
@@ -25,15 +24,20 @@ export PGROOT=${PGROOT:-/tmp/pglite}
 export WEBROOT=${WEBROOT:-/tmp/web}
 
 export PG_BUILD=${BUILD:-/tmp/sdk/build}
-export PGL_BUILD_NATIVE="${PG_BUILD}/pglite-native"
+export PGL_BUILD_NATIVE=${PG_BUILD}/pglite-native
+export PGL_BUILD_DUMPS=${PG_BUILD}/dumps
+
 
 export PG_DIST=${DIST:-/tmp/sdk/dist}
-export PG_DIST_EXT="${PG_DIST}/extensions-emsdk"
+export PG_DIST_EXT=${PG_DIST}/extensions-emsdk
 
-export PGL_DIST_JS="${PG_DIST}/pglite-js"
+export PGL_DIST_JS=${PG_DIST}/pglite-js
+export PGL_DIST_LINK=${PG_DIST}/pglite-link
 
-export PGL_DIST_NATIVE="${PG_DIST}/pglite-native"
-export PGL_DIST_WEB="${PG_DIST}/pglite-web"
+export PGL_DIST_NATIVE=${PG_DIST}/pglite-native
+export PGL_DIST_C=${PG_DIST}/pglite-native
+export PGL_DIST_WEB=${PG_DIST}/pglite-web
+
 
 export DEBUG=${DEBUG:-true}
 
@@ -47,6 +51,7 @@ export PGUSER=${PGUSER:-postgres}
 export WASI=${WASI:-false}
 export WASI_SDK=${WASI_SDK:-25.0}
 export PYBUILD=${PYBUILD:-3.13}
+export NATIVE=${NATIVE:-false}
 
 
 if $WASI
@@ -64,21 +69,49 @@ else
     BUILD=emscripten
     if $DEBUG
     then
-        # clang default to O0 but specifying -O0 may trigger memory start address bug in emsdk
-        export COPTS="-g3 --no-wasm-opt"
-        export LOPTS=${LOPTS:-"-g3 --no-wasm-opt -sASSERTIONS=1"}
+        # clang default to O0 but specifying -O0 may trigger align bug in emsdk
+        if [ -f /alpine ]
+        then
+            # dev debug
+            export COPTS="-O2 -g3 --no-wasm-opt"
+            export LOPTS=${LOPTS:-"-O2 -g3 --no-wasm-opt -sASSERTIONS=1"}
+        else
+            # docker debug ( exepected to be ide friendly )
+            export COPTS="-g3 --no-wasm-opt"
+            export LOPTS=${LOPTS:-"-g3 --no-wasm-opt -sASSERTIONS=1"}
+        fi
     else
         # DO NOT CHANGE COPTS - optimized wasm corruption fix
         export COPTS="-O2 -g3 --no-wasm-opt"
-        export LOPTS=${LOPTS:-"-Oz -g0 --closure=0 --closure-args=--externs=/tmp/externs.js -sASSERTIONS=0"}
+        export LOPTS=${LOPTS:-"-Os -g0 --closure=0 -sASSERTIONS=0"}
     fi
 fi
 
 export BUILD
 export BUILD_PATH=${PG_BUILD}/${BUILD}
 
+export PG_EXTRA=${PG_BUILD}/extra-${BUILD}
+
+
+# default to user writeable paths in /tmp/ .
+DIST_ALL="${PGROOT}/bin ${PG_DIST} ${PG_DIST_EXT} ${PGL_DIST_JS} ${PGL_BUILD_DUMPS} ${PGL_BUILD_NATIVE}"
+DIST_ALL="$DIST_ALL ${PGL_DIST_LINK} ${PGL_DIST_NATIVE} ${PGL_DIST_WEB} ${PGL_DIST_C}"
+DIST_ALL="$DIST_ALL ${PG_EXTRA}"
+
+if mkdir -p $DIST_ALL
+then
+    echo "checking for valid prefix ${PGROOT} ${PG_DIST}"
+else
+    sudo mkdir -p $DIST_ALL
+    sudo chown $(whoami) -R $DIST_ALL
+fi
+
+
+
+
+
 export PGDATA=${PGROOT}/base
-export PGPATCH=${WORKSPACE}/patches
+
 
 chmod +x ${PORTABLE}/*.sh
 [ -d ${PORTABLE}/extra ] && ${PORTABLE}/extra/*.sh
@@ -88,15 +121,6 @@ chmod +x ${PORTABLE}/*.sh
 # exit on error
 EOE=true
 
-
-# default to user writeable paths in /tmp/ .
-if mkdir -p ${PGROOT} ${PG_DIST} ${PG_DIST_EXT} ${PGL_DIST_JS} ${PGL_DIST_WEB}
-then
-    echo "checking for valid prefix ${PGROOT} ${PG_DIST}"
-else
-    sudo mkdir -p ${PGROOT} ${PGROOT}/bin ${PG_DIST} ${PG_DIST_EXT} ${PGL_DIST_WEB}
-    sudo chown $(whoami) -R ${PGROOT} ${PG_DIST}
-fi
 
 # TODO: also handle PGPASSFILE hostname:port:database:username:password
 # https://www.postgresql.org/docs/devel/libpq-pgpass.html
@@ -132,125 +156,127 @@ System node/pnpm ( may interfer) :
 # setup compiler+node. emsdk provides node 20, recent enough for bun.
 # TODO: but may need to adjust $PATH with stock emsdk.
 
-if ${WASI}
-then
-    pushd ${SDKROOT}
-     . wasisdk/wasisdk_env.sh
-    popd
-
-    if [ -f ${WASI_SYSROOT}/extra ]
+pushd ${SDKROOT}
+    if ${WASI}
     then
-        echo -n
+        . wasisdk/wasisdk_env.sh
     else
-        pushd ${WASI_SYSROOT}
-            VMLABS="https://github.com/vmware-labs/webassembly-language-runtimes/releases/download"
-            wget -q "${VMLABS}/libs%2Flibpng%2F1.6.39%2B20230629-ccb4cb0/libpng-1.6.39-wasi-sdk-20.0.tar.gz" -O-| tar xfz -
-            wget -q "${VMLABS}/libs%2Fzlib%2F1.2.13%2B20230623-2993864/libz-1.2.13-wasi-sdk-20.0.tar.gz"  -O-| tar xfz -
-            wget -q "${VMLABS}/libs%2Fsqlite%2F3.42.0%2B20230623-2993864/libsqlite-3.42.0-wasi-sdk-20.0.tar.gz" -O-| tar xfz -
-            wget -q "${VMLABS}/libs%2Flibxml2%2F2.11.4%2B20230623-2993864/libxml2-2.11.4-wasi-sdk-20.0.tar.gz" -O-| tar xfz -
-            wget -q "${VMLABS}/libs%2Fbzip2%2F1.0.8%2B20230623-2993864/libbzip2-1.0.8-wasi-sdk-20.0.tar.gz"  -O-| tar xfz -
-            wget -q "${VMLABS}/libs%2Flibuuid%2F1.0.3%2B20230623-2993864/libuuid-1.0.3-wasi-sdk-20.0.tar.gz" -O-| tar xfz -
-        popd
-        touch ${WASI_SYSROOT}/extra
-    fi
+        if which emcc
+        then
+            echo "emcc found in PATH=$PATH"
+        else
+            . ${SDKROOT}/wasm32-bi-emscripten-shell.sh
+        fi
 
-    # wasi does not use -sGLOBAL_BASE
-    CC_PGLITE="-DCMA_MB=${CMA_MB}"
-
-else
-    if which emcc
-    then
-        echo "emcc found in PATH=$PATH"
-    else
         if ${PORTABLE}/sdk.sh
         then
             echo "$PORTABLE : sdk check passed (emscripten)"
         else
             echo emsdk failed
-            exit 150
+            exit 176
         fi
 
-        . ${SDKROOT}/wasm32-bi-emscripten-shell.sh
+
+        export PG_LINK=${PG_LINK:-$(which emcc)}
+
+        echo "
+
+        Using provided emsdk from $(which emcc)
+        Using PG_LINK=$PG_LINK as linker
+
+            node : $(which node) $($(which node) -v)
+            PNPM : $(which pnpm)
+
+
+        "
     fi
-    export PG_LINK=${PG_LINK:-$(which emcc)}
+popd
 
-    echo "
-
-    Using provided emsdk from $(which emcc)
-    Using PG_LINK=$PG_LINK as linker
-
-        node : $(which node) $($(which node) -v)
-        PNPM : $(which pnpm)
+# used for not makefile (manual linking and pgl_main)
+# pass the "kernel" contiguous memory zone size to the C compiler with CMA_MB which will be multiplied by 1024x1024 in
+# preprocessed source.
+# nb: wasi does not use -sGLOBAL_BASE
+export CC_PGLITE="-DPYDK=1 -DPG_PREFIX=${PGROOT} -I${PGROOT}/include -DCMA_MB=${CMA_MB}"
 
 
+
+echo "
+    ----------------------------------------
+"
+env|grep PG |grep -v BUILD
+echo
+env|grep BUILD|grep -v PG
+echo
+env|grep WA
+echo
+env|grep PY
+
+echo "
+    ----------------------------------------
+PATH=${PATH}
+wasmtime=$(which wasmtime)
+    ----------------------------------------
 "
 
-    # custom code for node/web builds that modify pg main/tools behaviour
-    # this used by both node/linkweb build stages
-
-    # pass the "kernel" contiguous memory zone size to the C compiler.
-    CC_PGLITE="-DCMA_MB=${CMA_MB}"
-
-fi
-
-# also used for non make (linking and pgl_main)
-export CC_PGLITE="-DPYDK=1 -DPG_PREFIX=${PGROOT} -I${PGROOT}/include ${CC_PGLITE}"
 
 
 
 # ========================= symbol extractor ============================
-
-OBJDUMP=${OBJDUMP:-true}
-
-if $OBJDUMP
+if [ -f $PGROOT/bin/wasm-objdump ]
 then
-    if [ -f $PGROOT/bin/wasm-objdump ]
+    echo "wasm-objdump found"
+else
+    WRAPPER=$(which wasm-objdump)
+    WASIFILE=$(realpath ${WRAPPER}.wasi)
+    if $WRAPPER -h $WASIFILE | grep -q 'file format wasm 0x1'
     then
-        echo "wasm-objdump found"
+        mkdir -p $PGROOT/bin/
+        if cp -f $WRAPPER $WASIFILE $PGROOT/bin/
+        then
+            echo "wasm-objdump found and working, and copied to $PGROOT/bin/"
+        else
+            OBJDUMP=false
+        fi
     else
-        WRAPPER=$(which wasm-objdump)
-        WASIFILE=$(realpath ${WRAPPER}.wasi)
+        echo "
+    WARNING: $(which wasm-objdump) not working properly, trying alternate syntax
+
+"
+        cat > $WRAPPER <<END
+#!/bin/bash
+LNK="\$(realpath \$0).wasi"
+if [ -f "\$LNK" ]
+then
+    WASM=\$LNK
+else
+    WASM=\$1
+    shift
+    if [ -f "\${WASM}.wasi" ]
+    then
+        WASM="\${WASM}.wasi"
+    fi
+fi
+echo "WASI: \$WASM \$@" > /proc/self/fd/2
+$(which wasmtime) --env PYTHONDONTWRITEBYTECODE=1 --dir / \$WASM \$@
+END
+        chmod +x $WRAPPER
+
         if $WRAPPER -h $WASIFILE | grep -q 'file format wasm 0x1'
         then
             mkdir -p $PGROOT/bin/
             if cp -f $WRAPPER $WASIFILE $PGROOT/bin/
             then
-                echo "wasm-objdump found and working, and copied to $PGROOT/bin/"
-            else
-                OBJDUMP=false
+                echo "wasm-objdump fixed and working, copied to $PGROOT/bin/"
             fi
         else
             echo "
-        ERROR: $(which wasm-objdump) is not working properly ( is wasmtime ok ? )
+    ERROR: $(which wasm-objdump) not working properly ( is wasmtime ok ? )
 
-    "
-            OBJDUMP=false
+"
+            exit 262
         fi
     fi
-else
-    echo "
-
-    WARNING: OBJDUMP disabled, some newer or complex extensions may not load properly
-
-
-"
 fi
-
-if $OBJDUMP
-then
-    mkdir -p patches/imports patches/imports.pgcore
-else
-    mkdir -p patches/imports
-    touch patches/imports/plpgsql
-    echo "
-
-    WARNING:    wasm-objdump not found or OBJDUMP disabled, some extensions may not load properly
-
-
-"
-fi
-
-export OBJDUMP
 
 
 # ========================= pg core configuration ============================
@@ -301,7 +327,7 @@ END
         [ -f $dest/pg_debug.h ] || cp ${PG_DEBUG_HEADER} $dest/
     done
 
-    # store all pg options that have impact on cmd line initdb/boot
+    # store all options that have impact on cmd line initdb/boot compile+link
     cat > ${PGROOT}/pgopts.sh <<END
 export PG_BRANCH=$PG_BRANCH
 export CMA_MB=$CMA_MB
@@ -321,6 +347,7 @@ export PGL_BUILD_NATIVE=$PGL_BUILD_NATIVE
 export PG_DIST=$PG_DIST
 export PG_DIST_EXT=$PG_DIST_EXT
 export PGL_DIST_JS=$PGL_DIST_JS
+export PGL_DIST_LINK=$PGL_DIST_LINK
 
 export PGL_DIST_NATIVE=$PGL_DIST_NATIVE
 export PGL_DIST_WEB=$PGL_DIST_WEB
@@ -390,7 +417,7 @@ fi
 
 # put local zic in the path from build dir
 # put emsdk-shared and also pg_config from the install dir.
-export PATH=${WORKSPACE}/${BUILD_PATH}/bin:${PGROOT}/bin:$PATH
+export PATH=${WORKSPACE}/${BUILD_PATH}/bin:${PGROOT}/bin:${HOST_PREFIX}/bin:$PATH
 
 
 # At this stage, PG should be installed to PREFIX and ready for linking
@@ -401,130 +428,27 @@ export PATH=${WORKSPACE}/${BUILD_PATH}/bin:${PGROOT}/bin:$PATH
 # ===========================================================================
 # ===========================================================================
 #                             EXTENSIONS
+
+cd ${WORKSPACE}
+. ./wasm-build/build-ext.sh
+
 # ===========================================================================
 # ===========================================================================
 
-if echo " $*"|grep -q " contrib"
-then
-    mkdir -p ${PGROOT}/dumps
-
-    if $WASI
-    then
-        echo " ========= TODO WASI openssl ============== "
-        SKIP="\
- [\
- sslinfo bool_plperl hstore_plperl hstore_plpython jsonb_plperl jsonb_plpython\
- ltree_plpython sepgsql bool_plperl start-scripts\
- pgcrypto uuid-ossp xml2\
- ]"
-    else
-        # TEMP FIX for SDK
-        SSL_INCDIR=$EMSDK/upstream/emscripten/cache/sysroot/include/openssl
-        [ -f $SSL_INCDIR/evp.h ] || ln -s $PREFIX/include/openssl $SSL_INCDIR
-        SKIP="\
- [\
- sslinfo bool_plperl hstore_plperl hstore_plpython jsonb_plperl jsonb_plpython\
- ltree_plpython sepgsql bool_plperl start-scripts\
- ]"
-    fi
-
-    for extdir in postgresql-${PG_BRANCH}/contrib/*
-    do
-        if [ -f ${PGROOT}/dumps/dump.vector ]
-        then
-            echo "
-
-    *   NOT rebuilding extensions
-
-"
-            break
-        fi
-
-        if [ -d "$extdir" ]
-        then
-            ext=$(echo -n $extdir|cut -d/ -f3)
-            if echo -n $SKIP|grep -q "$ext "
-            then
-                echo skipping extension $ext
-            else
-                echo "
-
-        Building contrib extension : $ext : begin
-"
-                pushd ${BUILD_PATH}/contrib/$ext
-                if PATH=$PREFIX/bin:$PATH emmake make install 2>&1 >/dev/null
-                then
-                    echo "
-        Building contrib extension : $ext : end
-"
-                else
-                    echo "
-
-        Extension $ext from $extdir failed to build
-
-"
-                    exit 216
-                fi
-                popd
-
-                python3 ${PORTABLE}/pack_extension.py 2>&1 >/dev/null
-
-            fi
-        fi
-    done
-
-
-fi
-
-
-echo "
-
-        Extensions distribution folder : ${PG_DIST_EXT}
-
-
-"
 
 
 
 # only build extra when targeting pglite-wasm .
+rm -f pglite-link.sh
 
-if [ -f  ${WORKSPACE}/pglite-${PG_BRANCH}/build.sh ]
+if [ -f ${WORKSPACE}/pglite-${PG_BRANCH}/build.sh ]
 then
     if $WASI
     then
         echo "
-    * WASI build : skipping extra extensions and FS
+    * WASI build : skipping FS building
 "
     else
-
-        if echo " $*"|grep -q " extra"
-        then
-            for extra_ext in  ${EXTRA_EXT:-"vector"}
-            do
-                if $CI
-                then
-                    #if [ -d $PREFIX/include/X11 ]
-                    if true
-                    then
-                        echo -n
-                    else
-                        # install EXTRA sdk
-                        . /etc/lsb-release
-                        DISTRIB="${DISTRIB_ID}-${DISTRIB_RELEASE}"
-                        CIVER=${CIVER:-$DISTRIB}
-                        SDK_URL=https://github.com/pygame-web/python-wasm-sdk-extra/releases/download/$SDK_VERSION/python3.13-emsdk-sdk-extra-${CIVER}.tar.lz4
-                        echo "Installing $SDK_URL"
-                        curl -sL --retry 5 $SDK_URL | tar xvP --use-compress-program=lz4 | pv -p -l -s 15000 >/dev/null
-                        chmod +x ./extra/*.sh
-                    fi
-                fi
-                echo "======================= ${extra_ext} : $(pwd) ==================="
-
-                ./extra/${extra_ext}.sh || exit 522
-
-                python3 ${PORTABLE}/pack_extension.py
-            done
-        fi
 
         # this is for initial emscripten MEMFS
         export PGPRELOAD="\
@@ -540,52 +464,57 @@ then
     echo "
     * building + linking pglite-wasm (initdb/loop/transport/repl/backend)
 "
-    if ${WORKSPACE}/pglite-${PG_BRANCH}/build.sh
+
+    if $WASI
     then
-        if $WASI
-        then
-            echo "TODO: wasi pack/tests"
-        else
-            cat > pglite-link.sh <<END
+        echo "TODO: wasi pack/tests"
+    else
+        cat > pglite-link.sh <<END
 . ${PGROOT}/pgopts.sh
 . ${SDKROOT}/wasm32-bi-emscripten-shell.sh
-./pglite-${PG_BRANCH}/build.sh
-
-if [ -d pglite ]
+if ./pglite-${PG_BRANCH}/build.sh
 then
-    mkdir -p pglite/packages/pglite/release
-
-    for archive in ${PG_DIST_EXT}/*.tar
-    do
-        echo "    packing extension \$archive"
-        gzip -f -k -9 \$archive
-        mv \$archive.gz pglite/packages/pglite/release/
-    done
-
-    cp ${PGL_DIST_WEB}/pglite.* pglite/packages/pglite/release/
-    pushd pglite
-        export HOME=$PG_BUILD
-        [ -f $HOME/.local/share/pnpm/pnpm ] || wget -qO- https://get.pnpm.io/install.sh | ENV="$HOME/.bashrc" SHELL="$(which bash)" bash -
-        . $HOME/.bashrc
-        pnpm install -g npm vitest
-        pnpm install
-        pnpm run ts:build
-    popd
-
-    if [ -f /skiptest ]
+    if [ -d pglite ]
     then
-        echo skipping tests
-    else
-        if $CI
+        mkdir -p pglite/packages/pglite/release
+
+        for archive in ${PG_DIST_EXT}/*.tar
+        do
+            echo "    packing extension \$archive"
+            gzip -f -k -9 \$archive
+            mv \$archive.gz pglite/packages/pglite/release/
+        done
+
+        cp ${PGL_DIST_WEB}/pglite.* pglite/packages/pglite/release/
+        pushd pglite
+            export HOME=$PG_BUILD
+            export PNPM_HOME=$PG_BUILD
+            export PATH=$(echo -n ${SDKROOT}/emsdk/node/*.*.*/bin):$PNPM_HOME:$PATH
+            which pnpm || npm install -g pnpm
+            pnpm install -g npm vitest
+            pnpm install
+            pnpm run ts:build
+        popd
+
+        if [ -f /skiptest ]
         then
-            ./runtests.sh || exit 580
+            echo skipping tests
+        else
+            if $CI
+            then
+                ./runtests.sh || exit 580
+            fi
         fi
     fi
+else
+    echo "pglite linking failed"
+    exit 657
 fi
 END
-            chmod +x pglite-link.sh
-            ./pglite-link.sh
+        chmod +x pglite-link.sh
 
+        if ./pglite-link.sh
+        then
             if [ -d pglite ]
             then
                echo -n
@@ -596,11 +525,10 @@ END
                     gzip -f -k -9 $archive
                 done
             fi
-
+        else
+            exit 676
         fi
-    else
-        echo "linking libpglite wasm failed"
-        exit 602
     fi
-
+else
+    echo "linking libpglite skipped"
 fi
