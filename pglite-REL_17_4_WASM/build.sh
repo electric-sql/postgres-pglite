@@ -243,12 +243,12 @@ ________________________________________________________
         echo "  * linking node raw version of pglite ${PG_BRANCH} (with all symbols)"
 
         # wgpu ???
-        # export EMCC_FORCE_STDLIBS=1
+        export EMCC_FORCE_STDLIBS=1
 
         if COPTS="-O2 -g3 --no-wasm-opt" ${CC} ${CC_PGLITE} ${PGINC} -o ${PGL_DIST_JS}/pglite-js.js \
          -sGLOBAL_BASE=${CMA_MB}MB -ferror-limit=1  \
          -sFORCE_FILESYSTEM=1 $EMCC_NODE -sMAIN_MODULE=1 -sEXPORT_ALL -sASSERTIONS=0 \
-             -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS \
+             -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
              -sEXPORTED_RUNTIME_METHODS=${EXPORTED_RUNTIME_METHODS} \
          ${BUILD_PATH}/pglite.o \
          $LIBPGCORE \
