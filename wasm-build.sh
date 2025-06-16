@@ -24,19 +24,20 @@ export PGROOT=${PGROOT:-/tmp/pglite}
 export WEBROOT=${WEBROOT:-/tmp/web}
 
 export PG_BUILD=${BUILD:-/tmp/sdk/build}
-export PGL_BUILD_NATIVE=${PG_BUILD}/pglite-native
-export PGL_BUILD_DUMPS=${PG_BUILD}/dumps
+    export PG_BUILD_DUMPS=${PG_BUILD}/dumps
+    export PGL_BUILD_NATIVE=${PG_BUILD}/pglite-native
+
 
 
 export PG_DIST=${DIST:-/tmp/sdk/dist}
-export PG_DIST_EXT=${PG_DIST}/extensions-emsdk
+    export PG_DIST_EXT=${PG_DIST}/extensions-emsdk
 
-export PGL_DIST_JS=${PG_DIST}/pglite-js
-export PGL_DIST_LINK=${PG_DIST}/pglite-link
+    export PGL_DIST_JS=${PG_DIST}/pglite-js
+    export PGL_DIST_LINK=${PG_DIST}/pglite-link
 
-export PGL_DIST_NATIVE=${PG_DIST}/pglite-native
-export PGL_DIST_C=${PG_DIST}/pglite-native
-export PGL_DIST_WEB=${PG_DIST}/pglite-web
+    export PGL_DIST_NATIVE=${PG_DIST}/pglite-native
+    export PGL_DIST_C=${PG_DIST}/pglite-native
+    export PGL_DIST_WEB=${PG_DIST}/pglite-web
 
 
 export DEBUG=${DEBUG:-true}
@@ -75,11 +76,16 @@ else
             # dev debug
             export COPTS="-O2 -g3 --no-wasm-opt"
             export LOPTS=${LOPTS:-"-O2 -g3 --no-wasm-opt -sASSERTIONS=1"}
+
         else
             # docker debug ( exepected to be ide friendly )
             export COPTS="-g3 --no-wasm-opt"
             export LOPTS=${LOPTS:-"-g3 --no-wasm-opt -sASSERTIONS=1"}
         fi
+
+        export COPTS="-O2 -sDEMANGLE_SUPPORT=1 -frtti -g4 --no-wasm-opt"
+        export LOPTS=${LOPTS:-"-O1 -sDEMANGLE_SUPPORT=1 -frtti -g4 --no-wasm-opt -sASSERTIONS=1"}
+
     else
         # DO NOT CHANGE COPTS - optimized wasm corruption fix
         export COPTS="-O2 -g3 --no-wasm-opt"
@@ -94,7 +100,7 @@ export PG_EXTRA=${PG_BUILD}/extra-${BUILD}
 
 
 # default to user writeable paths in /tmp/ .
-DIST_ALL="${PGROOT}/bin ${PG_DIST} ${PG_DIST_EXT} ${PGL_DIST_JS} ${PGL_BUILD_DUMPS} ${PGL_BUILD_NATIVE}"
+DIST_ALL="${PGROOT}/bin ${PG_DIST} ${PG_DIST_EXT} ${PG_BUILD_DUMPS} ${PGL_DIST_JS} ${PGL_BUILD_NATIVE}"
 DIST_ALL="$DIST_ALL ${PGL_DIST_LINK} ${PGL_DIST_NATIVE} ${PGL_DIST_WEB} ${PGL_DIST_C}"
 DIST_ALL="$DIST_ALL ${PG_EXTRA}"
 
@@ -160,6 +166,10 @@ pushd ${SDKROOT}
     if ${WASI}
     then
         . wasisdk/wasisdk_env.sh
+        if ${PORTABLE}/sdk.sh
+        then
+            echo "$PORTABLE : sdk check passed (wasi)"
+        fi
     else
         if which emcc
         then
@@ -173,7 +183,7 @@ pushd ${SDKROOT}
             echo "$PORTABLE : sdk check passed (emscripten)"
         else
             echo emsdk failed
-            exit 176
+            exit 181
         fi
 
 
@@ -273,7 +283,7 @@ END
     ERROR: $(which wasm-objdump) not working properly ( is wasmtime ok ? )
 
 "
-            exit 262
+            exit 281
         fi
     fi
 fi
@@ -446,8 +456,25 @@ then
     if $WASI
     then
         echo "
-    * WASI build : skipping FS building
+        * WASI build : TODO: FS building
+        * WASI build : TODO: ext linking
 "
+        cat > pglite-link.sh <<END
+. ${PGROOT}/pgopts.sh
+. ${SDKROOT}/wasm32-bi-emscripten-shell.sh
+if ./pglite-${PG_BRANCH}/build.sh
+then
+    echo "TODO: tests"
+fi
+END
+
+        chmod +x pglite-link.sh
+
+        if ./pglite-link.sh
+        then
+            echo "TODO: extensions fs packing"
+        fi
+
     else
 
         # this is for initial emscripten MEMFS
@@ -459,16 +486,11 @@ then
 --preload-file placeholder@${PGROOT}/bin/postgres \
 --preload-file placeholder@${PGROOT}/bin/initdb\
 "
-    fi
 
-    echo "
-    * building + linking pglite-wasm (initdb/loop/transport/repl/backend)
+        echo "
+    * emsdk: building + linking pglite-wasm (initdb/loop/transport/repl/backend)
 "
 
-    if $WASI
-    then
-        echo "TODO: wasi pack/tests"
-    else
         cat > pglite-link.sh <<END
 . ${PGROOT}/pgopts.sh
 . ${SDKROOT}/wasm32-bi-emscripten-shell.sh
@@ -487,10 +509,15 @@ then
 
         cp ${PGL_DIST_WEB}/pglite.* pglite/packages/pglite/release/
         pushd pglite
-            export HOME=$PG_BUILD
-            export PNPM_HOME=$PG_BUILD
-            export PATH=$(echo -n ${SDKROOT}/emsdk/node/*.*.*/bin):$PNPM_HOME:$PATH
-            which pnpm || npm install -g pnpm
+            export PNPM_HOME=\$(echo -n $SDKROOT/emsdk/node/*.*.*/bin)
+            export PATH=\$PNPM_HOME:\$PATH
+
+            if which pnpm
+            then
+                echo -n
+            else
+                npm install -g pnpm@latest-10
+            fi
             pnpm install -g npm vitest
             pnpm install
             pnpm run ts:build
@@ -502,7 +529,7 @@ then
         else
             if $CI
             then
-                ./runtests.sh || exit 580
+                ./runtests.sh || exit 515
             fi
         fi
     fi
@@ -526,7 +553,7 @@ END
                 done
             fi
         else
-            exit 676
+            exit 539
         fi
     fi
 else

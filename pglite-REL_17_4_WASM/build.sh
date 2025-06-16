@@ -243,7 +243,7 @@ ________________________________________________________
         echo "  * linking node raw version of pglite ${PG_BRANCH} (with all symbols)"
 
         # wgpu ???
-        export EMCC_FORCE_STDLIBS=1
+        # export EMCC_FORCE_STDLIBS=1
 
         if COPTS="-O2 -g3 --no-wasm-opt" ${CC} ${CC_PGLITE} ${PGINC} -o ${PGL_DIST_JS}/pglite-js.js \
          -sGLOBAL_BASE=${CMA_MB}MB -ferror-limit=1  \
