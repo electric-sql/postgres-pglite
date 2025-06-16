@@ -1295,7 +1295,7 @@ puts("# 1164 : setup_connection");
 	 * Quote all identifiers, if requested.
 	 */
 	if (fe_utils_quote_all_identifiers)
-		ExecuteSqlStatement(AH, "SET fe_utils_quote_all_identifiers = true");
+		ExecuteSqlStatement(AH, "SET quote_all_identifiers = true");
 
 	/*
 	 * Adjust row-security mode, if supported.
