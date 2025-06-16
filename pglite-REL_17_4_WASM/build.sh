@@ -36,7 +36,7 @@ if $WASI
 then
 
 
-echo "
+    echo "
 _______________________ PG_BRANCH=${PG_BRANCH} _____________________
 
 wasi : $(which wasi-c) $(wasi-c -v)
@@ -139,11 +139,14 @@ END
             fi
         else
             echo "linking libpglite ${BUILD} failed in $(pwd)"
+            exit 142
         fi
     else
         echo "${BUILD} compilation of libpglite ${PG_BRANCH} failed"
-        exit 106
+        exit 146
     fi
+
+    touch ${WORKSPACE}/${BUILD}.done
 
 else
     . ${SDKROOT:-/opt/python-wasm-sdk}/wasm32-bi-emscripten-shell.sh
@@ -165,9 +168,7 @@ else
     EXPORTED_FUNCTIONS="_main,_use_wire,_pgl_initdb,_pgl_backend,_pgl_shutdown,_interactive_write,_interactive_read,_interactive_one"
     EXPORTED_FUNCTIONS="$EXPORTED_FUNCTIONS,_get_channel,_get_buffer_size,_get_buffer_addr"
 
-#    EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,FS_mount,FS_syncfs,FS_analyzePath,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
     EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
-
 
 
     if $DEBUG
@@ -175,7 +176,6 @@ else
         # FULL
         LINKER="-sMAIN_MODULE=1 -sEXPORTED_FUNCTIONS=${EXPORTED_FUNCTIONS}"
         unset EMCC_FORCE_STDLIBS
-#        LINKER="-sMAIN_MODULE=2 -sEXPORTED_FUNCTIONS=@${PGL_DIST_LINK}/exports/pglite"
     else
         # min
         # LINKER="-sMAIN_MODULE=2"
@@ -236,10 +236,14 @@ ________________________________________________________
         LINK_ICU=""
     fi
 
+
     if ${CC} ${CC_PGLITE} ${PGINC} -o ${BUILD_PATH}/pglite.o -c ${WORKSPACE}/pglite-${PG_BRANCH}/pg_main.c \
      -Wno-incompatible-pointer-types-discards-qualifiers
     then
         echo "  * linking node raw version of pglite ${PG_BRANCH} (with all symbols)"
+
+        # wgpu ???
+        export EMCC_FORCE_STDLIBS=1
 
         if COPTS="-O2 -g3 --no-wasm-opt" ${CC} ${CC_PGLITE} ${PGINC} -o ${PGL_DIST_JS}/pglite-js.js \
          -sGLOBAL_BASE=${CMA_MB}MB -ferror-limit=1  \
@@ -255,10 +259,14 @@ ________________________________________________________
             ./wasm-build/linkimports.sh
         else
             echo "
-    *   linking node raw version of pglite failed"; exit 250
+    *   linking node raw version of pglite failed"; exit 261
 
         fi
 
+        if $DEBUG
+        then
+            unset EMCC_FORCE_STDLIBS
+        fi
 
         echo "
 
@@ -293,13 +301,13 @@ ________________________________________________________
          -lnodefs.js -lidbfs.js -lxml2 -lz
         then
             du -hs du -hs ${PG_DIST}/*
-            touch ${WORKSPACE}/done
+            touch ${WORKSPACE}/${BUILD}.done
         else
             echo "
-    * linking web version of pglite failed"; exit 272
+    * linking web version of pglite failed"; exit 302
         fi
     else
-        echo "compilation of libpglite ${PG_BRANCH} failed"; exit 275
+        echo "compilation of libpglite ${PG_BRANCH} failed"; exit 305
     fi
 fi
 
