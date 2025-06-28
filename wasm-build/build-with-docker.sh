@@ -2,7 +2,7 @@
 
 # we are using a custom emsdk to build pglite wasm
 # this is available as a docker image under electricsql/pglite-builder
-IMG_NAME="electricsql/pglite-builder"
+IMG_NAME="docker.io/electricsql/pglite-builder"
 IMG_TAG="17.4_3.1.61.7bi"
 
 [ -f postgres-pglite/configure ] || ln -s . postgres-pglite
@@ -37,9 +37,9 @@ docker run $@ \
   --env-file .buildconfig \
   -e DEBUG=${DEBUG:-false} \
   --workdir=${DOCKER_WORKSPACE} \
-  -v ${WORKSPACE}/postgres-pglite/tmp/pglite:/tmp/pglite:rw \
-  -v ${WORKSPACE}/postgres-pglite/tmp/sdk/build:/tmp/sdk/build:rw \
-  -v ${WORKSPACE}/postgres-pglite:${DOCKER_WORKSPACE}:rw \
-  -v ${WORKSPACE}/postgres-pglite/dist:/tmp/sdk/dist:rw \
+  -v ${WORKSPACE}/postgres-pglite/tmp/pglite:/tmp/pglite:rw,z \
+  -v ${WORKSPACE}/postgres-pglite/tmp/sdk/build:/tmp/sdk/build:rw,z \
+  -v ${WORKSPACE}/postgres-pglite:${DOCKER_WORKSPACE}:rw,Z \
+  -v ${WORKSPACE}/postgres-pglite/dist:/tmp/sdk/dist:rw,z \
   $IMG_NAME:$IMG_TAG \
   bash --noprofile --rcfile ${SDKROOT}/wasm32-bi-emscripten-shell.sh -ci "( ./wasm-build.sh ${WHAT:-\"contrib extra\"} $PROMPT"
