@@ -432,7 +432,7 @@ main(int argc, char **argv)
 		{"lock-wait-timeout", required_argument, NULL, 2},
 		{"no-table-access-method", no_argument, &dopt.outputNoTableAm, 1},
 		{"no-tablespaces", no_argument, &dopt.outputNoTablespaces, 1},
-		{"quote-all-identifiers", no_argument, &fe_utils_quote_all_identifiers, true},
+		{"quote-all-identifiers", no_argument, (int *)(&fe_utils_quote_all_identifiers), true},
 		{"load-via-partition-root", no_argument, &dopt.load_via_partition_root, 1},
 		{"role", required_argument, NULL, 3},
 		{"section", required_argument, NULL, 5},
@@ -843,12 +843,9 @@ chdir("/");
 	 * Open the database using the Archiver, so it knows about it. Errors mean
 	 * death.
 	 */
-puts("# 813 : " __FILE__ "\r\n");
-    //setup();
 	ConnectDatabase(fout, &dopt.cparams, false);
-puts("# 815 : " __FILE__ "\r\n");
 	setup_connection(fout, dumpencoding, dumpsnapshot, use_role);
-puts("# 817 : " __FILE__ "\r\n");
+
 	/*
 	 * On hot standbys, never try to dump unlogged table data, since it will
 	 * just throw an error.
@@ -1203,10 +1200,9 @@ setup_connection(Archive *AH, const char *dumpencoding,
 				 const char *dumpsnapshot, char *use_role)
 {
 	DumpOptions *dopt = AH->dopt;
-puts("# 1206 : get_connection : "__FILE__);
 	PGconn	   *conn = GetConnection(AH);
 	const char *std_strings;
-puts("# 1209 : setup_connection");
+
 	PQclear(ExecuteSqlQueryForSingleRow(AH, ALWAYS_SECURE_SEARCH_PATH_SQL));
 
 	/*

@@ -712,7 +712,6 @@ pg_ftruncate(int fd, off_t length)
 
 retry:
 	ret = ftruncate(fd, length);
-printf("# 670 pg_ftruncate(int fd=%d, off_t length=%lld)=%d\n" __FILE__, fd, length, ret);
 	if (ret == -1 && errno == EINTR)
 		goto retry;
 
@@ -744,7 +743,6 @@ pg_truncate(const char *path, off_t length)
 
 retry:
 	ret = truncate(path, length);
-printf("# 670 pg_truncate(path=%s, off_t length=%lld)=%d\n" __FILE__, path, length, ret);
 	if (ret == -1 && errno == EINTR)
 		goto retry;
 #endif
