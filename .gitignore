@@ -44,3 +44,8 @@ lib*.pc
 /tmp_install/
 /portlock/
 /dist
+
+# emscripten build excludes
+# note: these need to be added to install, uninstall etc. jobs in each respective Makefile
+*.cjs
+*.wasm

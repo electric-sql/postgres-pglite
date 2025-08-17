@@ -77,14 +77,38 @@ ifeq ($(PORTNAME), emscripten)
 AR ?= llvm-ar
 LIBPGCORE ?= $(top_builddir)/libpgcore.a
 LIBPG = $(top_builddir)/libpostgres.a
+LIBPGMAIN = $(top_builddir)/libpgmain.a
 PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
 PGMAIN = main/main.o tcop/postgres.o
+PGLITE_MAIN = pglite-wasm/pg_main.c
+EXPORTED_FUNCTIONS="_main,_use_wire,_pgl_initdb,_pgl_backend,_pgl_shutdown,_interactive_write,_interactive_read,_interactive_one,_get_channel,_get_buffer_size,_get_buffer_addr"
+EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
+PGROOT=/install/pglite
+PGPRELOAD="--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql \
+	--preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql \
+	--preload-file ${PGROOT}/password@/tmp/pglite/password \
+	--preload-file ${PGROOT}/PGPASSFILE@/home/web_user/.pgpass \
+	--preload-file ${PGROOT}/empty@/tmp/pglite/bin/postgres \
+	--preload-file ${PGROOT}/empty@/tmp/pglite/bin/initdb"
 postgres: $(OBJS)
-	$(AR) rcs $(top_builddir)/libpgmain.a $(PGMAIN)
+	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
 	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
 	$(CC) -r -o $(top_builddir)/libpgcore.o -Wl,--whole-archive $(PGCORE)
 	$(AR) rcs $(LIBPGCORE) $(top_builddir)/libpgcore.o
-	COPTS="$(LOPTS)" $(CC) $(MAIN_MODULE) $(CFLAGS) $(LDFLAGS) -o $@ $(LIBPGCORE) $(top_builddir)/libpgmain.a $(LIBS)
+	COPTS="$(LOPTS)" $(CC) $(MAIN_MODULE) $(CFLAGS) $(LDFLAGS) -o $@$(X) $(LIBPGCORE) $(LIBPGMAIN) $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -DPYDK=1 -fpic -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
+	COPTS="$(LOPTS)" $(CC) $(CFLAGS) $(LDFLAGS) -DPYDK=1 -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -o pglite.html --shell-file $(top_builddir)/pglite-wasm/repl.html \
+        $(PGPRELOAD) \
+        -sGLOBAL_BASE=12MB -ferror-limit=1 \
+        -sFORCE_FILESYSTEM=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web \
+		-sEXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS) \
+        -sMAIN_MODULE=1 -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=Module \
+        -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=1 \
+        -sEXPORTED_RUNTIME_METHODS=$(EXPORTED_RUNTIME_METHODS) \
+        -L$(top_builddir) \
+        pglite.o \
+        -lpgcore \
+        -lnodefs.js -lidbfs.js -lxml2 -lz	
 endif
 
 ifeq ($(PORTNAME), wasi)
@@ -215,6 +239,11 @@ ifeq ($(MAKE_DLL), true)
 	$(INSTALL_DATA) libpostgres.a '$(DESTDIR)$(libdir)/libpostgres.a'
 endif
 endif
+ifeq ($(PORTNAME), emscripten)
+	$(INSTALL_DATA) $(LIBPG) '$(DESTDIR)$(libdir)/libpostgres.a'
+	$(INSTALL_DATA) $(LIBPGCORE) '$(DESTDIR)$(libdir)/libpgcore.a'
+	$(INSTALL_DATA) $(LIBPGMAIN) '$(DESTDIR)$(libdir)/libpgmain.a'
+endif
 	$(MAKE) -C catalog install-data
 	$(MAKE) -C tsearch install-data
 	$(MAKE) -C utils install-data
@@ -234,6 +263,12 @@ install-bin: postgres $(POSTGRES_IMP) installdirs
 ifeq ($(MAKE_EXPORTS), true)
 	$(INSTALL_DATA) $(POSTGRES_IMP) '$(DESTDIR)$(pkglibdir)/$(POSTGRES_IMP)'
 	$(INSTALL_PROGRAM) $(MKLDEXPORT) '$(DESTDIR)$(pgxsdir)/$(MKLDEXPORT_DIR)/mkldexport.sh'
+endif
+ifeq ($(PORTNAME), emscripten)
+	$(INSTALL_PROGRAM) postgres.wasm '$(DESTDIR)$(bindir)/postgres.wasm'
+	$(INSTALL_PROGRAM) pglite.html '$(DESTDIR)$(bindir)/pglite.html'
+	$(INSTALL_PROGRAM) pglite.wasm '$(DESTDIR)$(bindir)/pglite.wasm'
+	$(INSTALL_PROGRAM) pglite.js '$(DESTDIR)$(bindir)/pglite.js'	
 endif
 
 .PHONY: install-bin
@@ -274,6 +309,15 @@ ifeq ($(MAKE_DLL), true)
 	rm -f '$(DESTDIR)$(libdir)/libpostgres.a'
 endif
 endif
+ifeq ($(PORTNAME), emscripten)
+	rm -f '$(DESTDIR)$(libdir)/libpostgres.a'
+	rm -f '$(DESTDIR)$(libdir)/libpgcore.a'
+	rm -f '$(DESTDIR)$(libdir)/libpgmain.a'
+	rm -f '$(DESTDIR)$(bindir)/postgres.wasm'
+	rm -f '$(DESTDIR)$(bindir)/pglite.wasm'
+	rm -f '$(DESTDIR)$(bindir)/pglite.html'
+	rm -f '$(DESTDIR)$(bindir)/pglite.js'
+endif
 	$(MAKE) -C catalog uninstall-data
 	$(MAKE) -C tsearch uninstall-data
 	$(MAKE) -C utils uninstall-data
@@ -294,6 +338,9 @@ ifeq ($(PORTNAME), cygwin)
 endif
 ifeq ($(PORTNAME), win32)
 	rm -f postgres.dll libpostgres.a $(WIN32RES)
+endif
+ifeq ($(PORTNAME), emscripten)
+	rm -f postgres.wasm libpostgres.a libpgcore.a libpgmain.a pglite.o pglite.html pglite.js pglite.wasm
 endif
 
 distclean: clean

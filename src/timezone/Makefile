@@ -77,3 +77,6 @@ endif
 
 clean distclean:
 	rm -f zic$(X) $(ZICOBJS) abbrevs.txt
+ifeq ($(PORTNAME), emscripten)
+	rm -f zic.wasm
+endif
