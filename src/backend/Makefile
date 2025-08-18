@@ -84,12 +84,7 @@ PGLITE_MAIN = pglite-wasm/pg_main.c
 EXPORTED_FUNCTIONS="_main,_use_wire,_pgl_initdb,_pgl_backend,_pgl_shutdown,_interactive_write,_interactive_read,_interactive_one,_get_channel,_get_buffer_size,_get_buffer_addr"
 EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 PGROOT=/install/pglite
-PGPRELOAD="--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql \
-	--preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql \
-	--preload-file ${PGROOT}/password@/tmp/pglite/password \
-	--preload-file ${PGROOT}/PGPASSFILE@/home/web_user/.pgpass \
-	--preload-file ${PGROOT}/empty@/tmp/pglite/bin/postgres \
-	--preload-file ${PGROOT}/empty@/tmp/pglite/bin/initdb"
+PGPRELOAD=--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql --preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file ${PGROOT}/other/password@/tmp/pglite/password --preload-file ${PGROOT}/other/PGPASSFILE@/home/web_user/.pgpass --preload-file ${PGROOT}/other/empty@/tmp/pglite/bin/postgres --preload-file ${PGROOT}/other/empty@/tmp/pglite/bin/initdb
 postgres: $(OBJS)
 	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
 	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
@@ -108,7 +103,7 @@ postgres: $(OBJS)
         -L$(top_builddir) \
         pglite.o \
         -lpgcore \
-        -lnodefs.js -lidbfs.js -lxml2 -lz	
+        -lnodefs.js -lidbfs.js -lxml2 -lz
 endif
 
 ifeq ($(PORTNAME), wasi)
@@ -268,7 +263,8 @@ ifeq ($(PORTNAME), emscripten)
 	$(INSTALL_PROGRAM) postgres.wasm '$(DESTDIR)$(bindir)/postgres.wasm'
 	$(INSTALL_PROGRAM) pglite.html '$(DESTDIR)$(bindir)/pglite.html'
 	$(INSTALL_PROGRAM) pglite.wasm '$(DESTDIR)$(bindir)/pglite.wasm'
-	$(INSTALL_PROGRAM) pglite.js '$(DESTDIR)$(bindir)/pglite.js'	
+	$(INSTALL_PROGRAM) pglite.js '$(DESTDIR)$(bindir)/pglite.js'
+	$(INSTALL_PROGRAM) pglite.data '$(DESTDIR)$(bindir)/pglite.data'
 endif
 
 .PHONY: install-bin
@@ -317,6 +313,7 @@ ifeq ($(PORTNAME), emscripten)
 	rm -f '$(DESTDIR)$(bindir)/pglite.wasm'
 	rm -f '$(DESTDIR)$(bindir)/pglite.html'
 	rm -f '$(DESTDIR)$(bindir)/pglite.js'
+	rm -f '$(DESTDIR)$(bindir)/pglite.data'
 endif
 	$(MAKE) -C catalog uninstall-data
 	$(MAKE) -C tsearch uninstall-data
@@ -340,7 +337,7 @@ ifeq ($(PORTNAME), win32)
 	rm -f postgres.dll libpostgres.a $(WIN32RES)
 endif
 ifeq ($(PORTNAME), emscripten)
-	rm -f postgres.wasm libpostgres.a libpgcore.a libpgmain.a pglite.o pglite.html pglite.js pglite.wasm
+	rm -f postgres.wasm libpostgres.a libpgcore.a libpgmain.a pglite.o pglite.html pglite.js pglite.wasm pglite.data
 endif
 
 distclean: clean
