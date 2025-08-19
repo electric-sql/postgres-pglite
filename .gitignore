@@ -46,6 +46,8 @@ lib*.pc
 /dist
 
 # emscripten build excludes
-# note: these need to be added to install, uninstall etc. jobs in each respective Makefile
 *.cjs
 *.wasm
+pglite.data
+pglite.js
+pglite.html
