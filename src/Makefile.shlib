@@ -225,7 +225,7 @@ ifeq ($(SHLIB_EXPORTS),)
 endif
 
 ifeq ($(PORTNAME), emscripten)
-  LINK.shared       = emsdk-shared
+  LINK.shared       = $(COMPILER) -shared -sSIDE_MODULE=1 -Wno-unused-function
   ifdef soname
     # emscripten uses unversioned shared libraries
     shlib     = $(shlib_bare)
