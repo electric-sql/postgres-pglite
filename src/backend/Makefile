@@ -84,7 +84,7 @@ PGLITE_MAIN = pglite-wasm/pg_main.c
 EXPORTED_FUNCTIONS="_main,_use_wire,_pgl_initdb,_pgl_backend,_pgl_shutdown,_interactive_write,_interactive_read,_interactive_one,_get_channel,_get_buffer_size,_get_buffer_addr"
 EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 PGROOT=/install/pglite
-PGPRELOAD=--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql --preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file ${PGROOT}/other/password@/tmp/pglite/password --preload-file ${PGROOT}/other/PGPASSFILE@/home/web_user/.pgpass --preload-file ${PGROOT}/other/empty@/tmp/pglite/bin/postgres --preload-file ${PGROOT}/other/empty@/tmp/pglite/bin/initdb
+PGPRELOAD=--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql --preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(top_builddir)/other/password@/tmp/pglite/password --preload-file $(top_builddir)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/postgres --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/initdb
 postgres: $(OBJS)
 	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
 	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
