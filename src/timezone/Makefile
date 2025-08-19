@@ -48,7 +48,11 @@ endif
 # but GNU make versions <= 3.78.1 or perhaps later have a bug
 # that causes a segfault;  GNU make 3.81 or later fixes this.
 ifeq (,$(ZIC))
+ifeq ($(PORTNAME), emscripten)
+ZIC= /usr/sbin/zic
+else
 ZIC= ./zic
+endif
 endif
 
 zic: $(ZICOBJS) | submake-libpgport
