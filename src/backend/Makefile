@@ -91,16 +91,20 @@ postgres: $(OBJS)
 	$(CC) -r -o $(top_builddir)/libpgcore.o -Wl,--whole-archive $(PGCORE)
 	$(AR) rcs $(LIBPGCORE) $(top_builddir)/libpgcore.o
 	COPTS="$(LOPTS)" $(CC) $(MAIN_MODULE) $(CFLAGS) $(LDFLAGS) -o $@$(X) $(LIBPGCORE) $(LIBPGMAIN) $(LIBS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -DPYDK=1 -fpic -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
-	COPTS="$(LOPTS)" $(CC) $(CFLAGS) $(LDFLAGS) -DPYDK=1 -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -o pglite.html --shell-file $(top_builddir)/pglite-wasm/repl.html \
+pglite:
+	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
+	$(CC) \
+	-fPIC -sWASM_BIGINT -sMIN_SAFARI_VERSION=150000 -D__PYDK__=1 -O2 -m32 -D_FILE_OFFSET_BITS=64 -sSUPPORT_LONGJMP=emscripten -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn \
+	-DPYDK=1 -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -o pglite.html --shell-file $(top_builddir)/pglite-wasm/repl.html \
         $(PGPRELOAD) \
         -sGLOBAL_BASE=12MB -ferror-limit=1 \
-        -sFORCE_FILESYSTEM=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web \
-		-sEXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS) \
-        -sMAIN_MODULE=1 -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=Module \
-        -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=1 \
+        -sFORCE_FILESYSTEM=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
+        -sMAIN_MODULE=1 -sEXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS) \
+        -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=Module \
+        -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
         -sEXPORTED_RUNTIME_METHODS=$(EXPORTED_RUNTIME_METHODS) \
-        -L$(top_builddir) \
+        -I./src/include -I./src/ -I./src/interfaces/libpq \
+        -L/install/libs/lib -L$(top_builddir) \
         pglite.o \
         -lpgcore \
         -lnodefs.js -lidbfs.js -lxml2 -lz
@@ -261,10 +265,6 @@ ifeq ($(MAKE_EXPORTS), true)
 endif
 ifeq ($(PORTNAME), emscripten)
 	$(INSTALL_PROGRAM) postgres.wasm '$(DESTDIR)$(bindir)/postgres.wasm'
-	$(INSTALL_PROGRAM) pglite.html '$(DESTDIR)$(bindir)/pglite.html'
-	$(INSTALL_PROGRAM) pglite.wasm '$(DESTDIR)$(bindir)/pglite.wasm'
-	$(INSTALL_PROGRAM) pglite.js '$(DESTDIR)$(bindir)/pglite.js'
-	$(INSTALL_PROGRAM) pglite.data '$(DESTDIR)$(bindir)/pglite.data'
 endif
 
 .PHONY: install-bin
@@ -285,6 +285,16 @@ ifeq ($(MAKE_EXPORTS), true)
 	$(MKDIR_P) '$(DESTDIR)$(pkglibdir)'
 	$(MKDIR_P) '$(DESTDIR)$(pgxsdir)/$(MKLDEXPORT_DIR)'
 endif
+
+ifeq ($(PORTNAME), emscripten)
+install-pglite: pglite
+	$(INSTALL_PROGRAM) pglite.html '$(DESTDIR)$(bindir)/pglite.html'
+	$(INSTALL_PROGRAM) pglite.wasm '$(DESTDIR)$(bindir)/pglite.wasm'
+	$(INSTALL_PROGRAM) pglite.js '$(DESTDIR)$(bindir)/pglite.js'
+	$(INSTALL_PROGRAM) pglite.data '$(DESTDIR)$(bindir)/pglite.data'
+endif
+
+.PHONY: install-pglite
 
 
 ##########################################################################
