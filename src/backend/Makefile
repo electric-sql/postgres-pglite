@@ -81,10 +81,12 @@ LIBPGMAIN = $(top_builddir)/libpgmain.a
 PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
 PGMAIN = main/main.o tcop/postgres.o
 PGLITE_MAIN = pglite-wasm/pg_main.c
-EXPORTED_FUNCTIONS="_main,_use_wire,_pgl_initdb,_pgl_backend,_pgl_shutdown,_interactive_write,_interactive_read,_interactive_one,_get_channel,_get_buffer_size,_get_buffer_addr"
+EXPORTED_FUNCTIONS="_main,_use_wire,_pgl_initdb,_pgl_backend,_pgl_shutdown,_interactive_write,_interactive_read,_interactive_one,_get_channel,_get_buffer_size,_get_buffer_addr,_lowerstr"
 EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 PGROOT=/install/pglite
 PGPRELOAD=--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql --preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(top_builddir)/other/password@/tmp/pglite/password --preload-file $(top_builddir)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/postgres --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/initdb
+# -sEXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)
+# -sDYLINK_DEBUG=2
 postgres: $(OBJS)
 	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
 	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
@@ -99,7 +101,8 @@ pglite:
         $(PGPRELOAD) \
         -sGLOBAL_BASE=12MB -ferror-limit=1 \
         -sFORCE_FILESYSTEM=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
-        -sMAIN_MODULE=2 -sEXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS) \
+        -sMAIN_MODULE=2 \
+		-sEXPORTED_FUNCTIONS=@/tmp/exported_functions2.txt \
         -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=Module \
         -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
         -sEXPORTED_RUNTIME_METHODS=$(EXPORTED_RUNTIME_METHODS) \
