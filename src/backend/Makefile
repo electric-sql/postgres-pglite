@@ -93,7 +93,19 @@ postgres: $(OBJS)
 	$(CC) -r -o $(top_builddir)/libpgcore.o -Wl,--whole-archive $(PGCORE)
 	$(AR) rcs $(LIBPGCORE) $(top_builddir)/libpgcore.o
 	COPTS="$(LOPTS)" $(CC) $(MAIN_MODULE) $(CFLAGS) $(LDFLAGS) -o $@$(X) $(LIBPGCORE) $(LIBPGMAIN) $(LIBS)
-pglite:
+
+# Extensions use functions from the core PG. These need to be exported by the emscripten compiler.
+# The following target gathers all extension imports + the default ones (included.pglite.imports),
+# excludes the one in excluded.pglite.imports and add a leading _ to each.
+pglite-exported-functions:
+	$(MKDIR_P) '$(emscripten_imports_dir)'
+	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite-wasm/included.pglite.imports' | \
+	sort -u | \
+	grep -Fv -f '$(top_builddir)/pglite-wasm/excluded.pglite.imports' | \
+	sed 's/^/_/' \
+	> '$(emscripten_imports_dir)/exported_functions.txt'
+
+pglite: pglite-exported-functions
 	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
 	$(CC) \
 	-fPIC -sWASM_BIGINT -sMIN_SAFARI_VERSION=150000 -D__PYDK__=1 -O2 -m32 -D_FILE_OFFSET_BITS=64 -sSUPPORT_LONGJMP=emscripten -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn \
@@ -102,7 +114,7 @@ pglite:
         -sGLOBAL_BASE=12MB -ferror-limit=1 \
         -sFORCE_FILESYSTEM=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
         -sMAIN_MODULE=2 \
-		-sEXPORTED_FUNCTIONS=@/tmp/exported_functions2.txt \
+		-sEXPORTED_FUNCTIONS=@$(emscripten_imports_dir)/exported_functions.txt \
         -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=Module \
         -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
         -sEXPORTED_RUNTIME_METHODS=$(EXPORTED_RUNTIME_METHODS) \
@@ -351,6 +363,9 @@ ifeq ($(PORTNAME), win32)
 endif
 ifeq ($(PORTNAME), emscripten)
 	rm -f postgres.wasm libpostgres.a libpgcore.a libpgmain.a pglite.o pglite.html pglite.js pglite.wasm pglite.data
+endif
+ifeq ($(PORTNAME), emscripten)
+	rm -f '$(emscripten_imports_dir)/exported_functions.txt'
 endif
 
 distclean: clean
