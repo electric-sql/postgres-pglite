@@ -122,7 +122,12 @@ static char *PqSendBuffer;
 static int	PqSendBufferSize;	/* Size send buffer */
 static size_t PqSendPointer;	/* Next index to store a byte in PqSendBuffer */
 static size_t PqSendStart;		/* Next index to send a byte in PqSendBuffer */
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#ifdef PGL_MOBILE
+static char PqRecvBuffer_static[PQ_RECV_BUFFER_SIZE];
+static char *PqRecvBuffer;
+static int	PqRecvPointer;		/* Next index to read a byte from PqRecvBuffer */
+static int	PqRecvLength;		/* End of data available in PqRecvBuffer */
+#elif !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 static char PqRecvBuffer[PQ_RECV_BUFFER_SIZE];
 static int	PqRecvPointer;		/* Next index to read a byte from PqRecvBuffer */
 static int	PqRecvLength;		/* End of data available in PqRecvBuffer */
@@ -136,8 +141,15 @@ volatile FILE* queryfp = NULL;
 #endif
 
 /* pglite specific */
-extern int cma_rsize;
+extern volatile int cma_rsize;
 extern bool sockfiles;
+
+#ifdef PGL_MOBILE
+/* Mobile CMA buffer - set by mobile SDK, used by PostgreSQL */
+void* pgl_mobile_cma_buffer_addr = NULL;
+int pgl_mobile_cma_buffer_size = 0;
+volatile int pgl_mobile_cma_wsize = 0;
+#endif
 
 
 /*
@@ -326,6 +338,9 @@ pq_init(ClientSocket *client_sock)
 								  MyLatch, NULL);
 	AddWaitEventToSet(FeBeWaitSet, WL_POSTMASTER_DEATH, PGINVALID_SOCKET,
 					  NULL, NULL);
+#elif defined(PGL_MOBILE)
+    /* Mobile: Initialize PqRecvBuffer pointer to static buffer initially */
+    PqRecvBuffer = &PqRecvBuffer_static[0];
 #else /* WASM */
     /* because we may fill before starting reading message */
     PqRecvBuffer = &PqRecvBuffer_static[0];
@@ -928,6 +943,8 @@ pq_recvbuf(void)
 		else
 			PqRecvLength = PqRecvPointer = 0;
 	}
+
+
 #if defined(__EMSCRIPTEN__) || defined(__wasi__)
     if (queryfp && querylen) {
         int got = fread( PqRecvBuffer, 1, PQ_RECV_BUFFER_SIZE - PqRecvPointer, queryfp);
@@ -937,15 +954,18 @@ pq_recvbuf(void)
             PDEBUG("# 931: could close fp early here " __FILE__);
             queryfp = NULL;
         }
+
         if (got>0)
     		return 0;
     }
     return EOF;
 #endif
 
+
 	/* Ensure that we're in blocking mode */
 	socket_set_nonblocking(false);
 
+#ifndef PGL_MOBILE
 	/* Can fill buffer from PqRecvLength and upwards */
 	for (;;)
 	{
@@ -955,6 +975,10 @@ pq_recvbuf(void)
 
 		r = secure_read(MyProcPort, PqRecvBuffer + PqRecvLength,
 						PQ_RECV_BUFFER_SIZE - PqRecvLength);
+
+#ifdef PGL_MOBILE
+		elog(LOG, "pq_recvbuf: secure_read returned %d, errno=%d", r, errno);
+#endif
 
 		if (r < 0)
 		{
@@ -972,6 +996,9 @@ pq_recvbuf(void)
 				ereport(COMMERROR,
 						(errcode_for_socket_access(),
 						 errmsg("could not receive data from client: %m")));
+#ifdef PGL_MOBILE
+			elog(LOG, "pq_recvbuf: returning EOF due to read error");
+#endif
 			return EOF;
 		}
 		if (r == 0)
@@ -980,12 +1007,16 @@ pq_recvbuf(void)
 			 * EOF detected.  We used to write a log message here, but it's
 			 * better to expect the ultimate caller to do that.
 			 */
+#ifdef PGL_MOBILE
+			elog(LOG, "pq_recvbuf: returning EOF due to r=0");
+#endif
 			return EOF;
 		}
 		/* r contains number of bytes read, so just incr length */
 		PqRecvLength += r;
 		return 0;
 	}
+#endif /* !PGL_MOBILE */
 }
 
 /* --------------------------------
@@ -1044,8 +1075,12 @@ pq_getbyte_if_available(unsigned char *c)
 		*c = PqRecvBuffer[PqRecvPointer++];
 		return 1;
 	}
-#if defined(__EMSCRIPTEN__) || (__wasi__)
-puts("# 1044: pq_getbyte_if_available N/I in " __FILE__ ); abort();
+#ifdef PGL_MOBILE
+	/* Mobile: If no more data in buffer, return 0 (no data available) */
+	elog(LOG, "pq_getbyte_if_available: no data available in mobile CMA buffer");
+	return 0;
+#elif defined(__EMSCRIPTEN__) || (__wasi__)
+	puts("# 1044: pq_getbyte_if_available N/I in " __FILE__ ); abort();
 #else
 	/* Put the socket into non-blocking mode */
 	socket_set_nonblocking(true);
@@ -1203,7 +1238,30 @@ pq_startmsgread(void)
 		ereport(FATAL,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
 				 errmsg("terminating connection because protocol synchronization was lost")));
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+
+
+#ifdef PGL_MOBILE
+	/* Mobile: Set up CMA buffer pointers using external buffer address */
+	if (pgl_mobile_cma_buffer_addr && cma_rsize > 0) {
+		/* Reset pointer when no remaining data OR when starting a new batch */
+		if (!pq_buffer_remaining_data() || PqRecvLength != cma_rsize) {
+			PqRecvPointer = 0;
+		}
+		PqRecvLength = cma_rsize;
+		PqRecvBuffer = (char*)pgl_mobile_cma_buffer_addr;
+		
+		PqSendPointer = 0;
+		if (!PqSendBuffer_save)
+			PqSendBuffer_save = PqSendBuffer;
+		PqSendBuffer = (char*)pgl_mobile_cma_buffer_addr + cma_rsize + 2;
+		PqSendBufferSize = pgl_mobile_cma_buffer_size - cma_rsize - 2;
+		
+		elog(LOG, "pq_startmsgread: mobile CMA setup - rsize=%d, buffer_addr=%p, recv_buf=%p, send_buf=%p, send_size=%d", 
+			 cma_rsize, pgl_mobile_cma_buffer_addr, PqRecvBuffer, PqSendBuffer, PqSendBufferSize);
+		elog(LOG, "pq_startmsgread: buffer state - PqRecvPointer=%d, PqRecvLength=%d, remaining=%zd", 
+			 PqRecvPointer, PqRecvLength, pq_buffer_remaining_data());
+	}
+#elif defined(__EMSCRIPTEN__) || defined(__wasi__)
     if (!pq_buffer_remaining_data()) {
         if (sockfiles) {
             PqRecvBuffer = &PqRecvBuffer_static[0];

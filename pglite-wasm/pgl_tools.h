@@ -24,36 +24,49 @@ bool startswith(const char *str, const char *prefix) {
 }
 #endif
 
-void
-strconcat(char*p, const char *head, const char *tail) {
-    int   len;
+// Safe concatenation: tolerate NULL inputs and cap to STROPS_BUF
+static inline void
+strconcat(char *p, const char *head, const char *tail) {
+    size_t len = 0;
 
-    len = strnlen(head, STROPS_BUF );
-    p = memcpy(p, head, len);
-    p += len;
+    if (head && head[0] && len < STROPS_BUF) {
+        size_t l = strnlen(head, STROPS_BUF - len);
+        memcpy(p + len, head, l);
+        len += l;
+    }
 
-    len = strnlen(tail, STROPS_BUF - len);
-    p = memcpy(p, tail, len);
-    p += len;
-    *p = '\0';
+    if (tail && tail[0] && len < STROPS_BUF) {
+        size_t l = strnlen(tail, STROPS_BUF - len);
+        memcpy(p + len, tail, l);
+        len += l;
+    }
 
+    if (len >= STROPS_BUF)
+        len = STROPS_BUF - 1;
+    p[len] = '\0';
 }
 
-char *
+// getenv fallback that never returns NULL
+static inline char *
 setdefault(const char* key, const char *value) {
-    setenv(key, value, 0);
-    return strdup(getenv(key));
+    // Set only if not already set
+    if (value)
+        setenv(key, value, 0);
+    const char *res = getenv(key);
+    if (!res)
+        res = (value ? value : "");
+    return strdup(res);
 }
 
-char *
+static inline char *
 strcat_alloc(const char *head, const char *tail) {
     char buf[STROPS_BUF];
-    strconcat( &buf[0], head, tail);
+    strconcat(&buf[0], head, tail);
     return strdup((const char *)&buf[0]);
 }
 
-void
-mksub_dir(const char *dir,const char *sub) {
+static inline void
+mksub_dir(const char *dir, const char *sub) {
     char buf[STROPS_BUF];
     strconcat(&buf[0], dir, sub);
     mkdirp(&buf[0]);

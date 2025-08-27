@@ -1,4 +1,6 @@
 #include <setjmp.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 volatile int sf_connected = 0;
 FILE * single_mode_feed = NULL;
@@ -135,17 +137,41 @@ RePostgresSingleUserMain(int single_argc, char *single_argv[], const char *usern
 #if PGDEBUG
 printf("# 123: RePostgresSingleUserMain progname=%s for %s feed=%s\n", progname, single_argv[0], IDB_PIPE_SINGLE);
 #endif
-    single_mode_feed = fopen(IDB_PIPE_SINGLE, "r");
+    // On mobile, the single-user script is emitted under PREFIX/runtime
+    char idb_single_path[1024];
+    snprintf(idb_single_path, sizeof(idb_single_path), "%s/initdb.single.txt", PREFIX ? (const char*)PREFIX : WASM_PREFIX);
+    single_mode_feed = fopen(idb_single_path, "r");
+    if (!single_mode_feed) {
+        fprintf(stderr, "[pgl_single] failed to open %s (errno=%d)\n", idb_single_path, errno);
+        return; // nothing to replay; continue to backend startup
+    }
 
     // should be template1.
     const char *dbname = NULL;
 
+    // Reset getopt() state to ensure proper parsing after prior BootstrapModeMain
+    optind = 1; opterr = 1; optopt = 0; optarg = NULL;
+
+    // Log argv for diagnosis
+    fprintf(stderr, "[pgl_single] argc=%d argv:", single_argc);
+    for (int i = 0; i < single_argc; i++) {
+        fprintf(stderr, " %s", single_argv[i]);
+    }
+    fputc('\n', stderr);
 
     /* Parse command-line options. */
     process_postgres_switches(single_argc, single_argv, PGC_POSTMASTER, &dbname);
 #if PGDEBUG
 printf("# 134: dbname=%s\n", dbname);
 #endif
+    /* Log DataDir and control file presence before reading it */
+    {
+        char ctrl_path[1024];
+        snprintf(ctrl_path, sizeof(ctrl_path), "%s/global/pg_control", DataDir);
+        struct stat st; int rc = stat(ctrl_path, &st);
+        fprintf(stderr, "[pgl_single] DataDir=%s PGDATA(env)=%s ctrl=%s rc=%d errno=%d size=%lld\n",
+                DataDir, getenv("PGDATA"), ctrl_path, rc, errno, (long long)((rc==0)?st.st_size:0));
+    }
     LocalProcessControlFile(false);
 
     process_shared_preload_libraries();

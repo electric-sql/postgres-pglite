@@ -116,7 +116,7 @@ static void
 insert_timeout(TimeoutId id, int index)
 {
 	int			i;
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__) || defined(__wasi__) || defined(PGL_MOBILE)
     if (!insert_timeout_warned) //(index<0)
     {
         insert_timeout_warned = true;
@@ -220,7 +220,7 @@ enable_timeout(TimeoutId id, TimestampTz now, TimestampTz fin_time,
 static void
 schedule_alarm(TimestampTz now)
 {
-#if defined(__wasi__)
+#if defined(__wasi__) || defined(PGL_MOBILE)
     puts("# 224: schedule_alarm(TimestampTz now)");
     (void)signal_due_at;
 #else

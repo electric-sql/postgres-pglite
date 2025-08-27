@@ -45,6 +45,9 @@ typedef struct PGShmemHeader	/* standard header for all Postgres shmem */
 extern PGDLLIMPORT int shared_memory_type;
 extern PGDLLIMPORT int huge_pages;
 extern PGDLLIMPORT int huge_page_size;
+/* Dynamic shared memory GUCs (declared in dsm_impl.h as well) */
+extern PGDLLIMPORT int dynamic_shared_memory_type;
+extern PGDLLIMPORT int min_dynamic_shared_memory;
 
 /* Possible values for huge_pages and huge_pages_status */
 typedef enum

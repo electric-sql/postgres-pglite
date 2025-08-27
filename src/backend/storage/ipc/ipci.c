@@ -209,40 +209,60 @@ CreateSharedMemoryAndSemaphores(void)
 	size = CalculateShmemSize(&numSemas);
 	elog(DEBUG3, "invoking IpcMemoryCreate(size=%zu)", size);
 
+		/* Extra diagnostics on mobile: log computed sizes and GUCs */
+		{
+			const char *hp = GetConfigOption("huge_pages", false, false);
+			const char *hps = GetConfigOption("huge_pages_status", false, false);
+			const char *smt = GetConfigOption("shared_memory_type", false, false);
+			elog(DEBUG1, "shmem pre-create: size=%zu semaphores=%d huge_pages=%s huge_pages_status=%s shared_memory_type=%s",
+				 size, numSemas, hp ? hp : "?", hps ? hps : "?", smt ? smt : "?");
+		}
+
+
 	/*
 	 * Create the shmem segment
 	 */
 	seghdr = PGSharedMemoryCreate(size, &shim);
 
-	/*
-	 * Make sure that huge pages are never reported as "unknown" while the
-	 * server is running.
-	 */
-	Assert(strcmp("unknown",
-				  GetConfigOption("huge_pages_status", false, false)) != 0);
+		elog(DEBUG1, "PGSharedMemoryCreate returned header=%p, shim=%p", seghdr, shim);
+		elog(DEBUG1, "huge_pages_status after create=%s", GetConfigOption("huge_pages_status", false, false));
+		elog(DEBUG1, "calling InitShmemAccess");
+		InitShmemAccess(seghdr);
+		elog(DEBUG1, "InitShmemAccess ok");
+		#ifdef HAVE_SPINLOCKS
+		elog(DEBUG1, "spinlocks: native (HAVE_SPINLOCKS)");
+		#else
+		elog(DEBUG1, "spinlocks: emulated (no HAVE_SPINLOCKS)");
+		#endif
 
-	InitShmemAccess(seghdr);
 
-	/*
-	 * Create semaphores
-	 */
+	/* Make sure that huge pages are never reported as "unknown" while the server is running. */
+	Assert(strcmp("unknown", GetConfigOption("huge_pages_status", false, false)) != 0);
+
+	/* Create semaphores */
+	elog(DEBUG1, "calling PGReserveSemaphores(%d)", numSemas);
 	PGReserveSemaphores(numSemas);
+	elog(DEBUG1, "returned from PGReserveSemaphores");
 
-	/*
-	 * If spinlocks are disabled, initialize emulation layer (which depends on
-	 * semaphores, so the order is important here).
-	 */
-#ifndef HAVE_SPINLOCKS
+	/* If spinlocks are disabled, initialize emulation layer (depends on semaphores) */
+	#ifndef HAVE_SPINLOCKS
+	elog(DEBUG1, "calling SpinlockSemaInit");
 	SpinlockSemaInit();
-#endif
+	elog(DEBUG1, "SpinlockSemaInit ok");
+	#endif
 
-	/*
-	 * Set up shared memory allocation mechanism
-	 */
-	InitShmemAllocation();
 
-	/* Initialize subsystems */
-	CreateOrAttachShmemStructs();
+		elog(DEBUG1, "calling InitShmemAllocation");
+		InitShmemAllocation();
+		elog(DEBUG1, "InitShmemAllocation ok");
+
+		elog(DEBUG1, "calling CreateOrAttachShmemStructs");
+		CreateOrAttachShmemStructs();
+		elog(DEBUG1, "CreateOrAttachShmemStructs ok");
+
+
+
+
 
 #ifdef EXEC_BACKEND
 

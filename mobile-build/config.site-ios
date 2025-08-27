@@ -1,0 +1,12 @@
+# Autotools cache for cross-compiling PostgreSQL for iOS
+# Prevent configure from trying to run target binaries and preseed common checks
+ac_cv_func_getaddrinfo=yes
+ac_cv_func_getpwuid_r=yes
+ac_cv_header_pthread_h=yes
+ac_cv_header_locale_h=yes
+ac_cv_header_stdbool_h=yes
+ac_cv_func_getservbyname_r=no
+ac_cv_func_strlcat=no
+ac_cv_func_strlcpy=no
+# Add more as needed based on configure output
+

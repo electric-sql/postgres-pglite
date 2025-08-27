@@ -220,8 +220,15 @@ PGReserveSemaphores(int maxSemas)
 	 * ShmemAlloc() won't be ready yet.  (This ordering is necessary when we
 	 * are emulating spinlocks with semaphores.)
 	 */
-	sharedSemas = (PGSemaphore)
-		ShmemAllocUnlocked(PGSemaphoreShmemSize(maxSemas));
+	sharedSemas = (PGSemaphore) ShmemAllocUnlocked(PGSemaphoreShmemSize(maxSemas));
+	elog(DEBUG1, "PGReserveSemaphores: maxSemas=%d type=%s", maxSemas,
+	#ifdef USE_NAMED_POSIX_SEMAPHORES
+		"named-posix"
+	#else
+		"unnamed-posix"
+	#endif
+		);
+
 #endif
 
 	numSems = 0;

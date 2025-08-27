@@ -32,6 +32,7 @@
 #include <sys/mman.h>
 #endif
 #include <sys/stat.h>
+#include <errno.h>
 
 #include "common/pg_prng.h"
 #include "lib/ilist.h"
@@ -322,9 +323,22 @@ dsm_cleanup_for_mmap(void)
 	DIR		   *dir;
 	struct dirent *dent;
 
-	/* Scan the directory for something with a name of the correct format. */
+	/* Ensure the directory exists; if not, create it and return (nothing to clean). */
 	dir = AllocateDir(PG_DYNSHMEM_DIR);
+	if (dir == NULL)
+	{
+		if (errno == ENOENT)
+		{
+			/* First startup: create the directory and skip cleanup. */
+			(void) MakePGDirectory(PG_DYNSHMEM_DIR);
+			return;
+		}
+		/* On other errors, just return to avoid aborting bootstrap. */
+		elog(DEBUG2, "could not open '%s' for cleanup (errno=%d)", PG_DYNSHMEM_DIR, errno);
+		return;
+	}
 
+	/* Scan the directory for something with a name of the correct format. */
 	while ((dent = ReadDir(dir, PG_DYNSHMEM_DIR)) != NULL)
 	{
 		if (strncmp(dent->d_name, PG_DYNSHMEM_MMAP_FILE_PREFIX,

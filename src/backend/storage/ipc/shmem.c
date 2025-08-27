@@ -123,9 +123,12 @@ InitShmemAllocation(void)
 	 * Initialize the spinlock used by ShmemAlloc.  We must use
 	 * ShmemAllocUnlocked, since obviously ShmemAlloc can't be called yet.
 	 */
+	elog(DEBUG1, "InitShmemAllocation: pre-alloc totalsize=%zu freeoffset=%zu", shmhdr->totalsize, shmhdr->freeoffset);
 	ShmemLock = (slock_t *) ShmemAllocUnlocked(sizeof(slock_t));
+	elog(DEBUG1, "InitShmemAllocation: post-alloc freeoffset=%zu ShmemLock=%p", shmhdr->freeoffset, (void*) ShmemLock);
 
 	SpinLockInit(ShmemLock);
+	elog(DEBUG1, "InitShmemAllocation: SpinLockInit done");
 
 	/*
 	 * Allocations after this point should go through ShmemAlloc, which
@@ -249,8 +252,10 @@ ShmemAllocUnlocked(Size size)
 	Assert(ShmemSegHdr != NULL);
 
 	newStart = ShmemSegHdr->freeoffset;
+	elog(DEBUG1, "ShmemAllocUnlocked: req=%zu start=%zu totalsize=%zu", size, newStart, ShmemSegHdr->totalsize);
 
 	newFree = newStart + size;
+	elog(DEBUG1, "ShmemAllocUnlocked: newFree=%zu", newFree);
 	if (newFree > ShmemSegHdr->totalsize)
 		ereport(ERROR,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
