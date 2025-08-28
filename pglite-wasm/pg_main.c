@@ -45,7 +45,9 @@ static void* pgl_stderr_reader(void* arg) {
                 usleep(100000); // 100ms sleep to reduce spam
                 continue;
             }
+#ifdef __ANDROID__
             __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_stderr_reader] Read error errno=%d, breaking", errno);
+#endif
             break;
         }
         // n == 0: pipe closed
@@ -62,12 +64,16 @@ static void pgl_install_android_stderr_redirect(void) {
     }
     __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_install_android_stderr_redirect] Installing stderr redirect");
     if (pipe(pgl_stderr_pipe) == 0) {
+#ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_install_android_stderr_redirect] Pipe created: read_fd=%d write_fd=%d", pgl_stderr_pipe[0], pgl_stderr_pipe[1]);
+#endif
 
         // Make read end non-blocking to prevent hangs
         int flags = fcntl(pgl_stderr_pipe[0], F_GETFL);
         if (fcntl(pgl_stderr_pipe[0], F_SETFL, flags | O_NONBLOCK) < 0) {
+#ifdef __ANDROID__
             __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_install_android_stderr_redirect] Failed to set non-blocking: errno=%d", errno);
+#endif
         } else {
             __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_install_android_stderr_redirect] Set read end to non-blocking");
         }
@@ -75,18 +81,24 @@ static void pgl_install_android_stderr_redirect(void) {
         // Make stderr unbuffered and redirect
         setvbuf(stderr, NULL, _IONBF, 0);
         if (dup2(pgl_stderr_pipe[1], STDERR_FILENO) < 0) {
+#ifdef __ANDROID__
             __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_install_android_stderr_redirect] dup2 failed: errno=%d", errno);
+#endif
         } else {
             __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_install_android_stderr_redirect] stderr redirected to pipe");
         }
 
         if (pthread_create(&pgl_stderr_thread, NULL, pgl_stderr_reader, NULL) != 0) {
+#ifdef __ANDROID__
             __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_install_android_stderr_redirect] pthread_create failed: errno=%d", errno);
+#endif
         } else {
             __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_install_android_stderr_redirect] Reader thread created");
         }
     } else {
+#ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_install_android_stderr_redirect] pipe() failed: errno=%d", errno);
+#endif
     }
 }
 #endif
@@ -166,11 +178,13 @@ static void pgl_android_elog_hook(ErrorData* ed) {
     if (ed->elevel >= ERROR) prio = ANDROID_LOG_ERROR;
     else if (ed->elevel >= WARNING) prio = ANDROID_LOG_WARN;
     else if (ed->elevel >= DEBUG1) prio = ANDROID_LOG_DEBUG;
+#ifdef __ANDROID__
     __android_log_print(prio, "PGLitePG", "%s:%d %s: %s",
                         ed->filename ? ed->filename : "?",
                         ed->lineno,
                         ed->funcname ? ed->funcname : "?",
                         ed->message ? ed->message : "");
+#endif
 }
 #endif
 
@@ -413,7 +427,9 @@ main_pre(int argc, char *argv[]) {
 void
 main_post() {
 #ifdef __ANDROID__
+#ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** ENTRY: main_post() function called ***");
+#endif
 #endif
     PDEBUG("# 280: main_post()");
     /*
@@ -424,11 +440,15 @@ main_post() {
      * anywhere but stderr until GUC settings get loaded.
      */
 #ifdef __ANDROID__
+#ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** About to call MemoryContextInit() ***");
+#endif
 #endif
     MemoryContextInit();
 #ifdef __ANDROID__
+#ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** MemoryContextInit() completed ***");
+#endif
 #endif
 
     /*

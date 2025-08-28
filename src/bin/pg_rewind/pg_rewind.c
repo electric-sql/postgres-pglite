@@ -28,6 +28,11 @@
 #include "file_ops.h"
 #include "filemap.h"
 #include "getopt_long.h"
+
+#if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR)
+/* For iOS builds where system() is unavailable, return failure */
+#define system(cmd) (-1)
+#endif
 #include "pg_rewind.h"
 #include "rewind_source.h"
 #include "storage/bufpage.h"

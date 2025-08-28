@@ -29,6 +29,11 @@
 #include "fe_utils/string_utils.h"
 #include "getopt_long.h"
 
+#if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR)
+/* For iOS builds where system() is unavailable, return failure */
+#define system(cmd) (-1)
+#endif
+
 #define	DEFAULT_SUB_PORT	"50432"
 
 /* Command-line options */

@@ -68,6 +68,11 @@
 #include "port/pg_bitutils.h"
 #include "portability/instr_time.h"
 
+#if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR)
+/* For iOS builds where system() is unavailable, return failure */
+#define system(cmd) (-1)
+#endif
+
 /* X/Open (XSI) requires <math.h> to provide M_PI, but core POSIX does not */
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

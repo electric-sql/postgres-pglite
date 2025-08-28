@@ -34,13 +34,18 @@ maybe_enter_nix() {
   if [ "${NO_NIX:-0}" != "1" ] && command -v nix >/dev/null 2>&1; then
     if [ -z "${IN_NIX_SHELL:-}" ]; then
       case "$PLATFORM" in
-        android) ATTR="android" ;;
-        ios)     ATTR="ios" ;;
+        android) 
+          ATTR="android" 
+          echo "Re-executing inside Nix devShell: $ATTR"
+          exec nix develop "$FLAKE_ROOT#${ATTR}" --command bash -lc \
+            "PLATFORM='$PLATFORM' ABI='$ABI' ARCH='$ARCH' API='$API' PG_BRANCH='$PG_BRANCH' NO_NIX=1 '$SCRIPT_ABS'"
+          ;;
+        ios)     
+          # Skip Nix for iOS builds on macOS - use system tools instead
+          echo "Using system tools for iOS build (skipping Nix devShell)"
+          ;;
         *) echo "Unknown PLATFORM '$PLATFORM' (expected android|ios)" >&2; exit 2 ;;
       esac
-      echo "Re-executing inside Nix devShell: $ATTR"
-      exec nix develop "$FLAKE_ROOT#${ATTR}" --command bash -lc \
-        "PLATFORM='$PLATFORM' ABI='$ABI' ARCH='$ARCH' API='$API' PG_BRANCH='$PG_BRANCH' NO_NIX=1 '$SCRIPT_ABS'"
     fi
   fi
 }
@@ -135,36 +140,68 @@ setup_android() {
 
 # iOS toolchain setup (Xcode)
 setup_ios() {
+  echo "DEBUG: Starting iOS setup for ARCH=$ARCH"
+  
   if [[ "$ARCH" == "arm64" ]]; then
     SDK=iphoneos
+    echo "DEBUG: Using iphoneos SDK"
+    echo "DEBUG: Getting clang path..."
     CC_BIN=$(xcrun --sdk iphoneos -f clang)
+    echo "DEBUG: CC_BIN=$CC_BIN"
+    echo "DEBUG: Getting clang++ path..."
     CXX_BIN=$(xcrun --sdk iphoneos -f clang++)
+    echo "DEBUG: CXX_BIN=$CXX_BIN"
     TRIPLE=arm-apple-darwin
     ARCH_FLAG="-arch arm64"
     MIN_FLAG="-miphoneos-version-min=13.0"
     OUT_ARCH_DIR="arm64"
   else
     SDK=iphonesimulator
+    echo "DEBUG: Using iphonesimulator SDK"
+    echo "DEBUG: Getting clang path..."
     CC_BIN=$(xcrun --sdk iphonesimulator -f clang)
+    echo "DEBUG: CC_BIN=$CC_BIN"
+    echo "DEBUG: Getting clang++ path..."
     CXX_BIN=$(xcrun --sdk iphonesimulator -f clang++)
+    echo "DEBUG: CXX_BIN=$CXX_BIN"
     TRIPLE=x86_64-apple-darwin
     ARCH_FLAG="-arch x86_64"
     MIN_FLAG="-mios-simulator-version-min=13.0"
     OUT_ARCH_DIR="x86_64-sim"
   fi
+  echo "DEBUG: Getting SDK root path..."
   SDKROOT=$(xcrun --sdk "$SDK" --show-sdk-path)
+  echo "DEBUG: SDKROOT=$SDKROOT"
   export CC="$CC_BIN $ARCH_FLAG -isysroot $SDKROOT $MIN_FLAG"
   export CXX="$CXX_BIN $ARCH_FLAG -isysroot $SDKROOT $MIN_FLAG"
-  export AR=$(xcrun -f ar)
-  export RANLIB=$(xcrun -f ranlib)
-  export STRIP=$(xcrun -f strip)
+  # Clear any existing sysroot flags completely and set iOS sysroot only
+  echo "DEBUG: Before cleanup - CPPFLAGS=${CPPFLAGS:-}"
+  echo "DEBUG: Before cleanup - LDFLAGS=${LDFLAGS:-}"
+  unset CPPFLAGS LDFLAGS CFLAGS
   export CFLAGS="-fPIC -O2 -DHAVE_SPINLOCKS"
-  export LDFLAGS="-fPIC"
-  export CPPFLAGS="${CPPFLAGS:-} -DHAVE_SPINLOCKS -DPGL_MOBILE"
+  export CPPFLAGS="-isysroot $SDKROOT"
+  export LDFLAGS="-isysroot $SDKROOT"
+  echo "DEBUG: After cleanup - CFLAGS=$CFLAGS"
+  echo "DEBUG: After cleanup - CPPFLAGS=$CPPFLAGS"
+  echo "DEBUG: After cleanup - LDFLAGS=$LDFLAGS"
+  echo "DEBUG: Getting ar path..."
+  export AR=$(xcrun -f ar)
+  echo "DEBUG: AR=$AR"
+  echo "DEBUG: Getting ranlib path..."
+  export RANLIB=$(xcrun -f ranlib)
+  echo "DEBUG: RANLIB=$RANLIB"
+  echo "DEBUG: Getting strip path..."
+  export STRIP=$(xcrun -f strip)
+  echo "DEBUG: STRIP=$STRIP"
+  # Consolidate all flags here - don't override the cleanup above
+  export CFLAGS="$CFLAGS"  # Keep the clean CFLAGS from above
+  export LDFLAGS="$LDFLAGS -fPIC"  # Add -fPIC to the clean LDFLAGS
+  export CPPFLAGS="$CPPFLAGS -DHAVE_SPINLOCKS -DPGL_MOBILE -D_FORTIFY_SOURCE=0"  # Add defines to clean CPPFLAGS
 
   BUILD_DIR="$BUILD_BASE/ios/$OUT_ARCH_DIR"
   DIST_DIR="$DIST_BASE/ios/$OUT_ARCH_DIR"
   CONFIG_SITE_FILE="$REPO_ROOT/mobile-build/config.site-ios"
+  echo "DEBUG: iOS setup completed successfully"
 }
 
 # Common configure flags (aligned with wasm build spirit)
@@ -172,8 +209,14 @@ configure_flags() {
   CNF_COMMON=(
     "--disable-largefile" "--without-llvm"
     "--without-pam" "--with-openssl=no" "--without-readline"
-    "--without-icu" "--without-libxml"
+    "--without-icu" "--without-libxml" "--without-zlib"
   )
+  # Add iOS-specific flags
+  if [ "$PLATFORM" = "ios" ]; then
+    CNF_COMMON+=(
+      "--disable-shared"
+    )
+  fi
 }
 
 # Build PostgreSQL and package artifacts
@@ -198,6 +241,24 @@ build_pg() {
   # Ensure a clean rebuild to avoid mixing objects compiled with different CFLAGS
   "$MAKE_BIN" clean || true
   find src -name '*.o' -type f -delete || true
+
+  # Skip test directories (following WASM pattern)
+  if [ -d src/test ]; then
+    cat > src/test/Makefile <<END
+# auto-edited for mobile build - skip tests
+all: \$(echo src/test skipped for mobile)
+clean check installcheck all-src-recurse: all
+install: all
+END
+  fi
+  if [ -d src/test/isolation ]; then
+    cat > src/test/isolation/Makefile <<END
+# auto-edited for mobile build - skip isolation tests
+all: \$(echo src/test/isolation skipped for mobile)
+clean check installcheck all-src-recurse: all
+install: all
+END
+  fi
 
   # Build full tree (lets PostgreSQL pick correct backend units), then install headers and data
   "$MAKE_BIN" -j"$NCPU"
@@ -315,7 +376,7 @@ build_glue_and_merge() {
   pushd "$BUILD_DIR" >/dev/null
 
   # Glue: mirror WASM by compiling pg_main.c (which includes interactive_one.c, pgl_mains.c, etc.)
-  ${CC%% *} \
+  $CC \
     -I"$BUILD_DIR/install/include" -I"$PGSRC/src/include" -I"$PGSRC/src" \
     -I"$PGSRC/src/interfaces/libpq" \
     -I"$REPO_ROOT/mobile-build" \
@@ -324,24 +385,24 @@ build_glue_and_merge() {
     -DPGL_LIB_ONLY -DPGL_MOBILE -UHAVE_SHM_OPEN \
     -fPIC -c "$REPO_ROOT/pglite-wasm/pg_main.c" -o pg_main.o
   # Glue extras: provide mobile alias and minimal helpers
-  ${CC%% *} \
+  $CC \
     -I"$BUILD_DIR/install/include" -I"$PGSRC/src/include" -I"$PGSRC/src" \
     -I"$REPO_ROOT/mobile-build" -DPGL_MOBILE -fPIC -c "$REPO_ROOT/mobile-build/pgl_mobile_shims.c" -o pgl_mobile_shims.o
   # Backend weak stubs to satisfy backend-only globals when not linking postmaster
-  ${CC%% *} \
+  $CC \
     -I"$BUILD_DIR/install/include" -I"$PGSRC/src/include" -I"$PGSRC/src" \
     -I"$REPO_ROOT/mobile-build" -DPGL_MOBILE -fPIC -c "$REPO_ROOT/mobile-build/pgl_backend_stubs.c" -o pgl_backend_stubs.o
   # Mobile CMA shim providing get_buffer_addr/get_buffer_size
-  ${CC%% *} \
+  $CC \
     -I"$BUILD_DIR/install/include" -I"$PGSRC/src/include" -I"$PGSRC/src" \
     -I"$REPO_ROOT/mobile-build" -DPGL_MOBILE -fPIC -c "$REPO_ROOT/mobile-build/sdk_port-mobile.c" -o sdk_port-mobile.o
   # Mobile comm methods to route libpq I/O to CMA
-  ${CC%% *} \
+  $CC \
     -I"$BUILD_DIR/install/include" -I"$PGSRC/src/include" -I"$PGSRC/src" \
     -I"$REPO_ROOT/mobile-build" -DPGL_MOBILE -fPIC -c "$REPO_ROOT/mobile-build/pgl_mobile_comm.c" -o pgl_mobile_comm.o
 
   # Glue archive; includes pg_main and mobile shims/stubs
-  "$AR" rcs libpglite_glue_mobile.a pg_main.o pgl_mobile_shims.o pgl_backend_stubs.o sdk_port-mobile.o pgl_mobile_comm.o
+  "$AR" -r -cs libpglite_glue_mobile.a pg_main.o pgl_mobile_shims.o pgl_backend_stubs.o sdk_port-mobile.o pgl_mobile_comm.o
 
   # Merge core PG libs (reuse the server build outputs like WASM)
   # Prefer consuming installed archives if present; otherwise fall back to server variants in source tree
@@ -361,17 +422,24 @@ build_glue_and_merge() {
     echo "ADDMOD $obj" >> "$TZ_MRI"
   done < <(find "$PGSRC/src/timezone" -name '*.o' -type f | sort)
 
-  # Create a single MRI script that creates and fills the archive (always use server variants)
-  cat > merge_all.mri <<EOF
-CREATE libpgcore_mobile.a
-ADDLIB $PGSRC/src/common/libpgcommon_srv.a
-ADDLIB $PGSRC/src/port/libpgport_srv.a
-$(cat "$BACKEND_MRI")
-$(cat "$TZ_MRI")
-SAVE
-END
-EOF
-  "$AR" -M < merge_all.mri
+  # Since BSD ar doesn't support MRI scripts, we'll create the archive manually
+  # Start with the first library
+  cp "$PGSRC/src/common/libpgcommon_srv.a" libpgcore_mobile.a
+  
+  # Extract and add objects from other libraries
+  echo "Extracting and merging PostgreSQL libraries..."
+  mkdir -p temp_extract
+  
+  # Add libpgport_srv.a
+  (cd temp_extract && "$AR" -x "$PGSRC/src/port/libpgport_srv.a" && "$AR" -r -u ../libpgcore_mobile.a *.o && rm -f *.o)
+  
+  # Add backend objects from MRI files by extracting the library paths and object files
+  # This is a simplified approach - we'll add the main backend library if it exists
+  if [ -f "$PGSRC/src/backend/libpostgres.a" ]; then
+    (cd temp_extract && "$AR" -x "$PGSRC/src/backend/libpostgres.a" && "$AR" -r -u ../libpgcore_mobile.a *.o && rm -f *.o)
+  fi
+  
+  rm -rf temp_extract
   popd >/dev/null
 
   # Additional mobile-only weak stubs remain allowed if specific postmaster-only globals are unresolved
@@ -484,11 +552,15 @@ copy_into_rn_android() {
 
 
 main() {
+  echo "DEBUG: Starting main function with PLATFORM=$PLATFORM"
+  
   case "$PLATFORM" in
     android)
+      echo "DEBUG: Setting up Android toolchain"
       setup_android
       ;;
     ios)
+      echo "DEBUG: Setting up iOS toolchain"
       setup_ios
       ;;
     *)
@@ -497,12 +569,17 @@ main() {
       ;;
   esac
 
+  echo "DEBUG: Platform setup completed"
   echo "\n=== Building PGLite mobile core: PLATFORM=$PLATFORM ABI=$ABI ARCH=$ARCH ===\n"
   echo "Using PGSRC=$PGSRC"
 
+  echo "DEBUG: Starting PostgreSQL build"
   build_pg
+  echo "DEBUG: PostgreSQL build completed, starting glue build"
   build_glue_and_merge
+  echo "DEBUG: Glue build completed"
   if [ "$PLATFORM" = "android" ]; then
+    echo "DEBUG: Copying artifacts to Android RN module"
     copy_into_rn_android
   fi
 

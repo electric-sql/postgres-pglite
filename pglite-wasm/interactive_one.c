@@ -467,7 +467,7 @@ extern void pg_startcma();
 
 __attribute__((export_name("interactive_one"))) void
 interactive_one() {
-#ifdef PGL_MOBILE
+#ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_ERROR, "PGLiteMobile", "interactive_one: ENTRY - function called!");
     __android_log_print(ANDROID_LOG_ERROR, "PGLiteMobile", "interactive_one: cma_rsize=%d cma_wsize=%d", cma_rsize, cma_wsize);
     __android_log_print(ANDROID_LOG_ERROR, "PGLiteMobile", "interactive_one: is_wire=%d MyProcPort=%p", is_wire, (void*)MyProcPort);

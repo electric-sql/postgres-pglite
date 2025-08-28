@@ -6,7 +6,21 @@ ac_cv_header_pthread_h=yes
 ac_cv_header_locale_h=yes
 ac_cv_header_stdbool_h=yes
 ac_cv_func_getservbyname_r=no
+
+# Follow Android pattern: enable preadv/pwritev but disable declarations
+# This forces PostgreSQL to use pg_pread/pg_pwrite fallbacks like Android
+ac_cv_func_preadv=yes
+ac_cv_func_pwritev=yes
+ac_cv_have_decl_preadv=no
+ac_cv_have_decl_pwritev=no
+
+# Follow Android pattern: disable strlcat/strlcpy to avoid system conflicts
+# Let PostgreSQL provide its own implementations
 ac_cv_func_strlcat=no
 ac_cv_func_strlcpy=no
+
+# iOS doesn't allow system() calls for security reasons
+ac_cv_func_system=no
+
 # Add more as needed based on configure output
 

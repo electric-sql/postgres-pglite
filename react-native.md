@@ -111,29 +111,33 @@ JavaScript -> Wire Protocol -> CMA Buffer -> PostgreSQL Backend
 2. **Key Finding: WASM vs Mobile Memory Models**
 
    **WASM Approach (Working):**
+
    - Uses direct pointer arithmetic: `PqRecvBuffer = (char*)0x1`
    - Single unified memory space - address 0x1 maps directly to CMA buffer
    - No function calls to external libraries needed
 
    **Mobile Issue (Previous Broken Approach):**
+
    - Called `get_buffer_addr()` from PostgreSQL, creating separate buffer instance
    - React Native writes to buffer at address 0xAAAAA
    - PostgreSQL reads from different buffer at address 0xBBBBB
    - Function calls cross compilation unit boundaries, causing duplication
 
 3. **Solution: External Buffer Address Variables**
-   
+
    Instead of function calls, use external variables set by mobile SDK:
+
    ```c
    // In PostgreSQL - just declare external variables
    extern void* pgl_mobile_cma_buffer_addr;
    extern int pgl_mobile_cma_buffer_size;
-   
+
    // In pq_startmsgread() - use direct pointers like WASM
    PqRecvBuffer = (char*)pgl_mobile_cma_buffer_addr;
    ```
 
    This approach:
+
    - ✅ No mobile SDK inclusion in PostgreSQL core
    - ✅ Single shared buffer instance (created by mobile SDK)
    - ✅ Clean separation - PostgreSQL receives buffer addresses
@@ -298,56 +302,18 @@ The build uses a two-stage approach:
 ### Current Status (August 2025)
 
 **✅ What's Working:**
+
 - Basic CRUD operations (CREATE TABLE, INSERT, SELECT, UPDATE, DELETE)
-- Parameter serialization with correct PostgreSQL OIDs
-- PostgreSQL wire protocol communication via CMA buffers
+- Rudimentary serialization with correct PostgreSQL OIDs
+- PostgreSQL extended wire protocol communication via CMA buffers
 - Android build compilation and basic query execution
 - Memory context initialization for mobile environment
 
-**❌ Critical Issues Remaining:**
-
-1. **Database Persistence Issues** - App crashes when reusing existing databases across restarts
-   - Root cause: Mobile communication buffer initialization timing
-   - Workaround: Delete `pgdata` directory between app runs
-   - Status: Root cause identified, fix implemented but needs testing
-
-2. **iOS Support Missing** - Currently Android-only
-   - iOS build system not yet implemented
-   - iOS-specific mobile SDK integration needed
-
-3. **Code Duplication** - Custom parameter serialization duplicates web PGLite logic
-   - Need to extract common base package without web/WASM dependencies
-   - Replace custom mobile serialization with shared base methods
-   - Ensure consistent type handling across all platforms
-
-4. **Development Artifacts** - Excessive logging and temporary code remain
-   - Cleanup debug logging throughout codebase
-   - Remove experimental/iteration leftovers
-   - Optimize for production performance
-
 ### Remaining Work
 
-#### High Priority
-1. **Fix Database Reuse** - Complete the mobile communication initialization fix and thoroughly test
-2. **iOS Implementation** - Port Android work to iOS with proper build system integration
-3. **Extract Base Package** - Create shared `@electric-sql/pglite-base` without web dependencies
-4. **Replace Custom Serialization** - Use extracted base serialization methods for consistency
-
-#### Medium Priority
-5. **Comprehensive Testing** - Extensive testing across scenarios, edge cases, and platforms
-6. **Performance Optimization** - Remove development overhead, optimize for production
-7. **Error Handling** - Robust error handling and recovery mechanisms
-8. **Documentation** - Complete API documentation and usage examples
-
-#### Low Priority
-9. **Cleanup Codebase** - Remove debug logging, temporary code, and development artifacts
-10. **Advanced Features** - LISTEN/NOTIFY, transactions, advanced PostgreSQL features
-
-## Next Steps
-
-1. **Complete Database Reuse Fix** - Test and validate the mobile communication initialization fix
-2. **Begin iOS Port** - Set up iOS build system and adapt Android-specific code
-3. **Start Base Package Extraction** - Identify and extract platform-agnostic code from web PGLite
-4. **Establish Testing Infrastructure** - Automated testing for both Android and iOS
-5. **Production Cleanup** - Remove development artifacts and optimize for deployment
-6. **Documentation and Examples** - Comprehensive usage documentation
+- **iOS Implementation** - Port Android work to iOS with proper build system integration
+- **Extract Base Package** - Create shared `@electric-sql/pglite-base` without web dependencies so serialization and other logic can be shared with react native
+- **Replace Custom Serialization** - Use extracted base serialization methods for consistency
+- **Review PGL_MOBILE vs **EMSCRIPTEN**** - Find places where mobile is missing conditional compilation it might need
+- **Cleanup** - Remove debug logging, temporary code
+- **Add Extensions Support** - Load and use PostgreSQL extensions

@@ -32,8 +32,13 @@
 #include "storage/fd.h"
 #include "storage/ipc.h"
 
+#if defined(__wasi__) || (defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR))
 #if defined(__wasi__)
 #define system(cmd) system_wasi(cmd)
+#else
+/* For iOS builds where system() is unavailable, return failure */
+#define system(cmd) (-1)
+#endif
 #endif
 
 /*
