@@ -25,7 +25,7 @@
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
-#if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+#if defined(PGL_MOBILE)
 #define MOBILE_NO_SYSV 1
 #endif
 #ifndef MOBILE_NO_SYSV

@@ -5,9 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#ifdef __ANDROID__
-#include <android/log.h>
-#endif
+#include "../pglite-wasm/pgl_os.h"
 
 #include "postgres.h"
 #include "miscadmin.h"          // BackendType, sig_atomic_t globals
@@ -113,40 +111,10 @@ void proc_exit(int code) {
   // Outside bootstrap, do nothing — avoid exiting the host process.
 }
 
-// Minimal pq_init to avoid socket syscalls in in-process mobile mode
-// PG16+ uses void pq_init(void); older versions return Port*
-#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
-void pq_init(void) {
-  if (!MyProcPort) {
-    MyProcPort = (Port *) calloc(1, sizeof(Port));
-    if (MyProcPort) {
-      MyProcPort->sock = -1; // not a real socket
-    }
-  }
-  // Leave whereToSendOutput to be set by caller (interactive_one)
-}
-#else
-Port* pq_init(ClientSocket *server_fd) {
-  (void)server_fd;
-  if (!MyProcPort) {
-    MyProcPort = (Port *) calloc(1, sizeof(Port));
-    if (MyProcPort) {
-      MyProcPort->sock = -1;
-    }
-  }
-  return MyProcPort;
-}
-#endif
-
-// Ensure MyProcPort exists early so interactive_one() skips io_init()/pq_init
-__attribute__((constructor)) static void pgl_mobile_preinit(void) {
-  if (!MyProcPort) {
-    MyProcPort = (Port *) calloc(1, sizeof(Port));
-    if (MyProcPort) {
-      MyProcPort->sock = -1; // mark as non-socket
-    }
-  }
-}
+// Removed stub pq_init - the real pq_init in pqcomm.c handles PGL_MOBILE properly
+// and initializes critical variables like PqRecvLength/PqRecvPointer that error
+// recovery code depends on. Socket operations in pq_init are now properly guarded
+// to skip on mobile platforms while preserving essential buffer initialization.
 
 
 void pg_proc_exit(int code) { proc_exit(code); }

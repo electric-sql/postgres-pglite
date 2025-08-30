@@ -3,12 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
-#ifdef __ANDROID__
-#include <android/log.h>
-#ifndef ANDROID_LOG_INFO
-#define ANDROID_LOG_INFO ANDROID_LOG_DEBUG
-#endif
-#endif
+#include "../pglite-wasm/pgl_os.h"
 
 // Provide a stable mobile symbol name expected by the RN bridge.
 // Map pgl_shutdown() to the implementation in pgl_mains.c (pg_shutdown).
@@ -33,9 +28,7 @@ int find_other_exec(const char *argv0, const char *target, const char *versionst
   char buf[1024];
   snprintf(buf, sizeof(buf), "%s/bin/%s", prefix, target ? target : "postgres");
   strcpy(retpath, buf);
-#ifdef __ANDROID__
-  __android_log_print(ANDROID_LOG_INFO, "PGLiteMobile", "find_other_exec: argv0=%s target=%s ret=%s prefix=%s", argv0?argv0:"", target?target:"", retpath, prefix);
-#endif
+  PGL_LOG_INFO("find_other_exec: argv0=%s target=%s ret=%s prefix=%s", argv0?argv0:"", target?target:"", retpath, prefix);
   return 0; // success
 }
 
@@ -47,18 +40,20 @@ int find_my_exec(const char *argv0, char *retpath) {
   if (!prefix || !*prefix) prefix = getenv("ANDROID_DATA_DIR");
   if (!prefix || !*prefix) prefix = "/data/local/tmp/pglite";
   snprintf(retpath, 1024, "%s/bin/postgres", prefix);
-#ifdef __ANDROID__
-  __android_log_print(ANDROID_LOG_INFO, "PGLiteMobile", "find_my_exec: argv0=%s ret=%s prefix=%s", argv0?argv0:"", retpath, prefix);
-#endif
+  PGL_LOG_INFO("find_my_exec: argv0=%s ret=%s prefix=%s", argv0?argv0:"", retpath, prefix);
   return 0; // success
 }
 
 // Make initdb use our packaged catalogs instead of deriving from executable path.
-// Prefer PGSYSCONFDIR if set; otherwise derive from ANDROID_RUNTIME_DIR.
+// Prefer PGSYSCONFDIR if set; otherwise derive from platform runtime directory.
 void get_share_path(const char *my_exec_path, char *ret_path) {
   (void)my_exec_path;
   const char* conf = getenv("PGSYSCONFDIR");
+#ifdef __APPLE__
+  const char* runtime = getenv("IOS_RUNTIME_DIR");
+#else
   const char* runtime = getenv("ANDROID_RUNTIME_DIR");
+#endif
 
   // Candidates in order: PGSYSCONFDIR, runtime/share/postgresql, runtime/postgresql
   char cand1[1024] = {0}, cand2[1024] = {0}, cand3[1024] = {0};
@@ -73,11 +68,8 @@ void get_share_path(const char *my_exec_path, char *ret_path) {
   if (*cand2) { snprintf(bki2, sizeof(bki2), "%s/postgres.bki", cand2); }
   if (*cand3) { snprintf(bki3, sizeof(bki3), "%s/postgres.bki", cand3); }
 
-#ifdef __ANDROID__
-  __android_log_print(ANDROID_LOG_INFO, "PGLiteMobile",
-    "get_share_path: conf=%s runtime=%s cand1=%s cand2=%s cand3=%s exists(bki1)=%d exists(bki2)=%d exists(bki3)=%d",
+  PGL_LOG_INFO("get_share_path: conf=%s runtime=%s cand1=%s cand2=%s cand3=%s exists(bki1)=%d exists(bki2)=%d exists(bki3)=%d",
     conf?conf:"", runtime?runtime:"", cand1, cand2, cand3, file_exists(bki1), file_exists(bki2), file_exists(bki3));
-#endif
 
   if (*cand1 && file_exists(bki1)) { strcpy(ret_path, cand1); goto done; }
   if (*cand2 && file_exists(bki2)) { strcpy(ret_path, cand2); goto done; }
@@ -90,8 +82,6 @@ void get_share_path(const char *my_exec_path, char *ret_path) {
   strcpy(ret_path, "/data/local/tmp/pglite/share/postgresql");
 
 done:
-#ifdef __ANDROID__
-  __android_log_print(ANDROID_LOG_INFO, "PGLiteMobile", "get_share_path: chosen=%s", ret_path);
-#endif
+  PGL_LOG_INFO("get_share_path: chosen=%s", ret_path);
 }
 

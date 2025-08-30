@@ -9,12 +9,7 @@
 #include "libpq/pqformat.h"
 #include "libpq/pqcomm.h"
 #include "utils/guc.h"
-#ifdef __ANDROID__
-#include <android/log.h>
-#define MLOGI(...) __android_log_print(ANDROID_LOG_INFO, "PGLiteMobileComm", __VA_ARGS__)
-#else
-#define MLOGI(...)
-#endif
+#include "../pglite-wasm/pgl_os.h"
 
 // Mobile CMA shim
 #include "sdk_port-mobile.h"
@@ -75,13 +70,11 @@ static int mobile_flush(void)
             out_published += copyLen;
             channel = 1;
             pgl_mobile_cma_wsize = out_published;
-#ifdef __ANDROID__
-            __android_log_print(ANDROID_LOG_INFO, "PGLiteMobileComm", "flush: set pgl_mobile_cma_wsize=%d, addr=%p", pgl_mobile_cma_wsize, (void*)&pgl_mobile_cma_wsize);
-#endif
+            PGL_LOG_INFO("flush: set pgl_mobile_cma_wsize=%d, addr=%p", pgl_mobile_cma_wsize, (void*)&pgl_mobile_cma_wsize);
             // MLOGI("flush: published chunk=%d cum=%d at off=%d (reqLen=%d)", copyLen, out_published, off, reqLen);
         }
         else {
-            MLOGI("flush: mobileSendBuf.len=%d but cap insufficient (cap=%d, reqLen=%d)", mobileSendBuf.len, cap, cma_rsize);
+            PGL_LOG_INFO("flush: mobileSendBuf.len=%d but cap insufficient (cap=%d, reqLen=%d)", mobileSendBuf.len, cap, cma_rsize);
         }
         resetStringInfo(&mobileSendBuf);
     }
@@ -106,9 +99,7 @@ static bool mobile_is_send_pending(void)
 static int mobile_putmessage(char msgtype, const char *s, size_t len)
 {
     mobile_comm_init_if_needed();
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLiteMobileComm", "mobile_putmessage: msgtype='%c' len=%zu", msgtype, len);
-#endif
+    PGL_LOG_INFO("mobile_putmessage: msgtype='%c' len=%zu", msgtype, len);
 
     // Format: type + length (int32 network) + payload
     uint32 n32 = htonl((uint32)(len + 4));
@@ -159,9 +150,7 @@ static void mobile_putmessage_noblock(char msgtype, const char *s, size_t len)
 // Hook to install our methods
 void pgl_install_mobile_comm(void)
 {
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLiteMobileComm", "pgl_install_mobile_comm: Installing mobile comm methods");
-#endif
+    PGL_LOG_INFO("pgl_install_mobile_comm: Installing mobile comm methods");
     static const PQcommMethods MobileMethods = {
         .comm_reset = mobile_comm_reset,
         .flush = mobile_flush,
@@ -171,9 +160,7 @@ void pgl_install_mobile_comm(void)
         .putmessage_noblock = mobile_putmessage_noblock
     };
     PqCommMethods = &MobileMethods;
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLiteMobileComm", "pgl_install_mobile_comm: PqCommMethods set to %p", (void*)PqCommMethods);
-#endif
+    PGL_LOG_INFO("pgl_install_mobile_comm: PqCommMethods set to %p", (void*)PqCommMethods);
     
     /* Ensure CMA buffer is initialized and external variables are set */
     get_buffer_size(0);  /* This will trigger ensure_buf() */

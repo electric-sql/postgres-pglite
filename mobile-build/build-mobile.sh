@@ -2,14 +2,17 @@
 set -euo pipefail
 
 # Unified mobile build for PGLite native prebuilt libs
-# Platforms: ANDROID (arm64-v8a, x86_64) and iOS (arm64, x86_64-sim)
+# Platforms: ANDROID (arm64-v8a, x86_64) and iOS (arm64, arm64-sim, x86_64)
 #
 # Usage examples:
 #   PLATFORM=android ABI=arm64-v8a ANDROID_NDK=$HOME/Android/Sdk/ndk/27.1.12297006 \
 #     bash postgres-pglite/mobile-build/build-mobile.sh
 #
+#   PLATFORM=ios ARCH=arm64-sim \
+#     bash postgres-pglite/mobile-build/build-mobile.sh  # Apple Silicon simulator
+#
 #   PLATFORM=ios ARCH=arm64 \
-#     bash postgres-pglite/mobile-build/build-mobile.sh
+#     bash postgres-pglite/mobile-build/build-mobile.sh  # iOS device
 #
 # Outputs:
 #   dist/mobile/android/<abi>/{include,lib,runtime/share/postgresql}
@@ -17,7 +20,7 @@ set -euo pipefail
 
 PLATFORM=${PLATFORM:-android}  # android|ios
 ABI=${ABI:-arm64-v8a}          # android ABI (arm64-v8a|x86_64)
-ARCH=${ARCH:-arm64}            # ios arch (arm64|x86_64-sim)
+ARCH=${ARCH:-arm64-sim}        # ios arch (arm64|arm64-sim|x86_64)
 API=${API:-24}                 # android min API for toolchain wrapper
 PG_BRANCH=${PG_BRANCH:-REL_17_5_WASM}
 
@@ -144,20 +147,33 @@ setup_ios() {
   
   if [[ "$ARCH" == "arm64" ]]; then
     SDK=iphoneos
-    echo "DEBUG: Using iphoneos SDK"
+    echo "DEBUG: Using iphoneos SDK for device"
     echo "DEBUG: Getting clang path..."
     CC_BIN=$(xcrun --sdk iphoneos -f clang)
     echo "DEBUG: CC_BIN=$CC_BIN"
     echo "DEBUG: Getting clang++ path..."
     CXX_BIN=$(xcrun --sdk iphoneos -f clang++)
     echo "DEBUG: CXX_BIN=$CXX_BIN"
-    TRIPLE=arm-apple-darwin
+    TRIPLE=arm64-apple-darwin
     ARCH_FLAG="-arch arm64"
     MIN_FLAG="-miphoneos-version-min=13.0"
     OUT_ARCH_DIR="arm64"
-  else
+  elif [[ "$ARCH" == "arm64-sim" ]]; then
     SDK=iphonesimulator
-    echo "DEBUG: Using iphonesimulator SDK"
+    echo "DEBUG: Using iphonesimulator SDK for Apple Silicon simulator"
+    echo "DEBUG: Getting clang path..."
+    CC_BIN=$(xcrun --sdk iphonesimulator -f clang)
+    echo "DEBUG: CC_BIN=$CC_BIN"
+    echo "DEBUG: Getting clang++ path..."
+    CXX_BIN=$(xcrun --sdk iphonesimulator -f clang++)
+    echo "DEBUG: CXX_BIN=$CXX_BIN"
+    TRIPLE=arm64-apple-darwin
+    ARCH_FLAG="-arch arm64"
+    MIN_FLAG="-mios-simulator-version-min=13.0"
+    OUT_ARCH_DIR="arm64-sim"
+  elif [[ "$ARCH" == "x86_64" ]]; then
+    SDK=iphonesimulator
+    echo "DEBUG: Using iphonesimulator SDK for Intel simulator"
     echo "DEBUG: Getting clang path..."
     CC_BIN=$(xcrun --sdk iphonesimulator -f clang)
     echo "DEBUG: CC_BIN=$CC_BIN"
@@ -168,6 +184,9 @@ setup_ios() {
     ARCH_FLAG="-arch x86_64"
     MIN_FLAG="-mios-simulator-version-min=13.0"
     OUT_ARCH_DIR="x86_64-sim"
+  else
+    echo "ERROR: Unsupported iOS ARCH: $ARCH (supported: arm64, arm64-sim, x86_64)" >&2
+    exit 1
   fi
   echo "DEBUG: Getting SDK root path..."
   SDKROOT=$(xcrun --sdk "$SDK" --show-sdk-path)
@@ -437,7 +456,14 @@ build_glue_and_merge() {
   # This is a simplified approach - we'll add the main backend library if it exists
   if [ -f "$PGSRC/src/backend/libpostgres.a" ]; then
     (cd temp_extract && "$AR" -x "$PGSRC/src/backend/libpostgres.a" && "$AR" -r -u ../libpgcore_mobile.a *.o && rm -f *.o)
+  else
+    # If libpostgres.a doesn't exist, add all backend object files directly
+    echo "libpostgres.a not found, adding backend objects directly..."
+    find "$PGSRC/src/backend" -name '*.o' -type f -exec "$AR" -r -u libpgcore_mobile.a {} +
   fi
+  
+  # Also add timezone objects which are needed
+  find "$PGSRC/src/timezone" -name '*.o' -type f -exec "$AR" -r -u libpgcore_mobile.a {} +
   
   rm -rf temp_extract
   popd >/dev/null
@@ -550,6 +576,31 @@ copy_into_rn_android() {
   fi
 }
 
+# Copy artifacts into the React Native module for iOS
+copy_into_rn_ios() {
+  local RN_DIR="$FLAKE_ROOT/packages/pglite-react-native/ios"
+  
+  echo "Installing artifacts into RN iOS module at $RN_DIR"
+  mkdir -p "$RN_DIR/dist" || true
+  
+  # Copy static libraries
+  cp -f "$DIST_DIR/lib/libpgcore_mobile.a" "$RN_DIR/dist/libpgcore_mobile.a"
+  cp -f "$DIST_DIR/lib/libpglite_glue_mobile.a" "$RN_DIR/dist/"
+
+  # Copy runtime catalogs to iOS bundle format
+  local BUNDLE_ROOT="$RN_DIR/RuntimeResources/PGLiteRuntime"
+  if [ -d "$DIST_DIR/runtime/share" ]; then
+    mkdir -p "$BUNDLE_ROOT"
+    rsync -a --delete "$DIST_DIR/runtime/share/" "$BUNDLE_ROOT/share/" 2>/dev/null || {
+      rm -rf "$BUNDLE_ROOT/share"
+      mkdir -p "$BUNDLE_ROOT"
+      cp -R "$DIST_DIR/runtime/share" "$BUNDLE_ROOT/"
+    }
+    echo "Copied runtime catalogs to $BUNDLE_ROOT/share"
+  else
+    echo "Warning: runtime catalogs not found at $DIST_DIR/runtime/share"
+  fi
+}
 
 main() {
   echo "DEBUG: Starting main function with PLATFORM=$PLATFORM"
@@ -581,9 +632,14 @@ main() {
   if [ "$PLATFORM" = "android" ]; then
     echo "DEBUG: Copying artifacts to Android RN module"
     copy_into_rn_android
+    echo "\nArtifacts at: $DIST_DIR\n  - include/*\n  - lib/libpgcore_mobile.a\n  - lib/libpglite_glue_mobile.a\n  - runtime/share/postgresql (if present)\nAlso installed into RN module: packages/pglite-react-native/android/src/main/{jni,assets}\n"
+  elif [ "$PLATFORM" = "ios" ]; then
+    echo "DEBUG: Copying artifacts to iOS RN module"
+    copy_into_rn_ios
+    echo "\nArtifacts at: $DIST_DIR\n  - include/*\n  - lib/libpgcore_mobile.a\n  - lib/libpglite_glue_mobile.a\n  - runtime/share/postgresql (if present)\nAlso installed into RN module: packages/pglite-react-native/ios/{dist,RuntimeResources}\n"
+  else
+    echo "\nArtifacts at: $DIST_DIR\n  - include/*\n  - lib/libpgcore_mobile.a\n  - lib/libpglite_glue_mobile.a\n  - runtime/share/postgresql (if present)\n"
   fi
-
-  echo "\nArtifacts at: $DIST_DIR\n  - include/*\n  - lib/libpgcore_mobile.a\n  - lib/libpglite_glue_mobile.a\n  - runtime/share/postgresql (if present)\nAlso installed into RN module: packages/pglite-react-native/android/src/main/{jni,assets}\n"
 }
 
 main "$@"

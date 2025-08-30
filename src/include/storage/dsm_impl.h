@@ -48,9 +48,9 @@
     #define PG_DYNSHMEM_MMAP_FILE_PREFIX	"mmap."
 
 
-#elif defined(__ANDROID__)
+#elif defined(PGL_MOBILE)
     /*
-     * Android (bionic) lacks POSIX shm_* and SysV shm_* in usable form for our
+     * Android (bionic) and iOS lacks POSIX shm_* and SysV shm_* in usable form for our
      * build; prefer mmap-based DSM to avoid undeclared symbol errors. Use the
      * same on-disk directory names as upstream (relative to DataDir).
      */

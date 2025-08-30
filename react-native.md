@@ -260,7 +260,7 @@ The build uses a two-stage approach:
 ### Android Build
 
 - Configure with Android NDK toolchain
-- Compile to static libraries: `libpostgres_mobile.a`, `libpglite_glue_mobile.a`
+- Compile to static libraries: `libpgcore_mobile.a`, `libpglite_glue_mobile.a`
 - Place in `android/src/main/jni/<abi>/`
 - Link via CMake in the Nitro module
 
@@ -311,9 +311,9 @@ The build uses a two-stage approach:
 
 ### Remaining Work
 
-- **iOS Implementation** - Port Android work to iOS with proper build system integration
+- ~~**iOS Implementation** - Port Android work to iOS with proper build system integration~~
 - **Extract Base Package** - Create shared `@electric-sql/pglite-base` without web dependencies so serialization and other logic can be shared with react native
 - **Replace Custom Serialization** - Use extracted base serialization methods for consistency
-- **Review PGL_MOBILE vs **EMSCRIPTEN**** - Find places where mobile is missing conditional compilation it might need
+- **Review PGL_MOBILE vs **EMSCRIPTEN\*\*\*\* - Find places where mobile is missing conditional compilation it might need
 - **Cleanup** - Remove debug logging, temporary code
 - **Add Extensions Support** - Load and use PostgreSQL extensions

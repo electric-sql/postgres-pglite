@@ -63,7 +63,7 @@
 #ifdef HAVE_SHM_OPEN
 #include "sys/mman.h"
 #endif
-#ifdef __ANDROID__
+#ifdef PGL_MOBILE
 #undef HAVE_SHM_OPEN
 #endif
 
@@ -84,6 +84,10 @@
 #include "getopt_long.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+
+#ifdef PGL_MOBILE
+#include "../../mobile-build/wasm_common_mobile.h"
+#endif
 
 #if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR)
 /* For iOS builds where system() is unavailable, return failure */
@@ -822,7 +826,7 @@ cleanup_directories_atexit(void)
 static char *
 get_id(void)
 {
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(__EMSCRIPTEN__) && !defined(__wasi__) && !defined(PGL_MOBILE)
 	const char *username;
 
 #ifndef WIN32
@@ -838,9 +842,10 @@ get_id(void)
 
 	return pg_strdup(username);
 #else
+    /* WASM and Mobile path - uses environment variable */
     setenv("PGUSER", WASM_USERNAME, 0);
     return pg_strdup(getenv("PGUSER"));
-#endif /* wasm */
+#endif /* wasm and mobile */
 }
 
 static char *
@@ -1091,7 +1096,7 @@ choose_dsm_implementation(void)
 #if defined(__wasi__) || defined(__EMSCRIPTEN__)
     return "posix";
 #endif
-#if defined(HAVE_SHM_OPEN) && !defined(__sun__) && !defined(__ANDROID__)
+#if defined(HAVE_SHM_OPEN) && !defined(__sun__) && !defined(PGL_MOBILE)
 	int			ntries = 10;
 	pg_prng_state prng_state;
 
@@ -1133,6 +1138,34 @@ choose_dsm_implementation(void)
 static void
 test_config_settings(void)
 {
+#if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR)
+	/*
+	 * iOS doesn't allow system() calls, so skip config testing and use
+	 * hardcoded values that match what mobile bootstrap uses.
+	 */
+	printf(_("selecting dynamic shared memory implementation ... "));
+	fflush(stdout);
+	dynamic_shared_memory_type = "sysv";  // Safe fallback for mobile
+	printf("%s\n", dynamic_shared_memory_type);
+
+	printf(_("selecting default \"max_connections\" ... "));
+	fflush(stdout);
+	n_connections = 1;  // Match pg_main.c mobile bootstrap
+	printf("%d\n", n_connections);
+
+	printf(_("selecting default \"shared_buffers\" ... "));
+	fflush(stdout);
+	n_buffers = 16;  // Match pg_main.c mobile bootstrap (16 * 8kB = 128kB)
+	printf("%dkB\n", n_buffers * (BLCKSZ / 1024));
+
+	printf(_("selecting default time zone ... "));
+	fflush(stdout);
+	default_timezone = select_default_timezone(share_path);
+	printf("%s\n", default_timezone ? default_timezone : "GMT");
+	
+	return;  // Skip the rest of the function
+#endif
+
 	/*
 	 * This macro defines the minimum shared_buffers we want for a given
 	 * max_connections value. The arrays show the settings to try.

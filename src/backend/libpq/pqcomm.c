@@ -208,7 +208,7 @@ pq_init(ClientSocket *client_sock)
 	port->sock = client_sock->sock;
 	memcpy(&port->raddr.addr, &client_sock->raddr.addr, client_sock->raddr.salen);
 	port->raddr.salen = client_sock->raddr.salen;
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(__EMSCRIPTEN__) && !defined(__wasi__) && !defined(PGL_MOBILE)
 	/* fill in the server (local) address */
 	port->laddr.salen = sizeof(port->laddr.addr);
 	if (getsockname(port->sock,
@@ -308,7 +308,7 @@ pq_init(ClientSocket *client_sock)
 	PqSendPointer = PqSendStart = PqRecvPointer = PqRecvLength = 0;
 	PqCommBusy = false;
 	PqCommReadingMsg = false;
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(__EMSCRIPTEN__) && !defined(__wasi__) && !defined(PGL_MOBILE)
 	/* set up process-exit hook to close the socket */
 	on_proc_exit(socket_close, 0);
 

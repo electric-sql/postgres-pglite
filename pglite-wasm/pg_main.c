@@ -25,16 +25,16 @@ static pthread_t pgl_stderr_thread;
 static void* pgl_stderr_reader(void* arg) {
     (void)arg;
     if (pgl_stderr_pipe[0] < 0) {
-        __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_stderr_reader] Invalid pipe fd, exiting thread");
+        PGL_LOG_ERROR("[pgl_stderr_reader] Invalid pipe fd, exiting thread");
         return NULL;
     }
-    __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_stderr_reader] Thread started, entering read loop");
+    PGL_LOG_INFO("[pgl_stderr_reader] Thread started, entering read loop");
     char buf[1024];
     for (;;) {
         ssize_t n = read(pgl_stderr_pipe[0], buf, sizeof(buf)-1);
         if (n > 0) {
             buf[n] = '\0';
-            __android_log_write(ANDROID_LOG_INFO, "PGLitePG", buf);
+            PGL_LOG_INFO("%s", buf);
             continue;
         }
         if (n < 0) {
@@ -45,60 +45,48 @@ static void* pgl_stderr_reader(void* arg) {
                 usleep(100000); // 100ms sleep to reduce spam
                 continue;
             }
-#ifdef __ANDROID__
-            __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_stderr_reader] Read error errno=%d, breaking", errno);
-#endif
+            PGL_LOG_ERROR("[pgl_stderr_reader] Read error errno=%d, breaking", errno);
             break;
         }
         // n == 0: pipe closed
-        __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_stderr_reader] Pipe closed (EOF), exiting thread");
+        PGL_LOG_INFO("[pgl_stderr_reader] Pipe closed (EOF), exiting thread");
         break;
     }
-    __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_stderr_reader] Thread exiting");
+    PGL_LOG_INFO("[pgl_stderr_reader] Thread exiting");
     return NULL;
 }
 static void pgl_install_android_stderr_redirect(void) {
     if (pgl_stderr_pipe[0] >= 0) {
-        __android_log_write(ANDROID_LOG_DEBUG, "PGLitePG", "[pgl_install_android_stderr_redirect] Already installed, skipping");
+        PGL_DEBUG("[pgl_install_android_stderr_redirect] Already installed, skipping");
         return;
     }
-    __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_install_android_stderr_redirect] Installing stderr redirect");
+    PGL_LOG_INFO("[pgl_install_android_stderr_redirect] Installing stderr redirect");
     if (pipe(pgl_stderr_pipe) == 0) {
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_install_android_stderr_redirect] Pipe created: read_fd=%d write_fd=%d", pgl_stderr_pipe[0], pgl_stderr_pipe[1]);
-#endif
+        PGL_LOG_INFO("[pgl_install_android_stderr_redirect] Pipe created: read_fd=%d write_fd=%d", pgl_stderr_pipe[0], pgl_stderr_pipe[1]);
 
         // Make read end non-blocking to prevent hangs
         int flags = fcntl(pgl_stderr_pipe[0], F_GETFL);
         if (fcntl(pgl_stderr_pipe[0], F_SETFL, flags | O_NONBLOCK) < 0) {
-#ifdef __ANDROID__
-            __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_install_android_stderr_redirect] Failed to set non-blocking: errno=%d", errno);
-#endif
+            PGL_LOG_ERROR("[pgl_install_android_stderr_redirect] Failed to set non-blocking: errno=%d", errno);
         } else {
-            __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_install_android_stderr_redirect] Set read end to non-blocking");
+            PGL_LOG_INFO("%s", "[pgl_install_android_stderr_redirect] Set read end to non-blocking");
         }
 
         // Make stderr unbuffered and redirect
         setvbuf(stderr, NULL, _IONBF, 0);
         if (dup2(pgl_stderr_pipe[1], STDERR_FILENO) < 0) {
-#ifdef __ANDROID__
-            __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_install_android_stderr_redirect] dup2 failed: errno=%d", errno);
-#endif
+            PGL_LOG_ERROR("[pgl_install_android_stderr_redirect] dup2 failed: errno=%d", errno);
         } else {
-            __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_install_android_stderr_redirect] stderr redirected to pipe");
+            PGL_LOG_INFO("%s", "[pgl_install_android_stderr_redirect] stderr redirected to pipe");
         }
 
         if (pthread_create(&pgl_stderr_thread, NULL, pgl_stderr_reader, NULL) != 0) {
-#ifdef __ANDROID__
-            __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_install_android_stderr_redirect] pthread_create failed: errno=%d", errno);
-#endif
+            PGL_LOG_ERROR("[pgl_install_android_stderr_redirect] pthread_create failed: errno=%d", errno);
         } else {
-            __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_install_android_stderr_redirect] Reader thread created");
+            PGL_LOG_INFO("%s", "[pgl_install_android_stderr_redirect] Reader thread created");
         }
     } else {
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_install_android_stderr_redirect] pipe() failed: errno=%d", errno);
-#endif
+        PGL_LOG_ERROR("[pgl_install_android_stderr_redirect] pipe() failed: errno=%d", errno);
     }
 }
 #endif
@@ -178,13 +166,36 @@ static void pgl_android_elog_hook(ErrorData* ed) {
     if (ed->elevel >= ERROR) prio = ANDROID_LOG_ERROR;
     else if (ed->elevel >= WARNING) prio = ANDROID_LOG_WARN;
     else if (ed->elevel >= DEBUG1) prio = ANDROID_LOG_DEBUG;
-#ifdef __ANDROID__
-    __android_log_print(prio, "PGLitePG", "%s:%d %s: %s",
+    switch(prio) {
+        case ANDROID_LOG_ERROR:
+            PGL_LOG_ERROR("%s:%d %s: %s",
                         ed->filename ? ed->filename : "?",
                         ed->lineno,
                         ed->funcname ? ed->funcname : "?",
                         ed->message ? ed->message : "");
-#endif
+            break;
+        case ANDROID_LOG_WARN:
+            PGL_LOG_WARN("%s:%d %s: %s",
+                        ed->filename ? ed->filename : "?",
+                        ed->lineno,
+                        ed->funcname ? ed->funcname : "?",
+                        ed->message ? ed->message : "");
+            break;
+        case ANDROID_LOG_DEBUG:
+            PGL_DEBUG("%s:%d %s: %s",
+                        ed->filename ? ed->filename : "?",
+                        ed->lineno,
+                        ed->funcname ? ed->funcname : "?",
+                        ed->message ? ed->message : "");
+            break;
+        default:
+            PGL_LOG_INFO("%s:%d %s: %s",
+                        ed->filename ? ed->filename : "?",
+                        ed->lineno,
+                        ed->funcname ? ed->funcname : "?",
+                        ed->message ? ed->message : "");
+            break;
+    }
 }
 #endif
 
@@ -426,11 +437,7 @@ main_pre(int argc, char *argv[]) {
 
 void
 main_post() {
-#ifdef __ANDROID__
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** ENTRY: main_post() function called ***");
-#endif
-#endif
+    PGL_LOG_ERROR("[main_post] *** ENTRY: main_post() function called ***");
     PDEBUG("# 280: main_post()");
     /*
      * Fire up essential subsystems: error and memory management
@@ -439,48 +446,30 @@ main_post() {
      * localization of messages may not work right away, and messages won't go
      * anywhere but stderr until GUC settings get loaded.
      */
-#ifdef __ANDROID__
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** About to call MemoryContextInit() ***");
-#endif
-#endif
+    PGL_LOG_ERROR("[main_post] *** About to call MemoryContextInit() ***");
     MemoryContextInit();
-#ifdef __ANDROID__
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** MemoryContextInit() completed ***");
-#endif
-#endif
+    PGL_LOG_ERROR("[main_post] *** MemoryContextInit() completed ***");
 
     /*
      * Set up locale information
      */
     /* Guard against NULL g_argv when running as a library (mobile) */
     const char *argv0_local = NULL;
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** About to determine argv0_local, g_argv=%p ***", (void*)g_argv);
-#endif
+    PGL_LOG_ERROR("[main_post] *** About to determine argv0_local, g_argv=%p ***", (void*)g_argv);
     if (g_argv && g_argv[0] && g_argv[0][0]) {
         argv0_local = g_argv[0];
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** Using g_argv[0]: %s ***", argv0_local);
-#endif
+        PGL_LOG_ERROR("[main_post] *** Using g_argv[0]: %s ***", argv0_local);
     } else {
         static char __argv0_buf[STROPS_BUF];
         const char *pr = (PREFIX && ((const char*)PREFIX)[0]) ? (const char*)PREFIX : WASM_PREFIX;
         strconcat(__argv0_buf, pr, "/bin/postgres");
         argv0_local = __argv0_buf;
         fprintf(stderr, "[pgl_main] main_post fallback argv0=%s (g_argv missing)\n", argv0_local);
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** Using fallback argv0: %s ***", argv0_local);
-#endif
+        PGL_LOG_ERROR("[main_post] *** Using fallback argv0: %s ***", argv0_local);
     }
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** About to call set_pglocale_pgservice with argv0=%s ***", argv0_local ? argv0_local : "NULL");
-#endif
+    PGL_LOG_ERROR("[main_post] *** About to call set_pglocale_pgservice with argv0=%s ***", argv0_local ? argv0_local : "NULL");
     set_pglocale_pgservice(argv0_local, PG_TEXTDOMAIN("postgres"));
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[main_post] *** set_pglocale_pgservice completed ***");
-#endif
+    PGL_LOG_ERROR("[main_post] *** set_pglocale_pgservice completed ***");
 
     /*
      * In the postmaster, absorb the environment values for LC_COLLATE and
@@ -521,12 +510,8 @@ main_post() {
 __attribute__ ((export_name("pgl_backend")))
      void pgl_backend() {
 #ifdef PGL_MOBILE
-    #ifdef __ANDROID__
-    __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_backend] *** ENTRY: pgl_backend function called ***");
-    __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_backend] *** This confirms we reached pgl_backend after pgl_initdb ***");
-    #else
-    fprintf(stderr, "[pgl_backend] ENTRY: function called\n");
-    #endif
+    PGL_LOG_ERROR("%s", "[pgl_backend] *** ENTRY: pgl_backend function called ***");
+    PGL_LOG_ERROR("%s", "[pgl_backend] *** This confirms we reached pgl_backend after pgl_initdb ***");
 #endif
     fprintf(stderr, "[pgl_backend] *** ENTRY: pgl_backend function called ***\n");
 #ifdef __ANDROID__
@@ -570,16 +555,12 @@ __attribute__ ((export_name("pgl_backend")))
     if (!getenv("PGTZ")) setenv("PGTZ", "UTC", 1);
     if (!getenv("PGDATABASE")) setenv("PGDATABASE", "template1", 1);
     
-    #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_backend] Mobile environment initialization complete");
-    #endif
+    PGL_LOG_INFO("[pgl_backend] Mobile environment initialization complete");
 #endif
 
 #ifdef PGL_MOBILE
     /* Mobile communication methods will be installed after backend initialization */
-    #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_backend] *** Deferring mobile comm installation until backend is ready ***");
-    #endif
+    PGL_LOG_ERROR("[pgl_backend] *** Deferring mobile comm installation until backend is ready ***");
 
     /* MOBILE: Initialize g_argv equivalent for library mode if not already done */
     /* TEMPORARILY DISABLED - this may be causing invalidation message corruption
@@ -592,18 +573,14 @@ __attribute__ ((export_name("pgl_backend")))
         mobile_argv[1] = NULL;
         g_argv = mobile_argv;
         g_argc = 1;
-        #ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_backend] Mobile: initialized g_argv[0]=%s", mobile_argv0);
-        #endif
+        PGL_LOG_INFO("[pgl_backend] Mobile: initialized g_argv[0]=%s", mobile_argv0);
     }
     */
 #endif
 
     if (async_restart) {
 // old 487
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_backend] *** Taking async_restart=1 path (new DB or mobile) ***");
-#endif
+    PGL_LOG_ERROR("[pgl_backend] *** Taking async_restart=1 path (new DB or mobile) ***");
 
 #if PGDEBUG
         fprintf(stdout, "\n\n\n\n"
@@ -661,20 +638,14 @@ __attribute__ ((export_name("pgl_backend")))
 
     }
 
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_backend] *** About to enter main_post() for existing database ***");
-#endif
+    PGL_LOG_ERROR("[pgl_backend] *** About to enter main_post() for existing database ***");
     fprintf(stderr, "[pgl_main] entering main_post (before single-user resume) g_argv=%p g_argv0=%s DataDir=%s\n",
             (void*)g_argv,
             (g_argv && g_argv[0]) ? g_argv[0] : "",
             DataDir ? DataDir : "");
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_backend] *** Calling main_post() now ***");
-#endif
+    PGL_LOG_ERROR("[pgl_backend] *** Calling main_post() now ***");
     main_post();
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_backend] *** main_post() returned successfully ***");
-#endif
+    PGL_LOG_ERROR("[pgl_backend] *** main_post() returned successfully ***");
     fprintf(stderr, "[pgl_main] returned from main_post\n");
 
     // Build resuming single-user argv dynamically to avoid empty args
@@ -720,78 +691,46 @@ __attribute__ ((export_name("pgl_backend")))
 
 
   backend_started:;
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_backend] Reached backend_started label");
-#else
-    fprintf(stderr, "[pgl_backend] Reached backend_started label\n");
-#endif
+    PGL_LOG_INFO("[pgl_backend] Reached backend_started label");
     IsPostmasterEnvironment = true;
     
 #ifdef PGL_MOBILE
-    #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_mobile] Starting mobile-specific backend state initialization");
-    #else
-    fprintf(stderr, "[pgl_mobile] Starting mobile-specific backend state initialization\n");
-    #endif
+    PGL_LOG_INFO("[pgl_mobile] Starting mobile-specific backend state initialization");
     
     /* Mobile: Initialize critical backend state that must persist across interactive_one() calls */
     /* These are normally set up in PostgresMain() but mobile needs them for wire protocol */
     extern MemoryContext row_description_context;
     extern StringInfoData row_description_buf;
     
-    #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_mobile] row_description_context = %p", (void*)row_description_context);
-    #else
-    fprintf(stderr, "[pgl_mobile] row_description_context = %p\n", (void*)row_description_context);
-    #endif
+    PGL_LOG_INFO("[pgl_mobile] row_description_context = %p", (void*)row_description_context);
     
     if (row_description_context == NULL) {
-        #ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_mobile] Initializing row_description_context for wire protocol");
-        #endif
+        PGL_LOG_INFO("[pgl_mobile] Initializing row_description_context for wire protocol");
         row_description_context = AllocSetContextCreate(TopMemoryContext,
                                                        "RowDescriptionContext",
                                                        ALLOCSET_DEFAULT_SIZES);
         MemoryContext oldcontext = MemoryContextSwitchTo(row_description_context);
         initStringInfo(&row_description_buf);
         MemoryContextSwitchTo(oldcontext);
-        #ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_mobile] row_description_context created at %p", (void*)row_description_context);
-        #endif
+        PGL_LOG_INFO("[pgl_mobile] row_description_context created at %p", (void*)row_description_context);
     }
     
     /* Ensure MessageContext exists for protocol message handling */
-    #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_mobile] MessageContext = %p", (void*)MessageContext);
-    #else
-    fprintf(stderr, "[pgl_mobile] MessageContext = %p\n", (void*)MessageContext);
-    #endif
+    PGL_LOG_INFO("[pgl_mobile] MessageContext = %p", (void*)MessageContext);
     
     if (MessageContext == NULL) {
-        #ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_mobile] Initializing MessageContext for protocol handling");
-        #endif
+        PGL_LOG_INFO("[pgl_mobile] Initializing MessageContext for protocol handling");
         MessageContext = AllocSetContextCreate(TopMemoryContext,
                                               "MessageContext",
                                               ALLOCSET_DEFAULT_SIZES);
-        #ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_mobile] MessageContext created at %p", (void*)MessageContext);
-        #endif
+        PGL_LOG_INFO("[pgl_mobile] MessageContext created at %p", (void*)MessageContext);
     }
     /* Initialize mobile communication methods before any backend processing */
-    #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_mobile] Installing mobile communication methods");
-    #endif
+    PGL_LOG_INFO("[pgl_mobile] Installing mobile communication methods");
     pgl_install_mobile_comm();
-    #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_mobile] Mobile communication methods installed successfully");
-    #endif
+    PGL_LOG_INFO("[pgl_mobile] Mobile communication methods installed successfully");
     
-    #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_mobile] Mobile backend state initialization complete");
-    #else
-    fprintf(stderr, "[pgl_mobile] Mobile backend state initialization complete\n");
-    #endif
+    PGL_LOG_INFO("[pgl_mobile] Mobile backend state initialization complete");
 #endif
     
     if (TransamVariables && TransamVariables->nextOid < ((Oid) FirstNormalObjectId)) {
@@ -805,11 +744,7 @@ __attribute__ ((export_name("pgl_backend")))
 #endif
     }
 #ifdef PGL_MOBILE
-    #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_backend] EXIT: function completing successfully");
-    #else
-    fprintf(stderr, "[pgl_backend] EXIT: function completing successfully\n");
-    #endif
+    PGL_LOG_INFO("[pgl_backend] EXIT: function completing successfully");
 #endif
      }
 
@@ -819,9 +754,7 @@ __attribute__ ((export_name("pgl_backend")))
      __attribute__ ((export_name("pgl_initdb")))
 #endif
      int pgl_initdb() {
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_initdb] ENTRY: function called");
-#endif
+    PGL_LOG_INFO("[pgl_initdb] ENTRY: function called");
     PDEBUG("# 412: pg_initdb()");
     /* Ensure PREFIX/PGDATA/PGUSER defaults like wasm main_pre */
     if (!PREFIX || !*PREFIX) {
@@ -848,15 +781,11 @@ __attribute__ ((export_name("pgl_backend")))
     /* Allow forcing initdb even if PG_VERSION exists */
     const char* __force_env = getenv("PGL_FORCE_INITDB");
     bool __force_initdb = (__force_env && __force_env[0] == '1');
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_initdb] About to check if database exists at PGDATA=%s", PGDATA? (const char*)PGDATA : "");
-#endif
+    PGL_LOG_INFO("[pgl_initdb] About to check if database exists at PGDATA=%s", PGDATA? (const char*)PGDATA : "");
     if (!chdir(PGDATA)) {
         int __has_pgversion = (access("PG_VERSION", F_OK) == 0);
         fprintf(stderr, "[pgl_initdb] chdir PGDATA ok; PG_VERSION=%s force=%d\n", __has_pgversion ? "yes" : "no", __force_initdb ? 1 : 0);
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_initdb] Database exists check: PG_VERSION=%s force=%d", __has_pgversion ? "yes" : "no", __force_initdb ? 1 : 0);
-#endif
+        PGL_LOG_INFO("[pgl_initdb] Database exists check: PG_VERSION=%s force=%d", __has_pgversion ? "yes" : "no", __force_initdb ? 1 : 0);
         if (__has_pgversion && !__force_initdb) {
             chdir("/");
 
@@ -864,9 +793,7 @@ __attribute__ ((export_name("pgl_backend")))
 
             /* assume auth success for now */
             pgl_idb_status |= IDB_HASUSER;
-#ifdef __ANDROID__
-            __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_initdb] Database already exists, skipping initdb");
-#endif
+            PGL_LOG_INFO("[pgl_initdb] Database already exists, skipping initdb");
 #if PGDEBUG
             fprintf(stdout, "# 427: pg_initdb: db exists at : %s TODO: test for db name : %s \n", PGDATA, getenv("PGDATABASE"));
 #endif // PGDEBUG
@@ -875,30 +802,22 @@ __attribute__ ((export_name("pgl_backend")))
             goto initdb_done;
         }
         chdir("/");
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_initdb] No existing database found, will run initdb");
-#endif
+        PGL_LOG_INFO("[pgl_initdb] No existing database found, will run initdb");
 #if PGDEBUG
         fprintf(stderr, "# 435: pg_initdb no db found at : %s\n", PGDATA);
 #endif // PGDEBUG
     } else {
         fprintf(stderr, "[pgl_initdb] chdir PGDATA failed (dir missing?) path=%s errno=%d\n", PGDATA ? (const char*)PGDATA : "", errno);
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_initdb] chdir PGDATA failed, will run initdb");
-#endif
+        PGL_LOG_INFO("[pgl_initdb] chdir PGDATA failed, will run initdb");
 #if PGDEBUG
         fprintf(stderr, "# 439: pg_initdb db folder not found at : %s\n", PGDATA);
 #endif // PGDEBUG
     }
 
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_initdb] Calling pgl_initdb_main()...");
-#endif
+    PGL_LOG_INFO("[pgl_initdb] Calling pgl_initdb_main()...");
     int initdb_rc = pgl_initdb_main();
     fprintf(stderr, "[pgl_main] pgl_initdb_main rc=%d\n", initdb_rc);
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_initdb] pgl_initdb_main() returned %d", initdb_rc);
-#endif
+    PGL_LOG_INFO("[pgl_initdb] pgl_initdb_main() returned %d", initdb_rc);
     const char* skip_replay = getenv("PGL_SKIP_REPLAY");
     if (skip_replay && skip_replay[0] == '1') {
         fprintf(stderr, "[pgl_main] skipping boot replay due to PGL_SKIP_REPLAY=1\n");
@@ -1054,23 +973,17 @@ __attribute__ ((export_name("pgl_backend")))
             set_pglocale_pgservice(argv0_boot, PG_TEXTDOMAIN("initdb"));
             PG_exception_stack = &__boot_jmp;
             fprintf(stderr, "[pgl_main] calling BootstrapModeMain\n");
-#ifdef __ANDROID__
-            __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] About to call BootstrapModeMain");
-#endif
+            PGL_LOG_INFO("%s", "[pgl_main] About to call BootstrapModeMain");
             // Also redirect stderr to initdb.stderr.log so ereport lands there
             char errlog[1024];
             snprintf(errlog, sizeof(errlog), "%s/initdb.stderr.log", PREFIX ? (const char*)PREFIX : WASM_PREFIX);
             bootstrap_stderr_fd = open(errlog, O_WRONLY | O_CREAT | O_APPEND, 0644);
             if (bootstrap_stderr_fd >= 0) {
-#ifdef __ANDROID__
-              __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] Redirecting stderr to %s (fd=%d)", errlog, bootstrap_stderr_fd);
-#endif
+              PGL_LOG_INFO("[pgl_main] Redirecting stderr to %s (fd=%d)", errlog, bootstrap_stderr_fd);
               dup2(bootstrap_stderr_fd, STDERR_FILENO);
               setvbuf(stderr, NULL, _IONBF, 0); // unbuffer stderr
             } else {
-#ifdef __ANDROID__
-              __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] Failed to open stderr log %s: errno=%d", errlog, errno);
-#endif
+              PGL_LOG_ERROR("[pgl_main] Failed to open stderr log %s: errno=%d", errlog, errno);
             }
             /* Intercept proc_exit during bootstrap to avoid PANIC in child context */
             sigjmp_buf __boot_exit_jmp;
@@ -1078,83 +991,65 @@ __attribute__ ((export_name("pgl_backend")))
             if (sigsetjmp(__boot_exit_jmp, 1) != 0) {
               pgl_boot_jmp = NULL;
               fprintf(stderr, "[pgl_boot] proc_exit intercepted during bootstrap, continuing\n");
-#ifdef __ANDROID__
-              __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_boot] proc_exit intercepted during bootstrap");
-#endif
+              PGL_LOG_INFO("%s", "[pgl_boot] proc_exit intercepted during bootstrap");
             } else {
-#ifdef __ANDROID__
-              __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] Entering BootstrapModeMain");
-#endif
+              PGL_LOG_INFO("%s", "[pgl_main] Entering BootstrapModeMain");
               BootstrapModeMain(boot_argc, boot_argv, false);
-#ifdef __ANDROID__
-              __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] BootstrapModeMain completed successfully");
-#endif
+              PGL_LOG_INFO("[pgl_main] BootstrapModeMain completed successfully");
             }
             pgl_boot_jmp = NULL;
             fprintf(stderr, "[pgl_main] BootstrapModeMain returned normally\n");
-#ifdef __ANDROID__
-            __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** BootstrapModeMain phase completed ***");
-#endif
+            PGL_LOG_ERROR("%s", "[pgl_main] *** BootstrapModeMain phase completed ***");
         }
-#ifdef __ANDROID__
-        __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** About to clear PG_exception_stack ***");
-#endif
+        PGL_LOG_ERROR("%s", "[pgl_main] *** About to clear PG_exception_stack ***");
         PG_exception_stack = NULL;
-#ifdef __ANDROID__
-        __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** About to restore emit_log_hook ***");
-#endif
+        PGL_LOG_ERROR("%s", "[pgl_main] *** About to restore emit_log_hook ***");
         emit_log_hook = prev_hook;
-#ifdef __ANDROID__
-        __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** Hooks restored, about to restore stderr ***");
-#endif
+        PGL_LOG_ERROR("%s", "[pgl_main] *** Hooks restored, about to restore stderr ***");
 
 #ifdef __ANDROID__
-        __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** About to restore stderr after bootstrap ***");
+        PGL_LOG_ERROR("%s", "[pgl_main] *** About to restore stderr after bootstrap ***");
         // CRITICAL: Restore stderr to Android pipe after bootstrap to prevent hang
         if (bootstrap_stderr_fd >= 0) {
-            __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** About to close bootstrap stderr fd ***");
+            PGL_LOG_ERROR("%s", "[pgl_main] *** About to close bootstrap stderr fd ***");
             close(bootstrap_stderr_fd);
-            __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** Closed bootstrap stderr log file ***");
+            PGL_LOG_ERROR("%s", "[pgl_main] *** Closed bootstrap stderr log file ***");
             // Restore stderr to the Android pipe for continued logging
             if (pgl_stderr_pipe[1] >= 0) {
-                __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** About to dup2 stderr back to pipe ***");
+                PGL_LOG_ERROR("%s", "[pgl_main] *** About to dup2 stderr back to pipe ***");
                 if (dup2(pgl_stderr_pipe[1], STDERR_FILENO) < 0) {
-                    __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] Failed to restore stderr to pipe: errno=%d", errno);
+                    PGL_LOG_ERROR("[pgl_main] Failed to restore stderr to pipe: errno=%d", errno);
                 } else {
-                    __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** dup2 successful, about to setvbuf ***");
+                    PGL_LOG_ERROR("%s", "[pgl_main] *** dup2 successful, about to setvbuf ***");
                     setvbuf(stderr, NULL, _IONBF, 0);
-                    __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** Successfully restored stderr to Android pipe ***");
+                    PGL_LOG_ERROR("%s", "[pgl_main] *** Successfully restored stderr to Android pipe ***");
                 }
             } else {
-                __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] Android stderr pipe not available for restoration");
+                PGL_LOG_ERROR("%s", "[pgl_main] Android stderr pipe not available for restoration");
             }
         } else {
-            __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** bootstrap_stderr_fd was not opened ***");
+            PGL_LOG_ERROR("%s", "[pgl_main] *** bootstrap_stderr_fd was not opened ***");
         }
-        __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** Stderr restoration completed ***");
-#endif
+        PGL_LOG_ERROR("%s", "[pgl_main] *** Stderr restoration completed ***");
 
         // close the file stream, then restore the original FD 0 and stdin
         fprintf(stderr, "[pgl_main] about to fclose(stdin)\n");
-#ifdef __ANDROID__
-        __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** About to close stdin stream ***");
-#endif
+        PGL_LOG_ERROR("%s", "[pgl_main] *** About to close stdin stream ***");
         fclose(stdin);
         fprintf(stderr, "[pgl_main] fclose(stdin) completed\n");
-#ifdef __ANDROID__
-        __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** stdin stream closed successfully ***");
+        PGL_LOG_ERROR("%s", "[pgl_main] *** stdin stream closed successfully ***");
         /* On Android, we used /dev/null as saved_stdin, so just reopen /dev/null for stdin */
         fprintf(stderr, "[pgl_main] Android: reopening /dev/null for stdin\n");
-        __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] Reopening /dev/null for stdin");
+        PGL_LOG_INFO("%s", "[pgl_main] Reopening /dev/null for stdin");
         stdin = fopen("/dev/null", "r");
         if (!stdin) {
             fprintf(stderr, "[pgl_main] fopen(/dev/null) for stdin failed errno=%d\n", errno);
-            __android_log_print(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] fopen(/dev/null) for stdin failed errno=%d", errno);
+            PGL_LOG_ERROR("[pgl_main] fopen(/dev/null) for stdin failed errno=%d", errno);
         } else {
-            __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] Successfully reopened /dev/null for stdin");
+            PGL_LOG_INFO("%s", "[pgl_main] Successfully reopened /dev/null for stdin");
         }
         close(saved_stdin);
-        __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] Closed saved_stdin fd");
+        PGL_LOG_INFO("%s", "[pgl_main] Closed saved_stdin fd");
 #else
         if (dup2(saved_stdin, STDIN_FILENO) < 0) {
             fprintf(stderr, "[pgl_main] dup2 restore STDIN failed errno=%d\n", errno);
@@ -1164,9 +1059,7 @@ __attribute__ ((export_name("pgl_backend")))
         close(saved_stdin);
 #endif
         fprintf(stderr, "[pgl_main] about to fdopen(STDIN_FILENO)\n");
-#ifdef __ANDROID__
-        __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] Skipping fdopen on Android");
-#endif
+        PGL_LOG_INFO("%s", "[pgl_main] Skipping fdopen on Android");
 #ifndef __ANDROID__
         stdin = fdopen(STDIN_FILENO, "r");
         if (!stdin) {
@@ -1175,9 +1068,7 @@ __attribute__ ((export_name("pgl_backend")))
         }
 #endif
         fprintf(stderr, "[pgl_main] stdin restoration completed\n");
-#ifdef __ANDROID__
-        __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] stdin restoration phase completed");
-#endif
+        PGL_LOG_INFO("%s", "[pgl_main] stdin restoration phase completed");
         // Do NOT exit the process; just continue to allow backend to start
         if (__boot_err) {
             fprintf(stderr, "[pgl_main] initdb boot replay completed with errors\n");
@@ -1209,9 +1100,7 @@ __attribute__ ((export_name("pgl_backend")))
             }
         } else {
             PDEBUG("# 479: initdb boot replay done");
-#ifdef __ANDROID__
-            __android_log_write(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] initdb boot replay completed successfully");
-#endif
+            PGL_LOG_INFO("%s", "[pgl_main] initdb boot replay completed successfully");
         }
         // Log control file presence post-bootstrap
         {
@@ -1220,22 +1109,16 @@ __attribute__ ((export_name("pgl_backend")))
             struct stat st; int rc = stat(ctrl_path, &st);
             fprintf(stderr, "[pgl_main] post-boot ctrl=%s rc=%d errno=%d size=%lld\n",
                     ctrl_path, rc, errno, (long long)((rc==0)?st.st_size:0));
-#ifdef __ANDROID__
-            __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_main] post-boot ctrl=%s rc=%d errno=%d size=%lld",
+            PGL_LOG_INFO("[pgl_main] post-boot ctrl=%s rc=%d errno=%d size=%lld",
                     ctrl_path, rc, errno, (long long)((rc==0)?st.st_size:0));
-#endif
         }
         fprintf(stderr, "[pgl_main] bootstrap section completed successfully\n");
-#ifdef __ANDROID__
-        __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** BOOTSTRAP SECTION COMPLETED SUCCESSFULLY ***");
-        __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_main] *** EXITING BOOTSTRAP BLOCK ***");
-#endif
+        PGL_LOG_ERROR("%s", "[pgl_main] *** BOOTSTRAP SECTION COMPLETED SUCCESSFULLY ***");
+        PGL_LOG_ERROR("%s", "[pgl_main] *** EXITING BOOTSTRAP BLOCK ***");
 
     }
 
-#ifdef __ANDROID__
-    __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_initdb] *** PAST BOOTSTRAP SECTION, CONTINUING TO CLEANUP ***");
-#endif
+    PGL_LOG_ERROR("%s", "[pgl_initdb] *** PAST BOOTSTRAP SECTION, CONTINUING TO CLEANUP ***");
 
     /* use previous initdb output to feed single mode */
 
@@ -1271,9 +1154,7 @@ PDEBUG("# 498: initdb faking shutdown to complete WAL/OID states in single mode"
 */
     async_restart = 1;
   initdb_done:;
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_initdb] Reached initdb_done label");
-#endif
+    PGL_LOG_INFO("[pgl_initdb] Reached initdb_done label");
     pgl_idb_status |= IDB_CALLED;
 
     if (optind > 0) {
@@ -1285,15 +1166,11 @@ PDEBUG("# 498: initdb faking shutdown to complete WAL/OID states in single mode"
         PDEBUG("# 524: exiting on initdb-single error");
         // TODO raise js exception
     }
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "PGLitePG", "[pgl_initdb] EXIT: returning %d", pgl_idb_status);
-    __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_initdb] *** FINAL: About to return from pgl_initdb function ***");
-    __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_initdb] *** If you see this message, pgl_initdb completed successfully ***");
-#endif
+    PGL_LOG_INFO("[pgl_initdb] EXIT: returning %d", pgl_idb_status);
+    PGL_LOG_ERROR("%s", "[pgl_initdb] *** FINAL: About to return from pgl_initdb function ***");
+    PGL_LOG_ERROR("%s", "[pgl_initdb] *** If you see this message, pgl_initdb completed successfully ***");
     fprintf(stderr, "[pgl_initdb] *** RETURNING FROM pgl_initdb WITH STATUS %d ***\n", pgl_idb_status);
-#ifdef __ANDROID__
-    __android_log_write(ANDROID_LOG_ERROR, "PGLitePG", "[pgl_initdb] *** ABOUT TO EXECUTE RETURN STATEMENT ***");
-#endif
+    PGL_LOG_ERROR("%s", "[pgl_initdb] *** ABOUT TO EXECUTE RETURN STATEMENT ***");
     return pgl_idb_status;
 }                          // pgl_initdb
 

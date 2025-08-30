@@ -5,10 +5,10 @@ This folder contains scripts to cross-compile PostgreSQL and the PGLite glue for
 Artifacts layout (per plan):
 
 - dist/mobile/android/<abi>/{include,lib}
-  - libpostgres_mobile.a
+  - libpgcore_mobile.a
   - libpglite_glue_mobile.a
 - dist/mobile/ios/{arm64, x86_64-sim}/{include,lib}
-  - libpostgres_mobile.a
+  - libpgcore_mobile.a
   - libpglite_glue_mobile.a
 
 Notes:

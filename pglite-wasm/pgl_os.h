@@ -8,6 +8,39 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Unified logging macros for all platforms
+#ifdef PGL_MOBILE
+  #ifdef __ANDROID__
+    #include <android/log.h>
+    #define PGL_LOG(level, ...) __android_log_print(level, "PGLite", __VA_ARGS__)
+    #define PGL_LOG_INFO(...) __android_log_print(ANDROID_LOG_INFO, "PGLite", __VA_ARGS__)
+    #define PGL_LOG_ERROR(...) __android_log_print(ANDROID_LOG_ERROR, "PGLite", __VA_ARGS__)
+    #define PGL_LOG_WARN(...) __android_log_print(ANDROID_LOG_WARN, "PGLite", __VA_ARGS__)
+  #else // iOS and other mobile
+    #define PGL_LOG(level, ...) do { \
+      fprintf(stderr, "[PGLite] "); \
+      fprintf(stderr, __VA_ARGS__); \
+      fprintf(stderr, "\n"); \
+      fflush(stderr); \
+    } while(0)
+    #define PGL_LOG_INFO(...) PGL_LOG(0, __VA_ARGS__)
+    #define PGL_LOG_ERROR(...) PGL_LOG(0, __VA_ARGS__)
+    #define PGL_LOG_WARN(...) PGL_LOG(0, __VA_ARGS__)
+  #endif
+#else // WASM
+  #define PGL_LOG(level, ...) fprintf(stderr, __VA_ARGS__)
+  #define PGL_LOG_INFO(...) fprintf(stderr, __VA_ARGS__)
+  #define PGL_LOG_ERROR(...) fprintf(stderr, __VA_ARGS__)
+  #define PGL_LOG_WARN(...) fprintf(stderr, __VA_ARGS__)
+#endif
+
+// Debug logging controlled by PGDEBUG flag (like PDEBUG in WASM)
+#if PGDEBUG
+  #define PGL_DEBUG(...) PGL_LOG_INFO(__VA_ARGS__)
+#else
+  #define PGL_DEBUG(...) // no-op
+#endif
+
 FILE* IDB_PIPE_FP = NULL;
 int IDB_STAGE = 0;
 

@@ -73,10 +73,14 @@ static int find_other_exec_mobile(const char *argv0, const char *target, const c
 static void get_share_path_mobile(const char *my_exec_path, char *ret_path) {
     (void)my_exec_path;
     const char* conf = getenv("PGSYSCONFDIR");
+#ifdef __APPLE__
+    const char* runtime = getenv("IOS_RUNTIME_DIR");
+#else
     const char* runtime = getenv("ANDROID_RUNTIME_DIR");
-    // Candidates in order: PGSYSCONFDIR, runtime/share/postgresql, runtime/postgresql
+#endif
+    // Candidates in order: PGSYSCONFDIR/share/postgresql, runtime/share/postgresql, runtime/postgresql
     if (conf && *conf) {
-        snprintf(ret_path, MAXPGPATH, "%s", conf);
+        snprintf(ret_path, MAXPGPATH, "%s/share/postgresql", conf);
         return;
     }
     if (runtime && *runtime) {

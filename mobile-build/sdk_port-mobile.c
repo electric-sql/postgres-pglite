@@ -1,9 +1,7 @@
 #include "sdk_port-mobile.h"
 #include <stdlib.h>
 #include <string.h>
-#ifdef __ANDROID__
-#include <android/log.h>
-#endif
+#include "../pglite-wasm/pgl_os.h"
 
 /* When included in PostgreSQL build, these variables are defined in postgres.c */
 #ifdef POSTGRES_H
@@ -49,10 +47,8 @@ static void ensure_buf() {
       /* Set external variables for PostgreSQL to access this buffer */
       pgl_mobile_cma_buffer_addr = g_buf + 1;  /* Match WASM offset */
       pgl_mobile_cma_buffer_size = g_cap;
-#ifdef __ANDROID__
-      __android_log_print(ANDROID_LOG_ERROR, "PGLiteSDK", "ensure_buf: set pgl_mobile_cma_buffer_addr=%p, size=%d, g_buf=%p", 
+      PGL_LOG_INFO("ensure_buf: set pgl_mobile_cma_buffer_addr=%p, size=%d, g_buf=%p", 
                          pgl_mobile_cma_buffer_addr, pgl_mobile_cma_buffer_size, (void*)g_buf);
-#endif
     }
   }
 }
@@ -76,9 +72,7 @@ void interactive_write(int size) {
 }
 
 int interactive_read(void) {
-#ifdef __ANDROID__
-  __android_log_print(ANDROID_LOG_ERROR, "PGLiteSDK", "interactive_read: pgl_mobile_cma_wsize=%d, addr=%p", pgl_mobile_cma_wsize, (void*)&pgl_mobile_cma_wsize);
-#endif
+  PGL_LOG_INFO("interactive_read: pgl_mobile_cma_wsize=%d, addr=%p", pgl_mobile_cma_wsize, (void*)&pgl_mobile_cma_wsize);
   return pgl_mobile_cma_wsize;
 }
 
