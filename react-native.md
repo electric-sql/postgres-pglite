@@ -18,7 +18,7 @@ This document describes the architecture and implementation of PGLite for React 
 
 - **PostgreSQL Core**: Native compilation of PostgreSQL 17 for mobile platforms
 - **PGLite Glue**: Adaptation layer (pg_main.c, interactive_one.c, pgl_mains.c) that provides single-user mode operation
-- **Nitro Module**: React Native bridge using Nitro Modules for high-performance JSI communication
+- **Nitro Module (autolinked)**: React Native bridge using Nitro Modules (JSI) with autolinking; no manually written/native bridges are required
 - **TypeScript Adapter**: JavaScript layer that implements the PGLite API on top of the wire protocol
 
 ## Execution Model
@@ -56,10 +56,10 @@ This document describes the architecture and implementation of PGLite for React 
 
 2. **Backend Processing**
 
-   - `interactive_one()` reads from CMA buffer
-   - Processes through `SocketBackend()` for wire protocol messages
+   - `interactive_one()` reads from the CMA buffer
+   - Processes via the backend wire protocol machinery (libpq/PQcomm)
    - Executes SQL via `exec_simple_query()` or extended protocol
-   - Results written back to CMA buffer via mobile communication methods
+   - Results written back to the CMA buffer via mobile PQcomm methods
 
 3. **Response Flow**
    - Native reads response from CMA buffer
@@ -80,77 +80,34 @@ JavaScript -> Wire Protocol -> CMA Buffer -> PostgreSQL Backend
 
 - Request written to buffer offset 1
 - Response written to buffer offset (request_size + 2)
-- Fallback to file mode for oversized messages
 
 ### Memory Management
 
-- Single shared buffer for request/response (default 5MB)
+- Single shared buffer for request/response via CMA (size controlled by build-time CMA_MB macro; current default is 12MB)
 - Conservative PostgreSQL memory settings via single-user flags (-B 16, -S 512)
 - Memory contexts properly initialized and persisted across calls
 - No memory leaks between successive queries
 
-## Current Status and Problems
+## Status
 
 ### What's Working
 
 - ✅ Database initialization (pgl_initdb) completes successfully
 - ✅ Backend startup (pgl_backend) initializes properly
-- ✅ Memory contexts and communication methods are installed
-- ✅ CMA buffer communication is set up
-- ✅ Native bridge receives and processes protocol messages
+- ✅ Memory contexts and mobile communication methods are installed
+- ✅ CMA buffer communication is set up and is the only path on mobile
+- ✅ Nitro Modules autolinking loads the native module; execProtocolRaw round-trips
 
-### Current Issues
+### Historical issue (resolved)
 
-1. **PostgreSQL Cannot Read from CMA Buffer**
+Earlier, PostgreSQL and React Native accessed different buffer instances (function-based access to `get_buffer_addr()` introduced duplicate static buffers). This caused invalid message errors.
 
-   - React Native writes data to CMA buffer successfully
-   - PostgreSQL fails to read from buffer, causing "invalid frontend message type 0" errors
-   - The root issue: PostgreSQL and React Native were accessing different buffer instances
-   - Previous approach of including mobile SDK source created duplicate static buffer instances
+Resolution: Use external variables set by the mobile glue and consumed by PostgreSQL (e.g., `pgl_mobile_cma_buffer_addr`, `pgl_mobile_cma_buffer_size`). pqcomm.c (PGL_MOBILE) reads these in `pq_startmsgread()`, matching the WASM pattern of direct pointer usage.
 
-2. **Key Finding: WASM vs Mobile Memory Models**
+Notes:
 
-   **WASM Approach (Working):**
-
-   - Uses direct pointer arithmetic: `PqRecvBuffer = (char*)0x1`
-   - Single unified memory space - address 0x1 maps directly to CMA buffer
-   - No function calls to external libraries needed
-
-   **Mobile Issue (Previous Broken Approach):**
-
-   - Called `get_buffer_addr()` from PostgreSQL, creating separate buffer instance
-   - React Native writes to buffer at address 0xAAAAA
-   - PostgreSQL reads from different buffer at address 0xBBBBB
-   - Function calls cross compilation unit boundaries, causing duplication
-
-3. **Solution: External Buffer Address Variables**
-
-   Instead of function calls, use external variables set by mobile SDK:
-
-   ```c
-   // In PostgreSQL - just declare external variables
-   extern void* pgl_mobile_cma_buffer_addr;
-   extern int pgl_mobile_cma_buffer_size;
-
-   // In pq_startmsgread() - use direct pointers like WASM
-   PqRecvBuffer = (char*)pgl_mobile_cma_buffer_addr;
-   ```
-
-   This approach:
-
-   - ✅ No mobile SDK inclusion in PostgreSQL core
-   - ✅ Single shared buffer instance (created by mobile SDK)
-   - ✅ Clean separation - PostgreSQL receives buffer addresses
-   - ✅ Same pattern as WASM - direct pointer manipulation
-
-### Investigation Focus
-
-The investigation is currently focused on:
-
-1. Ensuring all required memory contexts are initialized before query processing
-2. Verifying the CMA buffer communication pattern matches WASM exactly
-3. Checking that `interactive_one()` properly processes and returns from each message
-4. Confirming the backend has transitioned from bootstrap to normal operation mode
+- `interactive_one.c` is the primary loop. Mobile uses its PGL_MOBILE CMA path exclusively; web/WASM continues to use the non-mobile paths.
+- Verbose logging is intentionally kept to aid diagnostics.
 
 ## Data Flow
 
@@ -250,28 +207,87 @@ Our current React Native implementation uses a simplified serialization approach
 
 In the future, we may separate the base class and serialization logic into platform-agnostic packages without web-specific dependencies to reduce code duplication and ensure consistent type handling across implementations.
 
-## Build System
+## Build & Initialization
 
-The build uses a two-stage approach:
+The build uses a two-stage approach on mobile:
 
-1. **PostgreSQL Compilation** - Cross-compile PostgreSQL using Autotools for each platform/ABI
-2. **Module Linking** - Link prebuilt PostgreSQL libraries into the React Native module
+1. **PostgreSQL Compilation** (mobile-build/build-mobile.sh)
 
-### Android Build
+   - Cross-compile PostgreSQL using Autotools for each platform/ABI
+   - Builds static libraries: `libpgcore_mobile.a`, `libpglite_glue_mobile.a`
+   - Copies artifacts into the RN module under platform-specific locations
 
-- Configure with Android NDK toolchain
-- Compile to static libraries: `libpgcore_mobile.a`, `libpglite_glue_mobile.a`
-- Place in `android/src/main/jni/<abi>/`
-- Link via CMake in the Nitro module
+2. **Module Linking**
+   - RN uses Nitro Modules with autolinking; the native module is discovered/linked automatically
 
-### iOS Build
+### Android initialization
 
-- Configure with Xcode toolchain
-- Compile for device (arm64) and simulator (x86_64)
-- Create XCFramework or universal binaries
-- Link via CocoaPods in the Nitro module
+- On app process start, a ContentProvider (InitProvider) ensures the native library is loaded and environment variables are applied via NativeEnv
+- Runtime resources (share/postgresql/\*) are copied into app storage if needed
+- Environment variables set include (examples):
+  - PGDATA: `<app files>/pglite/pgdata`
+  - PGSYSCONFDIR: `<app files>/pglite/runtime`
+  - PGROOT/PREFIX: runtime root
+- On first run, `pgl_initdb()` initializes the cluster, then `pgl_backend()` prepares the backend
+
+### iOS initialization
+
+- On app launch, Swift (NativeEnv) sets environment variables and prepares Application Support paths:
+  - PGDATA: `<App Support>/PGLite/pgdata`
+  - PGSYSCONFDIR + PGROOT + PREFIX: `<App Support>/PGLite/runtime`
+- Runtime resources are bundled in the Pod and copied on first run
+- The Nitro module is autolinked; no manual bridge code is required
+- Then `pgl_initdb()` and `pgl_backend()` run similarly to Android
 
 ## How to build and test
+
+### Integrated Build Script (Recommended)
+
+The `rebuild-mobile.sh` script in `packages/pglite-react-native/example/` provides an integrated workflow that automates the entire React Native mobile development process:
+
+**Purpose**: This script orchestrates the complete build chain from native PostgreSQL compilation to app deployment, eliminating the need to run multiple commands manually.
+
+**Functionality**:
+
+- Builds native PostgreSQL static libraries for the target platform
+- Compiles the React Native module TypeScript code
+- Generates platform-specific native projects (Android/iOS)
+- Builds and deploys the app to devices/simulators
+- Provides comprehensive error checking and progress reporting
+
+**Usage Examples**:
+
+```bash
+cd packages/pglite-react-native/example
+
+# Build Android with defaults (arm64-v8a, API 27)
+./rebuild-mobile.sh
+
+# Build iOS simulator for Apple Silicon
+./rebuild-mobile.sh -p ios
+
+# Build iOS for physical device
+./rebuild-mobile.sh -p ios --arch arm64
+
+# Skip native build, just rebuild app
+./rebuild-mobile.sh --skip-build
+
+# Build specific Android ABI
+./rebuild-mobile.sh -p android -a arm64-v8a
+```
+
+**Configuration Options**:
+
+- `--platform`: Target platform (android, ios)
+- `--abi`: Android ABI (arm64-v8a, armeabi-v7a)
+- `--arch`: iOS architecture (arm64-sim, arm64, x86_64)
+- `--pg-branch`: PostgreSQL branch to build
+- `--skip-build`: Skip native library compilation
+- `--skip-install`: Skip npm/pnpm install steps
+
+### Manual Build Process
+
+For advanced users or debugging, you can run the individual steps manually:
 
 - in `postgres-pglite` run `PLATFORM=android ABI=arm64-v8a PG_BRANCH=REL_17_5_WASM ./mobile-build/build-mobile.sh` to build pglite static libs for android. You need nix installed.
 - build-mobile.sh copies static libs into pglite-react-native project
@@ -306,7 +322,7 @@ The build uses a two-stage approach:
 - Basic CRUD operations (CREATE TABLE, INSERT, SELECT, UPDATE, DELETE)
 - Rudimentary serialization with correct PostgreSQL OIDs
 - PostgreSQL extended wire protocol communication via CMA buffers
-- Android build compilation and basic query execution
+- Android/ios build compilation and basic query execution
 - Memory context initialization for mobile environment
 
 ### Remaining Work

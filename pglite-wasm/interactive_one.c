@@ -553,22 +553,25 @@ if (cma_rsize<0)
     if (!cma_rsize) {
 #endif
 #endif
-        // no cma : reading from file. writing to file.
-        if (!SOCKET_FILE) {
-            SOCKET_FILE =  fopen(PGS_OLOCK, "w") ;
+        // no CMA input
 #ifndef PGL_MOBILE
+        if (!SOCKET_FILE) {
+            SOCKET_FILE = fopen(PGS_OLOCK, "w");
             if (SOCKET_FILE && MyProcPort) MyProcPort->sock = fileno(SOCKET_FILE);
             else if (MyProcPort) MyProcPort->sock = -1;
+        }
 #else
-            /* On mobile, do not assign write-only file fd to MyProcPort->sock */
+        /* Mobile: CMA-only; do not open socket files */
 #endif
-        }
     } else {
-        // prepare file reply queue, just in case of cma overflow
-        // if unused the file will be kept open till next query.
+#ifndef PGL_MOBILE
+        // prepare file reply queue, just in case of overflow
         if (!SOCKET_FILE) {
-            SOCKET_FILE =  fopen(PGS_OLOCK, "w") ;
+            SOCKET_FILE = fopen(PGS_OLOCK, "w");
         }
+#else
+        /* Mobile: CMA-only; no socket file reply queue */
+#endif
     }
 
     /* Defensive: ensure MessageContext exists (mobile may re-enter without setup) */
@@ -608,6 +611,8 @@ if (cma_rsize<0)
     /* On mobile, avoid dereferencing address 1; use empty immutable buffer */
     #undef IO
     #define IO ((char *)"")
+    /* Access CMA buffer address for peeking the first byte */
+    #include "../mobile-build/sdk_port-mobile.h"
 #endif
 
 #if defined(EMUL_CMA)
@@ -615,9 +620,8 @@ if (cma_rsize<0)
     #define IO ((char *)(1+(int)cma_port))
 #else
   #if defined(__ANDROID__) || defined(__APPLE__)
-    // On mobile, fetch the real buffer address from the native CMA shim
-    #include "../mobile-build/sdk_port-mobile.h"
-    #define IO ((char *)(intptr_t)get_buffer_addr(0))
+    // Mobile: do not reference CMA via IO; IO is unused on mobile. PQcomm reads CMA directly.
+    #define IO ((char *)"")
   #else
     #define IO ((char *)(1))
   #endif
@@ -631,10 +635,16 @@ if (cma_rsize<0)
  * TODO: allow to redirect stdout for fully external repl.
  */
 
+#ifdef PGL_MOBILE
+    /* On mobile, peek directly from CMA input buffer to set firstchar correctly */
+    peek = ((const unsigned char*)(intptr_t)get_buffer_addr(0))[0];
+#else
     peek = IO[0];
+#endif
     packetlen = cma_rsize;
 
-#ifdef PGL_MOBILE
+
+#if PGDEBUG && !defined(PGL_MOBILE)
     /* Debug: log what PostgreSQL reads from IO buffer vs socket */
     if (packetlen > 0) {
         PGL_LOG_INFO("PostgreSQL reads from IO[0]: peek=0x%02x ('%c'), packetlen=%d",
@@ -659,102 +669,76 @@ if (cma_rsize<0)
             whereToSendOutput = DestDebug;
         }
     } else {
+#ifndef PGL_MOBILE
         fp = fopen(PGS_IN, "r");
-puts("# 475:" PGS_IN "\r\n");
-        // read file in socket buffer for SocketBackend to consumme.
         if (fp) {
             fseek(fp, 0L, SEEK_END);
             packetlen = ftell(fp);
             if (packetlen) {
-                // set to always true if no REPL.
-//                is_wire = true;
                 resetStringInfo(inBuf);
                 rewind(fp);
                 /* peek on first char */
                 peek = getc(fp);
                 rewind(fp);
                 if (is_repl && !is_wire) {
-                    // sql in buffer
                     for (int i=0; i<packetlen; i++) {
                         appendStringInfoChar(inBuf, fgetc(fp));
                     }
                     sockfiles = false;
                     repl_from_file = true;
                 } else {
-                    // auth won't go to REPL, ever.
                     whereToSendOutput = DestRemote;
-                    // wire in socket reader
                     pq_recvbuf_fill(fp, packetlen);
                     sockfiles = true;
                 }
-
-                /* is it startup/auth packet ? */
-                if (!peek) {
-                    startup_auth();
-                    peek = -1;
-                    /* Mark startup message as consumed */
-                    PGL_LOG_INFO("Mobile: file-mode startup_auth complete, marking input buffer as consumed (cma_rsize %d -> 0)", cma_rsize);
-                    cma_rsize = 0;
-                }
-                if (peek==112) {
-                    startup_pass(true);
-                    peek = -1;
-                    /* Mark password message as consumed */
-                    PGL_LOG_INFO("Mobile: file-mode startup_pass complete, marking input buffer as consumed (cma_rsize %d -> 0)", cma_rsize);
-                    cma_rsize = 0;
-                }
+                if (!peek) { startup_auth(); peek = -1; }
+                if (peek==112) { startup_pass(true); peek = -1; }
             }
-
-            /* do not forget FD CLEANUP in all cases */
-//            fclose(fp);
-//            unlink(PGS_IN);
-
             if (packetlen) {
-                // it was startup/auth , write and return fast.
-                if (peek<0) {
-                    PDEBUG("# 492: handshake/auth/pass skip");
-                    goto wire_flush;
-                }
-
-                /* else it was wire msg or sql */
-#if PGDEBUG
-                if (is_wire) {
-                    force_echo = true;
-                }
-
-#endif
+                if (peek<0) { goto wire_flush; }
                 firstchar = peek;
                 goto incoming;
-            } // wire msg
-PDEBUG("# 507: NO DATA:" PGS_IN  "\n");
-        } // fp data read
+            }
+        }
+#else
+        /* Mobile: CMA-only; no file input */
+#endif
 
         // is it REPL in cma ?
+#ifndef PGL_MOBILE
         if (!peek)
             goto return_early;
 
         firstchar = peek ;
 
-        //REPL mode  in zero copy buffer ( lowest wasm memory segment )
+        // REPL mode in zero copy buffer (lowest wasm memory segment)
         packetlen = strlen(IO);
+#else
+        /* Mobile: CMA-only; skip REPL path entirely */
+        goto return_early;
+#endif
 
     } // !cma_rsize -> socketfiles -> repl
 
 #if PGDEBUG
+#ifndef PGL_MOBILE
     if (packetlen)
         IO[packetlen]=0; // wire blocks are not zero terminated
+#endif
     printf("\n# 524: fd=%d is_embed=%d is_repl=%d is_wire=%d fd %s,len=%d cma=%d peek=%d [%s]\n", MyProcPort->sock, is_embed, is_repl, is_wire, PGS_OLOCK, packetlen,cma_rsize, peek, IO);
 #endif
 
     if (!repl_from_file) {
         resetStringInfo(inBuf);
     }
+#ifndef PGL_MOBILE
     // when cma buffer is used to fake stdin, data is not read by socket/wire backend.
     if (is_repl && !repl_from_file) {
         for (int i=0; i<packetlen; i++) {
             appendStringInfoChar(inBuf, IO[i]);
         }
     }
+#endif
 
     if (packetlen<2) {
         puts("# 536: WARNING: empty packet");
@@ -954,13 +938,13 @@ wire_flush:
         } else
 #endif
 
+#ifndef PGL_MOBILE
             if (sockfiles) {
                 channel = -1;
                 if (cma_wsize) {
                     puts("ERROR: cma was not flushed before socketfile interface");
                 }
             } else {
-                /* wsize may have increased with previous rfq so assign here */
                 cma_wsize = SOCKET_DATA;
                 channel = cma_rsize + 2;
             }
@@ -969,18 +953,22 @@ wire_flush:
                 fclose(SOCKET_FILE);
                 SOCKET_FILE = NULL;
                 SOCKET_DATA = 0;
-
+#if PGDEBUG
                 if (cma_wsize) {
                     PDEBUG("# 672: cma and sockfile ???\n");
                 }
-
                 if (sockfiles) {
-#if PGDEBUG
                     printf("# 675: client:ready -> read(%d) " PGS_OLOCK "->" PGS_OUT"\n", outb);
+                }
 #endif
+                if (sockfiles) {
                     rename(PGS_OLOCK, PGS_OUT);
                 }
-            } else {
+            }
+#else
+            /* Mobile: CMA-only; no socket fallback */
+#endif
+            {
 #if PGDEBUG
 #ifdef PGL_MOBILE
             if (cma_wsize == 0)
@@ -1000,10 +988,12 @@ wire_flush:
 #endif
             PDEBUG("# 698: no data, send empty ?");
 // TODO: dedup 739
+#ifndef PGL_MOBILE
             if (sockfiles) {
                 if (SOCKET_FILE) { fclose(SOCKET_FILE); SOCKET_FILE = NULL; }
                 rename(PGS_OLOCK, PGS_OUT);
             }
+#endif
         }
     } else {
         pg_prompt();
@@ -1028,13 +1018,17 @@ return_early:;
     /* always FD CLEANUP */
     if (fp) {
         fclose(fp);
+#ifndef PGL_MOBILE
         unlink(PGS_IN);
+#endif
     }
 
 
     // always free kernel buffer !!!
     cma_rsize = 0;
+#ifndef PGL_MOBILE
     IO[0] = 0;
+#endif
 
 #ifdef PGL_MOBILE
     /* CMA mode: no cleanup needed, just reset buffer */
