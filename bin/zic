@@ -1,3 +1,0 @@
-#!/bin/bash
-#. /wasm32-wasi-shell.sh
-TZ=UTC PGTZ=UTC  /Users/imagio/dev/pg/pglite/pglite/postgres-pglite/src/timezone/zic.wasi $@
