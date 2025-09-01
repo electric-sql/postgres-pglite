@@ -105,6 +105,7 @@ pglite-exported-functions:
 	sed 's/^/_/' \
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
+# -gsource-map --no-wasm-opt
 pglite: pglite-exported-functions
 	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
 	$(CC) \
@@ -119,9 +120,12 @@ pglite: pglite-exported-functions
         -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
         -sEXPORTED_RUNTIME_METHODS=$(EXPORTED_RUNTIME_METHODS) \
         -I./src/include -I./src/ -I./src/interfaces/libpq \
-        -L/install/libs/lib -L$(top_builddir) \
+        -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ \
         pglite.o \
+		-lxslt \
         -lpgcore \
+		-lossp-uuid \
+		-lpq \
         -lnodefs.js -lidbfs.js -lxml2 -lz
 endif
 
