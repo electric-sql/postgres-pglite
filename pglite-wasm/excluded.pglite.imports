@@ -1,3 +1,4 @@
+__indirect_function_table
 invoke_i
 invoke_ii
 invoke_iii
@@ -11,4 +12,5 @@ invoke_viii
 invoke_viiii
 invoke_viiiii
 invoke_viiiiii
-__indirect_function_table
+invoke_di
+invoke_j
