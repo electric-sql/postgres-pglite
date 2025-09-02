@@ -99,9 +99,10 @@ postgres: $(OBJS)
 # excludes the one in excluded.pglite.imports and add a leading _ to each.
 pglite-exported-functions:
 	$(MKDIR_P) '$(emscripten_imports_dir)'
+	cat $(top_builddir)/pglite-wasm/excluded.*.imports $(top_builddir)/src/interfaces/libpq/exports.list | sort -u > '$(top_builddir)/pglite-wasm/excluded.imports'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite-wasm/included.pglite.imports' | \
 	sort -u | \
-	grep -Fv -f '$(top_builddir)/pglite-wasm/excluded.pglite.imports' | \
+	grep -Fvx -f '$(top_builddir)/pglite-wasm/excluded.imports' | \
 	sed 's/^/_/' \
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
@@ -122,10 +123,10 @@ pglite: pglite-exported-functions
         -I./src/include -I./src/ -I./src/interfaces/libpq \
         -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ \
         pglite.o \
+		-Ldict_snowball \
 		-lxslt \
         -lpgcore \
 		-lossp-uuid \
-		-lpq \
         -lnodefs.js -lidbfs.js -lxml2 -lz
 endif
 
