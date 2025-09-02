@@ -86,7 +86,6 @@ EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringTo
 PGROOT=/install/pglite
 PGPRELOAD=--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql --preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(top_builddir)/other/password@/tmp/pglite/password --preload-file $(top_builddir)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/postgres --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/initdb
 # -sEXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)
-# -sDYLINK_DEBUG=2
 postgres: $(OBJS)
 	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
 	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
@@ -99,13 +98,14 @@ postgres: $(OBJS)
 # excludes the one in excluded.pglite.imports and add a leading _ to each.
 pglite-exported-functions:
 	$(MKDIR_P) '$(emscripten_imports_dir)'
-	cat $(top_builddir)/pglite-wasm/excluded.*.imports $(top_builddir)/src/interfaces/libpq/exports.list | sort -u > '$(top_builddir)/pglite-wasm/excluded.imports'
+	cat $(top_builddir)/pglite-wasm/excluded.*.imports $(top_builddir)/src/interfaces/libpq/exports.list $(LIB_EXPORTS_DIR)/libossp-uuid.exports | sort -u > '$(top_builddir)/pglite-wasm/excluded.imports'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite-wasm/included.pglite.imports' | \
 	sort -u | \
 	grep -Fvx -f '$(top_builddir)/pglite-wasm/excluded.imports' | \
 	sed 's/^/_/' \
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
+# -sDYLINK_DEBUG=2
 # -gsource-map --no-wasm-opt
 pglite: pglite-exported-functions
 	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
@@ -126,7 +126,6 @@ pglite: pglite-exported-functions
 		-Ldict_snowball \
 		-lxslt \
         -lpgcore \
-		-lossp-uuid \
         -lnodefs.js -lidbfs.js -lxml2 -lz
 endif
 
