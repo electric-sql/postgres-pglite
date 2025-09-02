@@ -231,7 +231,8 @@ ifeq ($(PORTNAME), emscripten)
     shlib     = $(shlib_bare)
     soname        = $(shlib_bare)
   endif
-  BUILD.exports     = ( echo '{ global:'; $(AWK) '/^[^\#]/ {printf "%s;\n",$$1}' $<; echo ' local: *; };' ) >$@
+  BUILD.exports     = ( $(AWK) '/^[^\#]/ {printf "%s\n",$$1}' $< ) | sort -u >$@
+#  BUILD.exports     = ( echo '{ global:'; $(AWK) '/^[^\#]/ {printf "%s;\n",$$1}' $<; echo ' local: *; };' ) >$@
   exports_file      = $(SHLIB_EXPORTS:%.txt=%.list)
 #  ifneq (,$(exports_file))
 #    LINK.shared     += -Wl,--version-script=$(exports_file)
