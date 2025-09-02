@@ -5,6 +5,7 @@ top_builddir = ..
 include $(top_builddir)/src/Makefile.global
 
 SUBDIRS = \
-		pg_ivm
+		pg_ivm \
+		pgvector
 
 $(recurse)
