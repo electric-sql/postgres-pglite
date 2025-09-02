@@ -51,3 +51,4 @@ lib*.pc
 pglite.data
 pglite.js
 pglite.html
+*.map
