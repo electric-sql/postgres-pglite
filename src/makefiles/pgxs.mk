@@ -250,8 +250,8 @@ ifeq ($(with_llvm), yes)
 	$(foreach mod, $(MODULES), $(call install_llvm_module,$(mod),$(mod).bc))
 endif # with_llvm
 ifeq ($(PORTNAME), emscripten)
-	/emsdk/upstream/bin/llvm-nm -u *.o    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
-	/emsdk/upstream/bin/llvm-nm    *.o    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
+	$(LLVM_NM) -u *.o    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
+	$(LLVM_NM)    *.o    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
 	comm -23 undef.txt defs.txt > '$(DESTDIR)$(emscripten_extension_imports_dir)/$(MODULES).imports'
 	rm -f undef.txt defs.txt
 endif # PORTNAME=emscripten
@@ -278,8 +278,8 @@ ifeq ($(with_llvm), yes)
 	$(call install_llvm_module,$(MODULE_big),$(OBJS))
 endif # with_llvm
 ifeq ($(PORTNAME), emscripten)
-	/emsdk/upstream/bin/llvm-nm -u $(OBJS)    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
-	/emsdk/upstream/bin/llvm-nm    $(OBJS)    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
+	$(LLVM_NM) -u $(OBJS)    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
+	$(LLVM_NM)    $(OBJS)    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
 	comm -23 undef.txt defs.txt > '$(DESTDIR)$(emscripten_extension_imports_dir)/$(MODULE_big).imports'
 	rm -f undef.txt defs.txt
 endif # PORTNAME=emscripten

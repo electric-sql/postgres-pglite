@@ -62,8 +62,8 @@ uninstall: uninstall-lib uninstall-data uninstall-headers
 install-data: installdirs
 	$(INSTALL_DATA) $(addprefix $(srcdir)/, $(DATA)) '$(DESTDIR)$(datadir)/extension/'
 ifeq ($(PORTNAME), emscripten)
-	/emsdk/upstream/bin/llvm-nm -u $(OBJS)    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
-	/emsdk/upstream/bin/llvm-nm    $(OBJS)    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
+	$(LLVM_NM) -u $(OBJS)    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
+	$(LLVM_NM)    $(OBJS)    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
 	comm -23 undef.txt defs.txt > '$(DESTDIR)$(emscripten_extension_imports_dir)/$(NAME).imports'
 	rm -f undef.txt defs.txt
 endif
