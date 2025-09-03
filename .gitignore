@@ -52,3 +52,4 @@ pglite.data
 pglite.js
 pglite.html
 *.map
+pglite-wasm/excluded.imports
