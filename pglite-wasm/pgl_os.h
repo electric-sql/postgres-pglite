@@ -54,6 +54,9 @@ int IDB_STAGE = 0;
 static const char* get_env_or(const char* k, const char* d) { const char* v = getenv(k); return (v && *v) ? v : d; }
 static void build_pipe_path(int stage, char* out, size_t outsz) {
   const char* runtime = getenv("ANDROID_RUNTIME_DIR");
+#ifdef __APPLE__
+  if (!runtime || !*runtime) runtime = getenv("IOS_RUNTIME_DIR");
+#endif
   const char* base = (runtime && *runtime) ? runtime : get_env_or("PGDATA", "pglite/pgdata");
   const char* fname = stage==0 ? "initdb.boot.txt" : "initdb.single.txt";
   snprintf(out, outsz, "%s/%s", base, fname);

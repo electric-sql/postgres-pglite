@@ -9,7 +9,7 @@ extern "C" {
 // Simple mobile CMA-like buffer semantics used by interactive_one.c
 int get_buffer_size(int fd);       // capacity for channel fd
 intptr_t get_buffer_addr(int fd);  // native pointer to buffer base + 1 for IO[]
-void interactive_write(int size);  // set cma_rsize=size, reset cma_wsize=0
+// interactive_write is defined in interactive_one.c for both WASM and mobile
 int interactive_read(void);        // return cma_wsize
 void use_wire(int state);          // >0 wire mode, <=0 repl
 

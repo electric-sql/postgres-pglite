@@ -19,8 +19,7 @@ extern volatile int pgl_mobile_cma_wsize;
 
 static StringInfoData mobileSendBuf;
 static bool mobileCommInited = false;
-static int prev_req_len = -1;      /* last seen cma_rsize for request */
-static int out_published = 0;      /* cumulative bytes published for current request */
+int original_request_size = 0;  /* Saved original request size for offset calculation (non-static for external access) */
 
 static void mobile_comm_init_if_needed(void)
 {
@@ -28,6 +27,8 @@ static void mobile_comm_init_if_needed(void)
     {
         initStringInfo(&mobileSendBuf);
         mobileCommInited = true;
+
+        PGL_LOG_INFO("mobile_comm_init_if_needed: initialized mobileSendBuf");
     }
 }
 
@@ -35,11 +36,34 @@ static void mobile_comm_reset(void)
 {
     mobile_comm_init_if_needed();
     resetStringInfo(&mobileSendBuf);
+    original_request_size = 0;  /* Reset for new connection */
+    
+    /* Clear receive buffer state to prevent infinite retry loops */
+    extern void pq_reset_buffer_state(void);
+    pq_reset_buffer_state();
+    PGL_LOG_INFO("mobile_comm_reset: reset receive buffer state (PqRecvPointer=0, PqRecvLength=0)");
+    
+    /* Clear the CMA buffer to prevent bootstrap data from leaking into queries */
+    char *buf = (char*)(intptr_t)get_buffer_addr(1);
+    if (buf && get_buffer_size(1) > 0) {
+        memset(buf, 0, 256);  /* Clear first 256 bytes */
+        PGL_LOG_INFO("mobile_comm_reset: cleared buffer to prevent bootstrap data leakage");
+    }
 }
 
 static int mobile_flush(void)
 {
     mobile_comm_init_if_needed();
+    
+    /* Bootstrap/single-user queries should never reach here if REPL mode is working correctly */
+    extern volatile int cma_rsize;
+    if (original_request_size == 0 && cma_rsize == 0) {
+        PGL_LOG_WARN("mobile_flush: called without request size set, likely bootstrap query in wire mode");
+        /* Don't write anything to avoid buffer corruption */
+        resetStringInfo(&mobileSendBuf);
+        return 0;
+    }
+    
     // MLOGI("mobile_flush: mobileSendBuf.len=%d", mobileSendBuf.len);
     if (mobileSendBuf.len > 0)
     {
@@ -50,31 +74,36 @@ static int mobile_flush(void)
         if (n > 0)
         {
             char *dst = (char*)(intptr_t)get_buffer_addr(1);
-            int reqLen = cma_rsize;
-            if (prev_req_len != reqLen && reqLen > 0) {
-                /* New request began (only reset when reqLen > 0) */
-                out_published = 0;
-                prev_req_len = reqLen;
-                // MLOGI("mobile_flush: new request, reqLen=%d", reqLen);
-            } else if (prev_req_len != reqLen) {
-                /* Request finished (reqLen == 0), just update tracking */
-                prev_req_len = reqLen;
-                // MLOGI("mobile_flush: request finished, reqLen=%d", reqLen);
+            
+            /* Clear separator region if this is a new query (pgl_mobile_cma_wsize == 0) */
+            if (pgl_mobile_cma_wsize == 0 && original_request_size > 0) {
+                /* Clear the 2-byte separator region that sits between input and output */
+                memset(dst + original_request_size, 0, 2);
+                PGL_LOG_INFO("mobile_flush: cleared separator region at offset %d", original_request_size);
             }
-            int off = reqLen + 2 + out_published; /* append after previous chunks */
+
+            /* Calculate offset using original request size (matches WASM behavior) */
+            int off = (original_request_size > 0) ? (original_request_size + 2 + pgl_mobile_cma_wsize) : pgl_mobile_cma_wsize;
             if (off < 0) off = 0;
             if (off > cap) off = cap;
+
+            /* Validate that we won't write beyond buffer boundaries */
             int copyLen = (off + n <= cap) ? n : (cap - off);
-            if (copyLen > 0) memcpy(dst + off, mobileSendBuf.data, (size_t)copyLen);
-            // publish cumulative length for this request
-            out_published += copyLen;
+            if (copyLen > 0) {
+                memcpy(dst + off, mobileSendBuf.data, (size_t)copyLen);
+                PGL_LOG_INFO("mobile_flush: copied %d bytes to offset %d (original_req_size=%d, current_wsize=%d)",
+                           copyLen, off, original_request_size, pgl_mobile_cma_wsize);
+            }
+
+            /* Accumulate response size directly in pgl_mobile_cma_wsize */
+            pgl_mobile_cma_wsize += copyLen;
             channel = 1;
-            pgl_mobile_cma_wsize = out_published;
-            PGL_LOG_INFO("flush: set pgl_mobile_cma_wsize=%d, addr=%p", pgl_mobile_cma_wsize, (void*)&pgl_mobile_cma_wsize);
+
+            PGL_LOG_INFO("flush: updated pgl_mobile_cma_wsize=%d, addr=%p", pgl_mobile_cma_wsize, (void*)&pgl_mobile_cma_wsize);
             // MLOGI("flush: published chunk=%d cum=%d at off=%d (reqLen=%d)", copyLen, out_published, off, reqLen);
         }
         else {
-            PGL_LOG_INFO("flush: mobileSendBuf.len=%d but cap insufficient (cap=%d, reqLen=%d)", mobileSendBuf.len, cap, cma_rsize);
+            PGL_LOG_INFO("flush: mobileSendBuf.len=%d but cap insufficient (cap=%d, original_req_size=%d)", mobileSendBuf.len, cap, original_request_size);
         }
         resetStringInfo(&mobileSendBuf);
     }
@@ -100,6 +129,38 @@ static int mobile_putmessage(char msgtype, const char *s, size_t len)
 {
     mobile_comm_init_if_needed();
     PGL_LOG_INFO("mobile_putmessage: msgtype='%c' len=%zu", msgtype, len);
+
+    // For DataRow, parse first couple of field lengths to verify payload integrity
+    if (msgtype == 'D' && s != NULL && len >= 2) {
+        const unsigned char* p = (const unsigned char*)s;
+        // fieldCount is int16 big-endian
+        uint16_t fc = (uint16_t)((p[0] << 8) | p[1]);
+        PGL_LOG_INFO("mobile_putmessage:   DataRow fieldCount=%u", (unsigned)fc);
+        p += 2;
+        size_t remaining = len - 2;
+        for (unsigned i = 0; i < fc && i < 3 && remaining >= 4; i++) {
+            uint32_t flen = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+            PGL_LOG_INFO("mobile_putmessage:     field[%u] len=%u", i, (unsigned)flen);
+            p += 4;
+            if ((int32_t)flen >= 0) {
+                if (remaining < 4 + flen) {
+                    PGL_LOG_WARN("mobile_putmessage:     field[%u] payload would exceed message: flen=%u remainingAfterLen=%zu", i, (unsigned)flen, remaining - 4);
+                    break;
+                }
+                // Optional: dump a few bytes of payload
+                size_t pl = flen < 8 ? flen : 8;
+                char hex[3*8+1];
+                size_t pos = 0;
+                for (size_t k = 0; k < pl; k++) { pos += snprintf(hex + pos, sizeof(hex) - pos, "%02x ", p[k]); }
+                if (pl > 0) hex[pos ? pos-1 : 0] = '\0';
+                PGL_LOG_INFO("mobile_putmessage:       payload[0..%zu)=%s", pl, pl ? hex : "");
+                p += flen;
+                remaining -= (4 + flen);
+            } else {
+                remaining -= 4;
+            }
+        }
+    }
 
     // Format: type + length (int32 network) + payload
     uint32 n32 = htonl((uint32)(len + 4));
@@ -161,7 +222,7 @@ void pgl_install_mobile_comm(void)
     };
     PqCommMethods = &MobileMethods;
     PGL_LOG_INFO("pgl_install_mobile_comm: PqCommMethods set to %p", (void*)PqCommMethods);
-    
+
     /* Ensure CMA buffer is initialized and external variables are set */
     get_buffer_size(0);  /* This will trigger ensure_buf() */
 }

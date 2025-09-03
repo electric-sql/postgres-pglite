@@ -257,7 +257,15 @@ static void io_init(bool in_auth, bool out_auth) {
 }
 
 
+#ifdef PGL_MOBILE
+/* Mobile: these are defined in sdk_port-mobile.c */
+extern volatile bool is_wire;
+extern volatile bool is_repl;
+#else
+/* WASM: define here */
 volatile bool is_wire = true;
+extern volatile bool is_repl;  /* Defined in pg_main.c for WASM */
+#endif
 extern char * cma_port;
 extern void pq_startmsgread(void);
 
@@ -269,6 +277,9 @@ interactive_write(int size) {
     cma_wsize = 0;
 #else
     pgl_mobile_cma_wsize = 0;
+    extern int original_request_size;
+    original_request_size = size;  /* Save for mobile_flush offset calculation */
+    PGL_LOG_INFO("interactive_write: saved original_request_size=%d", original_request_size);
 #endif
 }
 
@@ -544,15 +555,7 @@ if (cma_rsize<0)
         goto wire_flush;
     }
 
-#ifdef PGL_MOBILE
     if (!cma_rsize) {
-#else
-#ifdef PGL_MOBILE
-    if (!cma_rsize) {
-#else
-    if (!cma_rsize) {
-#endif
-#endif
         // no CMA input
 #ifndef PGL_MOBILE
         if (!SOCKET_FILE) {

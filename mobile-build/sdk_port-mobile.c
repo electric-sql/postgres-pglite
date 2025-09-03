@@ -15,9 +15,12 @@ volatile int cma_rsize = 0;
 
 /* External variables defined in pqcomm.c, set by mobile SDK */
 extern volatile int pgl_mobile_cma_wsize;
+extern int original_request_size;  /* Defined in pgl_mobile_comm.c */
+
+/* Mobile: Single definition point for these globals (used by interactive_one.c) */
 volatile int channel = 0;
-volatile bool is_wire = true;
-volatile bool is_repl = true;
+volatile bool is_wire = false;  /* Default to REPL mode for bootstrap */
+volatile bool is_repl = true;   /* Start in REPL mode */
 
 // Single channel buffer for now
 #ifndef CMA_MB
@@ -66,11 +69,6 @@ intptr_t get_buffer_addr(int fd) {
   return (intptr_t)(g_buf + 1);
 }
 
-void interactive_write(int size) {
-  cma_rsize = size;
-  pgl_mobile_cma_wsize = 0;
-}
-
 int interactive_read(void) {
   PGL_LOG_INFO("interactive_read: pgl_mobile_cma_wsize=%d, addr=%p", pgl_mobile_cma_wsize, (void*)&pgl_mobile_cma_wsize);
   return pgl_mobile_cma_wsize;
@@ -80,5 +78,12 @@ void use_wire(int state) {
   is_wire = (state > 0);
   extern volatile bool is_repl;
   is_repl = !is_wire;
+  
+  /* When switching to REPL mode, clear request size to avoid confusion */
+  if (!is_wire) {
+    original_request_size = 0;
+    pgl_mobile_cma_wsize = 0;
+    PGL_LOG_INFO("use_wire: switched to REPL mode, cleared request sizes");
+  }
 }
 

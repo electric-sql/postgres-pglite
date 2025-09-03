@@ -6,8 +6,8 @@
 **/*.DS_Store
 
 # auto-edited makefiles
-./src/test/Makefile
-./src/test/isolation/Makefile
+src/test/Makefile
+src/test/isolation/Makefile
 
 # Global excludes across all subdirectories
 *.o
@@ -52,3 +52,8 @@ lib*.pc
 /portlock/
 /dist
 
+
+# build output symlinks
+postgres-pglite
+postgresql
+postgresql-REL_17_5_WASM

@@ -132,7 +132,13 @@ volatile char *PGUSER;
 
 const char *progname;
 
+#ifdef PGL_MOBILE
+/* Mobile: defined in sdk_port-mobile.c */
+extern volatile bool is_repl;
+#else
+/* WASM: define here */
 volatile bool is_repl = true;
+#endif
 volatile bool is_node = true;
 volatile bool is_embed = false;
 volatile int pgl_idb_status;
@@ -685,7 +691,10 @@ __attribute__ ((export_name("pgl_backend")))
 #endif
     setenv("PGUSER", PGUSER, 1);
 
-
+#ifdef PGL_MOBILE
+    /* Single-user mode runs in REPL mode by default (is_wire=false, is_repl=true) */
+    PGL_LOG_INFO("[pgl_backend] Using default REPL mode for AsyncPostgresSingleUserMain");
+#endif
 
     AsyncPostgresSingleUserMain(single_argc_save, single_argv, PGUSER, async_restart);
 

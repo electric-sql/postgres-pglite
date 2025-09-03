@@ -333,3 +333,8 @@ For advanced users or debugging, you can run the individual steps manually:
 - **Review PGL_MOBILE vs **EMSCRIPTEN\*\*\*\* - Find places where mobile is missing conditional compilation it might need
 - **Cleanup** - Remove debug logging, temporary code
 - **Add Extensions Support** - Load and use PostgreSQL extensions
+
+### TODOS
+
+- pgl_install_mobile_comm is getting run on every request, should only be necessary on the first one?
+-
