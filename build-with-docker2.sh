@@ -1,10 +1,6 @@
-# we are using a custom emsdk to build pglite wasm
-# this is available as a docker image under electricsql/pglite-builder
-IMG_NAME=${IMG_NAME:-"electricsql/pglite-builder"}
-IMG_TAG=${IMG_TAG:-"3.1.74_vanilla"}
-
-DOCKER_WORKSPACE=/src/postgres-pglite
-DEBUG_SOURCE_PATH=$(pwd)
+# although we could use any path inside docker, using the same path as on the host
+# allows the DWARF info (when building in DEBUG) to contain the correct file paths
+DOCKER_WORKSPACE=$(pwd)
 
 docker run $@ \
   --rm \
@@ -12,6 +8,6 @@ docker run $@ \
   --workdir=${DOCKER_WORKSPACE} \
   -v .:${DOCKER_WORKSPACE}:rw \
   -v ./dist:/install/pglite:rw \
-  $IMG_NAME:$IMG_TAG \
+  electricsql/pglite-builder:3.1.74_vanilla \
   ./build-pglite.sh
   
