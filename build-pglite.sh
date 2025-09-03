@@ -12,16 +12,14 @@ PGLITE_CFLAGS="-O2"
 if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
-    SOURCE_MAP_PREFIXES="[]"
-    if [ "$DEBUG_SOURCE_PATH" ]
-    then
-        SOURCE_MAP_PREFIXES="$(pwd)=$DEBUG_SOURCE_PATH"
-    fi
-    PGLITE_CFLAGS="-g -gsource-map --no-wasm-opt -sSOURCE_MAP_PREFIXES=$SOURCE_MAP_PREFIXES"
+    PGLITE_CFLAGS="-g -gsource-map --no-wasm-opt"
 else
     echo "pglite: building release version."
+    # we shouldn't need to do this, but there's a bug somewhere that prevents a successful build if this is set
     unset DEBUG
 fi
+
+echo "pglite: PGLITE_CFLAGS=$PGLITE_CFLAGS"
 
 # Step 1: configure the project
 LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0" CFLAGS="${PGLITE_CFLAGS} -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -DPYDK=1 -DCMA_MB=12 -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types" emconfigure ./configure ac_cv_exeext=.cjs --disable-spinlocks --disable-largefile --without-llvm  --without-pam --disable-largefile --with-openssl=no --without-readline --without-icu --with-includes=$INSTALL_PREFIX/include:$INSTALL_PREFIX/include/libxml2 --with-libraries=$INSTALL_PREFIX/lib --with-uuid=ossp --with-zlib --with-libxml --with-libxslt --with-template=emscripten --prefix=$INSTALL_FOLDER || { echo 'error: emconfigure failed' ; exit 11; }
