@@ -12,9 +12,15 @@ PGLITE_CFLAGS="-O2"
 if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
-    PGLITE_CFLAGS="-gsource-map --no-wasm-opt"
+    SOURCE_MAP_PREFIXES="[]"
+    if [ "$DEBUG_SOURCE_PATH" ]
+    then
+        SOURCE_MAP_PREFIXES="$(pwd)=$DEBUG_SOURCE_PATH"
+    fi
+    PGLITE_CFLAGS="-g -gsource-map --no-wasm-opt -sSOURCE_MAP_PREFIXES=$SOURCE_MAP_PREFIXES"
 else
     echo "pglite: building release version."
+    unset DEBUG
 fi
 
 # Step 1: configure the project
@@ -37,4 +43,4 @@ emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ install || { echo 'emmake
 PATH=$SAVE_PATH
 
 # Step 5: make and install pglite
-emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }
+PGLITE_CFLAGS=$PGLITE_CFLAGS emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }
