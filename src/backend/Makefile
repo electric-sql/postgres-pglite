@@ -106,11 +106,12 @@ pglite-exported-functions:
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
 # -sDYLINK_DEBUG=2
-# -gsource-map --no-wasm-opt
+# PGLITE_CFLAGS is something like "-O2" (aka release version) or "-gsource-map --no-wasm-opt" (aka debug version)
 pglite: pglite-exported-functions
 	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
 	$(CC) \
-	-fPIC -sWASM_BIGINT -sMIN_SAFARI_VERSION=150000 -D__PYDK__=1 -O2 -m32 -D_FILE_OFFSET_BITS=64 -sSUPPORT_LONGJMP=emscripten -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn \
+	$(PGLITE_CFLAGS) \
+	-fPIC -sWASM_BIGINT -sMIN_SAFARI_VERSION=150000 -D__PYDK__=1 -m32 -D_FILE_OFFSET_BITS=64 -sSUPPORT_LONGJMP=emscripten -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn \
 	-DPYDK=1 -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -o pglite.html --shell-file $(top_builddir)/pglite-wasm/repl.html \
         $(PGPRELOAD) \
         -sGLOBAL_BASE=12MB -ferror-limit=1 \

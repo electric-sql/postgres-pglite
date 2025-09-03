@@ -1,0 +1,42 @@
+#!/bin/bash
+
+### NOTES ###
+# $INSTALL_PREFIX is expected to point to the installation folder of various libraries built to wasm (see pglite-builder)
+#############
+
+# final output folder
+INSTALL_FOLDER=${INSTALL_FOLDER:-"/install/pglite"}
+
+# build with optimizations by default aka release
+PGLITE_CFLAGS="-O2"
+if [ "$DEBUG" = true ]
+then
+    echo "pglite: building debug version."
+    PGLITE_CFLAGS="-gsource-map --no-wasm-opt"
+else
+    echo "pglite: building release version."
+fi
+
+# Step 1: configure the project
+# echo "LDFLAGS: $LDFLAGS"
+# echo "CFLAGS: $CFLAGS"
+LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0" CFLAGS="${PGLITE_CFLAGS} -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -DPYDK=1 -DCMA_MB=12 -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types" emconfigure ./configure ac_cv_exeext=.cjs --disable-spinlocks --disable-largefile --without-llvm  --without-pam --disable-largefile --with-openssl=no --without-readline --without-icu --with-includes=$INSTALL_PREFIX/include:$INSTALL_PREFIX/include/libxml2 --with-libraries=$INSTALL_PREFIX/lib --with-uuid=ossp --with-zlib --with-libxml --with-libxslt --with-template=emscripten --prefix=$INSTALL_FOLDER || { echo 'error: emconfigure failed' ; exit 11; }
+
+# Step 2: make and install all except pglite
+emmake make PORTNAME=emscripten -j || { echo 'error: emmake make PORTNAME=emscripten -j' ; exit 21; }
+emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 22; }
+
+# Step 3: make and install contrib extensions
+emmake make PORTNAME=emscripten -C contrib/ -j || { echo 'emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
+emmake make PORTNAME=emscripten -C contrib/ install || { echo 'emmake make PORTNAME=emscripten -C contrib/ install' ; exit 32; }
+# the above will also create a file with the imports that each extension needs - we pass these as input in the next step for emscripten to keep alive
+
+# Step 4: make and install other extensions
+SAVE_PATH=$PATH
+PATH=$PATH:$INSTALL_FOLDER/bin
+emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 41; }
+emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ install || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 42; }
+PATH=$SAVE_PATH
+
+# Step 5: make and install pglite
+emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }
