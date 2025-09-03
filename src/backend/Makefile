@@ -106,7 +106,7 @@ pglite-exported-functions:
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
 # -sDYLINK_DEBUG=2
-# PGLITE_CFLAGS is something like "-O2" (aka release version) or "-gsource-map --no-wasm-opt" (aka debug version)
+# PGLITE_CFLAGS is something like "-O2" (aka release version) or "-g -gsource-map --no-wasm-opt" (aka debug version)
 pglite: pglite-exported-functions
 	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
 	$(CC) \
