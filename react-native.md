@@ -328,7 +328,7 @@ For advanced users or debugging, you can run the individual steps manually:
 ### Remaining Work
 
 - ~~**iOS Implementation** - Port Android work to iOS with proper build system integration~~
-- **Extract Base Package** - Create shared `@electric-sql/pglite-base` without web dependencies so serialization and other logic can be shared with react native
+- ~~**Extract Base Package** - Create shared `@electric-sql/pglite-base` without web dependencies so serialization and other logic can be shared with react native~~
 - **Replace Custom Serialization** - Use extracted base serialization methods for consistency
 - **Review PGL_MOBILE vs **EMSCRIPTEN\*\*\*\* - Find places where mobile is missing conditional compilation it might need
 - **Cleanup** - Remove debug logging, temporary code

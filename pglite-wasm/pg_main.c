@@ -874,6 +874,7 @@ __attribute__ ((export_name("pgl_backend")))
 #endif
     {
         PDEBUG("# 450: restarting in boot mode for initdb");
+#ifdef PGL_MOBILE
         char __pipe_path[1024];
         extern void pgl_get_pipe_path(int stage, char* out, size_t outsz);
         pgl_get_pipe_path(0, __pipe_path, sizeof(__pipe_path));
@@ -881,8 +882,15 @@ __attribute__ ((export_name("pgl_backend")))
         struct stat __bp_st; int __bp_rc = stat(__pipe_path, &__bp_st);
         fprintf(stderr, "[pgl_main] boot pipe stat rc=%d errno=%d size=%lld\n", __bp_rc, errno, (long long)((__bp_rc==0)?__bp_st.st_size:0));
         FILE* fr = freopen(__pipe_path, "r", stdin);
+#else
+        FILE* fr = freopen(IDB_PIPE_BOOT, "r", stdin);
+#endif
         if (!fr) {
+#ifdef PGL_MOBILE
             fprintf(stderr, "[pgl_main] freopen boot failed for %s errno=%d\n", __pipe_path, errno);
+#else
+            fprintf(stderr, "[pgl_main] freopen boot failed for %s errno=%d\n", IDB_PIPE_BOOT, errno);
+#endif
             // attempt to restore STDIN before returning
             dup2(saved_stdin, STDIN_FILENO);
             close(saved_stdin);
@@ -1094,6 +1102,7 @@ __attribute__ ((export_name("pgl_backend")))
                 fprintf(stderr, "[pgl_main] global dir stat rc=%d errno=%d\n", grc, errno);
             }
             // Dump first 25 lines of boot stream
+#ifdef PGL_MOBILE
             {
                 char pipe_path[1024]; extern void pgl_get_pipe_path(int stage, char* out, size_t outsz);
                 pgl_get_pipe_path(0, pipe_path, sizeof(pipe_path));
@@ -1107,6 +1116,19 @@ __attribute__ ((export_name("pgl_backend")))
                     fprintf(stderr, "[pgl_main] cannot open boot file for head: %s errno=%d\n", pipe_path, errno);
                 }
             }
+#else
+            {
+                FILE* f = fopen(IDB_PIPE_BOOT, "r");
+                if (f) {
+                    fprintf(stderr, "[pgl_main] boot head:\n");
+                    char line[256]; int n=0; while (n<25 && fgets(line, sizeof(line), f)) { fputs(line, stderr); n++; }
+                    if (!feof(f)) fprintf(stderr, "[pgl_main] ... (truncated)\n");
+                    fclose(f);
+                } else {
+                    fprintf(stderr, "[pgl_main] cannot open boot file for head: %s errno=%d\n", IDB_PIPE_BOOT, errno);
+                }
+            }
+#endif
         } else {
             PDEBUG("# 479: initdb boot replay done");
             PGL_LOG_INFO("%s", "[pgl_main] initdb boot replay completed successfully");
