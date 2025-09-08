@@ -29,17 +29,10 @@
 // globals
 
 /*
- * Ensure MessageContext and its children are actually cleared between
- * queries. Leaving this as a no-op causes unbounded growth in
- * MessageContext when large query strings or parameters are processed,
- * eventually exhausting memory.
+ * MessageContext cleanup between queries relies on upstream semantics:
+ * MemoryContextReset() deletes child contexts since v9.5.
+ * Avoid redefining legacy MemoryContextResetAndDeleteChildren.
  */
-#undef MemoryContextResetAndDeleteChildren
-#define MemoryContextResetAndDeleteChildren(ctx) \
-    do {                                           \
-        MemoryContextDeleteChildren((ctx));         \
-        MemoryContextReset((ctx));                  \
-    } while (0)
 // #define SpinLockInit(...)
 
 
