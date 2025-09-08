@@ -47,6 +47,22 @@
     #define PG_DYNSHMEM_DIR					"/tmp/pglite"
     #define PG_DYNSHMEM_MMAP_FILE_PREFIX	"mmap."
 
+
+#elif defined(PGL_MOBILE)
+    /*
+     * Android (bionic) and iOS lacks POSIX shm_* and SysV shm_* in usable form for our
+     * build; prefer mmap-based DSM to avoid undeclared symbol errors. Use the
+     * same on-disk directory names as upstream (relative to DataDir).
+     */
+    #define DEFAULT_DYNAMIC_SHARED_MEMORY_TYPE        DSM_IMPL_MMAP
+    #define USE_DSM_MMAP
+    #ifndef PG_DYNSHMEM_DIR
+    #define PG_DYNSHMEM_DIR                   "pg_dynshmem"
+    #endif
+    #ifndef PG_DYNSHMEM_MMAP_FILE_PREFIX
+    #define PG_DYNSHMEM_MMAP_FILE_PREFIX      "mmap."
+    #endif
+
 #else
 
 #ifdef WIN32

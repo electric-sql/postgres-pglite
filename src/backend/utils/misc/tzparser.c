@@ -31,6 +31,9 @@
 #include "utils/memutils.h"
 #include "utils/tzparser.h"
 
+#include <errno.h>
+#include <string.h>
+
 
 #define WHITESPACE " \t\n\r"
 
@@ -319,6 +322,7 @@ ParseTzFile(const char *filename, int depth,
 	get_share_path(my_exec_path, share_path);
 	snprintf(file_path, sizeof(file_path), "%s/timezonesets/%s",
 			 share_path, filename);
+	fprintf(stderr, "[pgl_boot] tzparser: trying file %s\n", file_path);
 	tzFile = AllocateFile(file_path, "r");
 	if (!tzFile)
 	{
@@ -329,15 +333,21 @@ ParseTzFile(const char *filename, int depth,
 		 * place we notice a problem during postmaster startup.
 		 */
 		int			save_errno = errno;
+		fprintf(stderr, "[pgl_boot] tzparser: open failed errno=%d (%s)\n", save_errno, strerror(save_errno));
 		DIR		   *tzdir;
 
 		snprintf(file_path, sizeof(file_path), "%s/timezonesets",
 				 share_path);
+		fprintf(stderr, "[pgl_boot] tzparser: trying dir %s\n", file_path);
 		tzdir = AllocateDir(file_path);
-		if (tzdir == NULL)
+		if (tzdir == NULL) {
+			int dir_errno = errno;
+			fprintf(stderr, "[pgl_boot] tzparser: open dir failed errno=%d (%s)\n", dir_errno, strerror(dir_errno));
+
 		{
 			GUC_check_errmsg("could not open directory \"%s\": %m",
 							 file_path);
+		}
 			GUC_check_errhint("This may indicate an incomplete PostgreSQL installation, or that the file \"%s\" has been moved away from its proper location.",
 							  my_exec_path);
 			return -1;

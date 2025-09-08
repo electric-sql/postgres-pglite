@@ -23,6 +23,11 @@
 #include "common/percentrepl.h"
 #include "pgstat.h"
 
+#if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR)
+/* For iOS builds where system() is unavailable, return failure */
+#define system(cmd) (-1)
+#endif
+
 static bool shell_archive_configured(ArchiveModuleState *state);
 static bool shell_archive_file(ArchiveModuleState *state,
 							   const char *file,

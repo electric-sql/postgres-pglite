@@ -2,6 +2,13 @@
 # Auxiliary files from local workflows, your preferred editor, etc. should
 # be ignored locally using $GIT_DIR/info/exclude or ~/.gitexclude.
 
+#  excludes for macOS
+**/*.DS_Store
+
+# auto-edited makefiles
+src/test/Makefile
+src/test/isolation/Makefile
+
 # Global excludes across all subdirectories
 *.o
 *.obj
@@ -44,3 +51,9 @@ lib*.pc
 /tmp_install/
 /portlock/
 /dist
+
+
+# build output symlinks
+postgres-pglite
+postgresql
+postgresql-REL_17_5_WASM

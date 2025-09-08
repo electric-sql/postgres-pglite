@@ -80,6 +80,9 @@ extern int	pq_getbyte(void);
 extern int	pq_peekbyte(void);
 extern int	pq_getbyte_if_available(unsigned char *c);
 extern ssize_t pq_buffer_remaining_data(void);
+#ifdef PGL_MOBILE
+extern void pq_reset_buffer_state(void);
+#endif
 extern int	pq_putmessage_v2(char msgtype, const char *s, size_t len);
 extern bool pq_check_connection(void);
 

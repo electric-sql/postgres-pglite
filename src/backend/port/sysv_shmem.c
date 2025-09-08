@@ -22,9 +22,19 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/file.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+#if defined(PGL_MOBILE)
+#define MOBILE_NO_SYSV 1
+#endif
+#ifndef MOBILE_NO_SYSV
 #include <sys/ipc.h>
+#endif
 #include <sys/mman.h>
+#ifndef MOBILE_NO_SYSV
 #include <sys/shm.h>
+#endif
 #include <sys/stat.h>
 
 #include "miscadmin.h"
@@ -117,6 +127,8 @@ static IpcMemoryState PGSharedMemoryAttach(IpcMemoryId shmId,
  * If we fail with a failure code other than collision-with-existing-segment,
  * print out an error and abort.  Other types of errors are not recoverable.
  */
+#ifndef MOBILE_NO_SYSV
+
 static void *
 InternalIpcMemoryCreate(IpcMemoryKey memKey, Size size)
 {
@@ -277,11 +289,15 @@ InternalIpcMemoryCreate(IpcMemoryKey memKey, Size size)
 	return memAddress;
 }
 
+#endif /* MOBILE_NO_SYSV */
+
+
 /****************************************************************************/
 /*	IpcMemoryDetach(status, shmaddr)	removes a shared memory segment		*/
 /*										from process' address space			*/
 /*	(called as an on_shmem_exit callback, hence funny argument list)		*/
 /****************************************************************************/
+#ifndef MOBILE_NO_SYSV
 static void
 IpcMemoryDetach(int status, Datum shmaddr)
 {
@@ -289,11 +305,19 @@ IpcMemoryDetach(int status, Datum shmaddr)
 	if (shmdt((void *) DatumGetPointer(shmaddr)) < 0)
 		elog(LOG, "shmdt(%p) failed: %m", DatumGetPointer(shmaddr));
 }
+#else
+static void
+IpcMemoryDetach(int status, Datum shmaddr)
+{
+	(void)status; (void)shmaddr; /* no-op on mobile */
+}
+#endif
 
 /****************************************************************************/
 /*	IpcMemoryDelete(status, shmId)		deletes a shared memory segment		*/
 /*	(called as an on_shmem_exit callback, hence funny argument list)		*/
 /****************************************************************************/
+#ifndef MOBILE_NO_SYSV
 static void
 IpcMemoryDelete(int status, Datum shmId)
 {
@@ -301,6 +325,13 @@ IpcMemoryDelete(int status, Datum shmId)
 		elog(LOG, "shmctl(%d, %d, 0) failed: %m",
 			 DatumGetInt32(shmId), IPC_RMID);
 }
+#else
+static void
+IpcMemoryDelete(int status, Datum shmId)
+{
+	(void)status; (void)shmId; /* no-op on mobile */
+}
+#endif
 
 /*
  * PGSharedMemoryIsInUse
@@ -313,6 +344,7 @@ IpcMemoryDelete(int status, Datum shmId)
  * DataDir.  This is an important consideration since accidental matches of
  * shmem segment IDs are reasonably common.
  */
+#ifndef MOBILE_NO_SYSV
 bool
 PGSharedMemoryIsInUse(unsigned long id1, unsigned long id2)
 {
@@ -335,6 +367,15 @@ PGSharedMemoryIsInUse(unsigned long id1, unsigned long id2)
 	return true;
 }
 
+#else
+bool
+PGSharedMemoryIsInUse(unsigned long id1, unsigned long id2)
+{
+	(void)id1; (void)id2;
+	return false;
+}
+#endif
+
 /*
  * Test for a segment with id shmId; see comment at IpcMemoryState.
  *
@@ -343,6 +384,7 @@ PGSharedMemoryIsInUse(unsigned long id1, unsigned long id2)
  *
  * *addr is set to the segment memory address if we attached to it, else NULL.
  */
+#ifndef MOBILE_NO_SYSV
 static IpcMemoryState
 PGSharedMemoryAttach(IpcMemoryId shmId,
 					 void *attachAt,
@@ -452,6 +494,14 @@ PGSharedMemoryAttach(IpcMemoryId shmId,
 	 */
 	return shmStat.shm_nattch == 0 ? SHMSTATE_UNATTACHED : SHMSTATE_ATTACHED;
 }
+#else
+static IpcMemoryState
+PGSharedMemoryAttach(IpcMemoryId shmId, void *attachAt, PGShmemHeader **addr)
+{
+	(void)shmId; (void)attachAt; (void)addr;
+	return SHMSTATE_ENOENT;
+}
+#endif
 
 /*
  * Identify the huge page size to use, and compute the related mmap flags.
@@ -664,6 +714,10 @@ CreateAnonymousSegment(Size *size)
 	}
 
 	*size = allocsize;
+
+	/* Mobile diagnostic: log anon mmap success and address */
+	fprintf(stderr, "[pgl_boot] shmem: mapped anon segment size=%zu at=%p\n", allocsize, ptr);
+
 	return ptr;
 }
 
@@ -696,6 +750,7 @@ AnonymousShmemDetach(int status, Datum arg)
  * is to detect and re-use keys that may have been assigned by a crashed
  * postmaster or backend.
  */
+#ifndef MOBILE_NO_SYSV
 PGShmemHeader *
 PGSharedMemoryCreate(Size size,
 					 PGShmemHeader **shim)
@@ -767,6 +822,9 @@ PGSharedMemoryCreate(Size size,
 				 errmsg("huge pages not supported with the current \"shared_memory_type\" setting")));
 
 	/* Room for a header? */
+
+		report_unix_error:;
+
 	Assert(size > MAXALIGN(sizeof(PGShmemHeader)));
 
 	if (shared_memory_type == SHMEM_TYPE_MMAP)
@@ -891,6 +949,10 @@ PGSharedMemoryCreate(Size size,
 	hdr->freeoffset = MAXALIGN(sizeof(PGShmemHeader));
 	*shim = hdr;
 
+		/* Mobile diagnostic: note whether AnonymousShmem was allocated and sysv shim size */
+		elog(DEBUG1, "PGSharedMemoryCreate: sysvsize=%zu anon=%s anon_size=%zu", sysvsize, AnonymousShmem ? "yes" : "no", AnonymousShmemSize);
+
+
 	/* Save info for possible future use */
 	UsedShmemSegAddr = memAddress;
 	UsedShmemSegID = (unsigned long) NextShmemSegID;
@@ -906,6 +968,36 @@ PGSharedMemoryCreate(Size size,
 	memcpy(AnonymousShmem, hdr, sizeof(PGShmemHeader));
 	return (PGShmemHeader *) AnonymousShmem;
 }
+#else /* MOBILE_NO_SYSV */
+
+PGShmemHeader *
+PGSharedMemoryCreate(Size size, PGShmemHeader **shim)
+{
+	/* Mobile (Android/iOS): use anonymous mmap only; no SysV shmem available */
+	Assert(size > MAXALIGN(sizeof(PGShmemHeader)));
+	AnonymousShmem = CreateAnonymousSegment(&size);
+	AnonymousShmemSize = size;
+
+	/* Initialize the shared memory header in-place */
+	PGShmemHeader *hdr = (PGShmemHeader *) AnonymousShmem;
+	hdr->magic = PGShmemMagic;
+	hdr->creatorPID = getpid();
+	hdr->totalsize = size;
+	hdr->freeoffset = MAXALIGN(sizeof(PGShmemHeader));
+	hdr->dsm_control = 0;
+	hdr->index = NULL;
+#ifndef WIN32
+	hdr->device = 0;
+	hdr->inode = 0;
+#endif
+	if (shim)
+		*shim = hdr;
+
+	/* Ensure unmap on exit */
+	on_shmem_exit(AnonymousShmemDetach, (Datum) 0);
+	return hdr;
+}
+#endif /* MOBILE_NO_SYSV */
 
 #ifdef EXEC_BACKEND
 
@@ -999,6 +1091,7 @@ PGSharedMemoryNoReAttach(void)
  * to get rid of it.
  *
  * UsedShmemSegID and UsedShmemSegAddr are implicit parameters to this
+
  * routine, also AnonymousShmem and AnonymousShmemSize.
  */
 void
@@ -1006,6 +1099,7 @@ PGSharedMemoryDetach(void)
 {
 	if (UsedShmemSegAddr != NULL)
 	{
+#ifndef MOBILE_NO_SYSV
 		if ((shmdt(UsedShmemSegAddr) < 0)
 #if defined(EXEC_BACKEND) && defined(__CYGWIN__)
 		/* Work-around for cygipc exec bug */
@@ -1013,7 +1107,13 @@ PGSharedMemoryDetach(void)
 #endif
 			)
 			elog(LOG, "shmdt(%p) failed: %m", UsedShmemSegAddr);
+#else
+		/* No SysV detach on mobile */
+#endif
 		UsedShmemSegAddr = NULL;
+
+
+
 	}
 
 	if (AnonymousShmem != NULL)

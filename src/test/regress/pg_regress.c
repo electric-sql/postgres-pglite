@@ -38,14 +38,18 @@
 #include "pg_regress.h"
 #include "portability/instr_time.h"
 
-#if defined(__wasi__)
+#if defined(__wasi__) || (defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR))
 #if defined(HAVE_GETRLIMIT)
 #undef HAVE_GETRLIMIT
 #endif
 #define execl(...) (-1)
 #define wait(...) (INVALID_PID)
 #define raise(...)
-#endif /* __wasi__ */
+#if !defined(__wasi__)
+/* For iOS builds where system() is unavailable, return failure */
+#define system(cmd) (-1)
+#endif
+#endif /* __wasi__ || iOS */
 
 /* for resultmap we need a list of pairs of strings */
 typedef struct _resultmap

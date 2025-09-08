@@ -798,7 +798,9 @@ puts("# 766:"__FILE__);
 		 */
 		CreateAuxProcessResourceOwner();
 
+		fprintf(stderr, "# before StartupXLOG:%s\n", __FILE__);
 		StartupXLOG();
+		fprintf(stderr, "# after StartupXLOG:%s\n", __FILE__);
 		/* Release (and warn about) any buffer pins leaked in StartupXLOG */
 		ReleaseAuxProcessResources(true);
 		/* Reset CurrentResourceOwner to nothing for the moment */
@@ -810,6 +812,8 @@ puts("# 766:"__FILE__);
 		 */
 		before_shmem_exit(pgstat_before_server_shutdown, 0);
 		before_shmem_exit(ShutdownXLOG, 0);
+		fprintf(stderr, "# after before_shmem_exit\n");
+
 	}
 
 	/*
@@ -844,6 +848,7 @@ puts("# 766:"__FILE__);
 	 * AbortTransaction call to clean up.
 	 */
 	before_shmem_exit(ShutdownPostgres, 0);
+	fprintf(stderr, "# after before_shmem_exit ShutdownPostgres\n");
 
 	/* The autovacuum launcher is done here */
 	if (AmAutoVacuumLauncherProcess())
@@ -934,6 +939,8 @@ if (!strcmp( username , WASM_USERNAME )) {
 	else
 	{
 		/* normal multiuser case */
+		fprintf(stderr, "# normal multiuser case\n");
+
 		Assert(MyProcPort != NULL);
 		PerformAuthentication(MyProcPort);
 		InitializeSessionUserId(username, useroid, false);
@@ -1207,6 +1214,7 @@ if (!strcmp( username , WASM_USERNAME )) {
 
 	/* set up ACL framework (so CheckMyDatabase can check permissions) */
 	initialize_acl();
+	fprintf(stderr, "# after initialize_acl\n");
 
 	/*
 	 * Re-read the pg_database row for our database, check permissions and set
@@ -1218,6 +1226,7 @@ if (!strcmp( username , WASM_USERNAME )) {
 		CheckMyDatabase(dbname, am_superuser,
 						(flags & INIT_PG_OVERRIDE_ALLOW_CONNS) != 0);
 
+
 	/*
 	 * Now process any command-line switches and any additional GUC variable
 	 * settings passed in the startup packet.   We couldn't do this before
@@ -1226,13 +1235,15 @@ if (!strcmp( username , WASM_USERNAME )) {
 	if (MyProcPort != NULL)
 		process_startup_options(MyProcPort, am_superuser);
 
+	fprintf(stderr, "# after process_startup_options\n");
+
 	/* Process pg_db_role_setting options */
 	process_settings(MyDatabaseId, GetSessionUserId());
-
+	fprintf(stderr, "# after process_settings\n");
 	/* Apply PostAuthDelay as soon as we've read all options */
 	if (PostAuthDelay > 0)
 		pg_usleep(PostAuthDelay * 1000000L);
-
+	fprintf(stderr, "# after postauthdelay\n");
 	/*
 	 * Initialize various default states that can't be set up until we've
 	 * selected the active user and gotten the right GUC settings.
@@ -1240,13 +1251,15 @@ if (!strcmp( username , WASM_USERNAME )) {
 
 	/* set default namespace search path */
 	InitializeSearchPath();
-
+	fprintf(stderr, "# after initialize_search_path\n");
 	/* initialize client encoding */
 	InitializeClientEncoding();
 
+	fprintf(stderr, "# after initialize_client_encoding\n");
 	/* Initialize this backend's session state. */
 	InitializeSession();
 
+	fprintf(stderr, "# after initialize_session\n");
 	/*
 	 * If this is an interactive session, load any libraries that should be
 	 * preloaded at backend start.  Since those are determined by GUCs, this
@@ -1257,13 +1270,16 @@ if (!strcmp( username , WASM_USERNAME )) {
 	if ((flags & INIT_PG_LOAD_SESSION_LIBS) != 0)
 		process_session_preload_libraries();
 
+	fprintf(stderr, "# after process_session_preload_libraries\n");
 	/* report this backend in the PgBackendStatus array */
 	if (!bootstrap)
 		pgstat_bestart();
 
+	fprintf(stderr, "# after pgstat_bestart\n");
 	/* close the transaction we started above */
 	if (!bootstrap)
 		CommitTransactionCommand();
+	fprintf(stderr, "# after commit_transaction_command, end of InitPostgres\n");
 }
 
 /* ========================================================================*/

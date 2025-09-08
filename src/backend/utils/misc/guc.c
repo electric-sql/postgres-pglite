@@ -1790,6 +1790,7 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 	bool		fname_is_malloced;
 	struct stat stat_buf;
 	struct config_string *data_directory_rec;
+	fprintf(stderr, "[pgl_boot] SCF enter D=%s PGDATA(env)=%s\n", userDoption ? userDoption : "", getenv("PGDATA") ? getenv("PGDATA") : "");
 
 	/* configdir is -D option, or $PGDATA if no -D */
 	if (userDoption)
@@ -1799,12 +1800,17 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 
 	if (configdir && stat(configdir, &stat_buf) != 0)
 	{
+		fprintf(stderr, "[pgl_boot] SCF stat(%s) failed errno=%d\n", configdir, errno);
 		write_stderr("%s: could not access directory \"%s\": %m\n",
 					 progname,
 					 configdir);
 		if (errno == ENOENT)
 			write_stderr("Run initdb or pg_basebackup to initialize a PostgreSQL data directory.\n");
 		return false;
+	}
+	else if (configdir)
+	{
+		fprintf(stderr, "[pgl_boot] SCF stat(%s) ok\n", configdir);
 	}
 
 	/*
@@ -1833,28 +1839,33 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 					 progname);
 		return false;
 	}
+	fprintf(stderr, "[pgl_boot] SCF fname=%s (malloced=%d)\n", fname ? fname : "", fname_is_malloced ? 1 : 0);
 
 	/*
 	 * Set the ConfigFileName GUC variable to its final value, ensuring that
 	 * it can't be overridden later.
 	 */
+	fprintf(stderr, "[pgl_boot] SCF SetConfigOption(config_file=...)\n");
 	SetConfigOption("config_file", fname, PGC_POSTMASTER, PGC_S_OVERRIDE);
+	fprintf(stderr, "[pgl_boot] SCF SetConfigOption done\n");
 
 	if (fname_is_malloced)
 		free(fname);
 	else
 		guc_free(fname);
-
 	/*
 	 * Now read the config file for the first time.
 	 */
+	fprintf(stderr, "[pgl_boot] SCF stat(ConfigFileName=%s) enter\n", ConfigFileName ? ConfigFileName : "");
 	if (stat(ConfigFileName, &stat_buf) != 0)
 	{
+		fprintf(stderr, "[pgl_boot] SCF stat(ConfigFileName) failed errno=%d\n", errno);
 		write_stderr("%s: could not access the server configuration file \"%s\": %m\n",
 					 progname, ConfigFileName);
 		free(configdir);
 		return false;
 	}
+	fprintf(stderr, "[pgl_boot] SCF stat(ConfigFileName) ok\n");
 
 	/*
 	 * Read the configuration file for the first time.  This time only the
@@ -1870,8 +1881,11 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 	 * Note: SetDataDir will copy and absolute-ize its argument, so we don't
 	 * have to.
 	 */
+	fprintf(stderr, "[pgl_boot] SCF before find_option(data_directory)\n");
 	data_directory_rec = (struct config_string *)
 		find_option("data_directory", false, false, PANIC);
+	fprintf(stderr, "[pgl_boot] SCF find_option ok, current=%s\n",
+				*data_directory_rec->variable ? *data_directory_rec->variable : "");
 	if (*data_directory_rec->variable)
 		SetDataDir(*data_directory_rec->variable);
 	else if (configdir)
@@ -1885,6 +1899,7 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 					 progname, ConfigFileName);
 		return false;
 	}
+	fprintf(stderr, "[pgl_boot] SCF SetDataDir done DataDir=%s\n", DataDir ? DataDir : "");
 
 	/*
 	 * Reflect the final DataDir value back into the data_directory GUC var.
@@ -1894,7 +1909,10 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 	 * chdir to DataDir, EXEC_BACKEND can read the config file without knowing
 	 * DataDir in advance.)
 	 */
+	fprintf(stderr, "[pgl_boot] SCF SetConfigOption(data_directory=DataDir)\n");
 	SetConfigOption("data_directory", DataDir, PGC_POSTMASTER, PGC_S_OVERRIDE);
+	fprintf(stderr, "[pgl_boot] SCF SetConfigOption(data_directory) done\n");
+
 
 	/*
 	 * Now read the config file a second time, allowing any settings in the
@@ -1911,11 +1929,14 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 	 * when InitializeGUCOptions runs, so the bootstrap default value cannot
 	 * be the real desired default.
 	 */
+	fprintf(stderr, "[pgl_boot] SCF before pg_timezone_abbrev_initialize\n");
 	pg_timezone_abbrev_initialize();
+	fprintf(stderr, "[pgl_boot] SCF after pg_timezone_abbrev_initialize\n");
 
 	/*
 	 * Figure out where pg_hba.conf is, and make sure the path is absolute.
 	 */
+	fprintf(stderr, "[pgl_boot] SCF before resolving hba_file\n");
 	if (HbaFileName)
 	{
 		fname = make_absolute_path(HbaFileName);
@@ -1937,7 +1958,9 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 					 progname, ConfigFileName);
 		return false;
 	}
+	fprintf(stderr, "[pgl_boot] SCF hba_file=%s\n", fname ? fname : "");
 	SetConfigOption("hba_file", fname, PGC_POSTMASTER, PGC_S_OVERRIDE);
+	fprintf(stderr, "[pgl_boot] SCF hba_file SetConfigOption done\n");
 
 	if (fname_is_malloced)
 		free(fname);
@@ -1947,6 +1970,7 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 	/*
 	 * Likewise for pg_ident.conf.
 	 */
+	fprintf(stderr, "[pgl_boot] SCF before resolving ident_file\n");
 	if (IdentFileName)
 	{
 		fname = make_absolute_path(IdentFileName);
@@ -1968,7 +1992,9 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 					 progname, ConfigFileName);
 		return false;
 	}
+	fprintf(stderr, "[pgl_boot] SCF ident_file=%s\n", fname ? fname : "");
 	SetConfigOption("ident_file", fname, PGC_POSTMASTER, PGC_S_OVERRIDE);
+	fprintf(stderr, "[pgl_boot] SCF ident_file SetConfigOption done\n");
 
 	if (fname_is_malloced)
 		free(fname);

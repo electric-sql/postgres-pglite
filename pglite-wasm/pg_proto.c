@@ -15,6 +15,11 @@
 			    query_string = pq_getmsgstring(&input_message);
 			    pq_getmsgend(&input_message);
 
+#ifdef PGL_MOBILE
+			    /* Use NOTICE level to ensure it gets through to client */
+			    ereport(NOTICE, (errmsg("MOBILE DEBUG: exec_simple_query starting query='%s'", query_string)));
+#endif
+
 			    if (am_walsender) {
 				    if (!exec_replication_command(query_string))
 					    exec_simple_query(query_string);
@@ -22,6 +27,10 @@
 				    exec_simple_query(query_string);
 
                 // valgrind_report_error_query(query_string);
+
+#ifdef PGL_MOBILE
+			    ereport(NOTICE, (errmsg("MOBILE DEBUG: exec_simple_query completed query='%s'", query_string)));
+#endif
 
 			    send_ready_for_query = true;
 		    }

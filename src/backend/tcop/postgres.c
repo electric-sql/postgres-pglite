@@ -107,7 +107,7 @@ int			client_connection_check_interval = 0;
 /* flags for non-system relation kinds to restrict use */
 int			restrict_nonsystem_relation_kind;
 
-#if (defined(__EMSCRIPTEN__) || defined(__wasi__))
+#if (defined(__EMSCRIPTEN__) || defined(__wasi__) || defined(PGL_MOBILE))
 #if !defined(PGL_MAIN)
     volatile int cma_rsize = 0;
     volatile bool sockfiles = false;
@@ -116,6 +116,7 @@ bool quote_all_identifiers = false;
 FILE* SOCKET_FILE = NULL;
 int SOCKET_DATA = 0;
 #endif // WASM
+
 
 
 
@@ -384,7 +385,13 @@ SocketBackend(StringInfo inBuf)
 	 */
 	HOLD_CANCEL_INTERRUPTS();
 	pq_startmsgread();
+#ifdef PGL_MOBILE
+	elog(LOG, "SocketBackend: after pq_startmsgread()");
+#endif
 	qtype = pq_getbyte();
+#ifdef PGL_MOBILE
+	elog(LOG, "SocketBackend: pq_getbyte() returned %d ('%c')", qtype, qtype > 0 && qtype < 127 ? qtype : '?');
+#endif
 
 	if (qtype == EOF)			/* frontend disconnected */
 	{
@@ -487,8 +494,19 @@ SocketBackend(StringInfo inBuf)
 	 * after the type code; we can read the message contents independently of
 	 * the type.
 	 */
+#ifdef PGL_MOBILE
+	elog(LOG, "SocketBackend: calling pq_getmessage() with maxmsglen=%d", maxmsglen);
+#endif
 	if (pq_getmessage(inBuf, maxmsglen))
+	{
+#ifdef PGL_MOBILE
+		elog(LOG, "SocketBackend: pq_getmessage() failed, returning EOF");
+#endif
 		return EOF;				/* suitable message already logged */
+	}
+#ifdef PGL_MOBILE
+	elog(LOG, "SocketBackend: pq_getmessage() succeeded, inBuf->len=%d", inBuf->len);
+#endif
 	RESUME_CANCEL_INTERRUPTS();
 
 	return qtype;

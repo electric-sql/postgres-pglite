@@ -14,6 +14,11 @@
 #include "common/string.h"
 #include "pg_upgrade.h"
 
+#if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR)
+/* For iOS builds where system() is unavailable, return failure */
+#define system(cmd) (-1)
+#endif
+
 static void check_data_dir(ClusterInfo *cluster);
 static void check_bin_dir(ClusterInfo *cluster, bool check_versions);
 static void get_bin_version(ClusterInfo *cluster);

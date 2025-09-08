@@ -27,6 +27,11 @@
 #include "common/logging.h"
 #include "common/string.h"
 #include "getopt_long.h"
+
+#if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR)
+/* For iOS builds where system() is unavailable, return failure */
+#define system(cmd) (-1)
+#endif
 #include "utils/pidfile.h"
 
 #ifdef WIN32					/* on Unix, we don't need libpq */

@@ -1,5 +1,15 @@
 #include <unistd.h>  // access, unlink
+#include <sys/socket.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdarg.h>
+
+#include <sys/stat.h> // fstat
+#include <errno.h>
 #define PGL_LOOP
+// Unified logging - PGL_LOG_INFO replaced with PGL_LOG_INFO
+#include "pgl_os.h"  // Provides unified logging macros (PGL_LOG_INFO, etc.)
+
 #if defined(__wasi__)
 // volatile sigjmp_buf void*;
 #else
@@ -13,10 +23,26 @@ volatile int canary_ex = 0;
 volatile int channel = 0;
 
 /* TODO : prevent multiple write and write while reading ? */
+#ifdef PGL_MOBILE
+#include "sdk_port-mobile.h"
+#include "pgl_os.h"
+static bool mobile_auth_started = false;
+
+#define MOBILE_LOG_CALL(func_name) PGL_LOG_INFO("CALL: %s() at line %d", func_name, __LINE__)
+#endif
+
+#ifndef PGL_MOBILE
 volatile int cma_wsize = 0;
 volatile int cma_rsize = 0;  // also defined in postgres.c for pqcomm
+#else
+/* On mobile, these are external variables defined in pqcomm.c */
+extern volatile int pgl_mobile_cma_wsize;
+extern volatile int cma_rsize;
+#define cma_wsize pgl_mobile_cma_wsize
+#endif
 volatile bool sockfiles = false; // also defined in postgres.c for pqcomm
 
+#if !defined(PGL_MOBILE)
 __attribute__((export_name("get_buffer_size")))
 int
 get_buffer_size(int fd) {
@@ -29,6 +55,7 @@ int
 get_buffer_addr(int fd) {
     return 1 + ( get_buffer_size(fd) *fd);
 }
+#endif
 
 __attribute__((export_name("get_channel")))
 int
@@ -172,12 +199,41 @@ ClientSocket dummy_sock;
 static void io_init(bool in_auth, bool out_auth) {
     ClientAuthInProgress = in_auth;
 #ifdef PG16
+
 	pq_init();					/* initialize libpq to talk to client */
     MyProcPort = (Port *) calloc(1, sizeof(Port));
 #else
+#ifdef PGL_MOBILE
+    if (is_wire && MyProcPort) {
+        PGL_LOG_INFO("PG17: CMA mode, no socket needed");
+        MyProcPort->sock = -1; // No real socket in CMA mode
+    } else {
+        PGL_LOG_INFO("PG17: skipped assign sock, MyProcPort=%p CMA mode is_wire=%d",
+                   (void*)MyProcPort, (int)is_wire);
+    }
+#endif
+
+#ifdef PGL_MOBILE
+    /* Socketpair will be created in per-request setup */
+    dummy_sock.sock = -1;
+#endif
     MyProcPort = pq_init(&dummy_sock);
+    /* On mobile, pq_init may be a no-op; allocate Port if still NULL */
+    if (!MyProcPort) {
+        MyProcPort = (Port *) calloc(1, sizeof(Port));
+        /* If we created a socketpair, attach it */
+#ifdef PGL_MOBILE
+        if (is_wire) {
+            MyProcPort->sock = -1; // CMA mode, no real socket
+        }
+#endif
+    }
 #endif
 	whereToSendOutput = DestRemote; /* now safe to ereport to client */
+#ifdef PGL_MOBILE
+    PGL_LOG_INFO("io_init: MyProcPort=%p sock(pre)=%d is_wire=%d", (void*)MyProcPort, MyProcPort?MyProcPort->sock:-1, (int)is_wire);
+#endif
+    PGL_LOG_INFO("io_init(univ): port=%p sock=%d", (void*)MyProcPort, MyProcPort?MyProcPort->sock:-1);
 
     if (!MyProcPort) {
         PDEBUG("# 155: io_init   --------- NO CLIENT (oom) ---------");
@@ -189,11 +245,27 @@ static void io_init(bool in_auth, bool out_auth) {
     ClientAuthInProgress = out_auth;
     SOCKET_FILE = NULL;
     SOCKET_DATA = 0;
+#ifdef PGL_MOBILE
+    if (is_wire) {
+        /* CMA mode: data is already in buffer, no socket writing needed */
+        if (cma_rsize > 0) {
+            PGL_LOG_INFO("io_init: CMA buffer has %d bytes ready", cma_rsize);
+        }
+    }
+#endif
     PDEBUG("\n\n\n# 165: io_init  --------- Ready for CLIENT ---------");
 }
 
 
+#ifdef PGL_MOBILE
+/* Mobile: these are defined in sdk_port-mobile.c */
+extern volatile bool is_wire;
+extern volatile bool is_repl;
+#else
+/* WASM: define here */
 volatile bool is_wire = true;
+extern volatile bool is_repl;  /* Defined in pg_main.c for WASM */
+#endif
 extern char * cma_port;
 extern void pq_startmsgread(void);
 
@@ -201,7 +273,14 @@ __attribute__((export_name("interactive_write")))
 void
 interactive_write(int size) {
     cma_rsize = size;
+#ifndef PGL_MOBILE
     cma_wsize = 0;
+#else
+    pgl_mobile_cma_wsize = 0;
+    extern int original_request_size;
+    original_request_size = size;  /* Save for mobile_flush offset calculation */
+    PGL_LOG_INFO("interactive_write: saved original_request_size=%d", original_request_size);
+#endif
 }
 
 __attribute__((export_name("use_wire")))
@@ -291,8 +370,15 @@ void discard_input(){
 
 void
 startup_auth() {
+    PGL_LOG_INFO("startup_auth: enter, port=%p sock=%d", (void*)MyProcPort, MyProcPort?MyProcPort->sock:-1);
     /* code is in handshake/auth domain so read whole msg now */
     send_ready_for_query = false;
+#ifdef PGL_MOBILE
+    /* CMA mode: data is already in buffer, no socket writing needed */
+    if (cma_rsize > 0) {
+        PGL_LOG_INFO("startup_auth: CMA buffer has %d bytes ready", cma_rsize);
+    }
+#endif
 
     if (ProcessStartupPacket(MyProcPort, true, true) != STATUS_OK) {
         PDEBUG("# 271: ProcessStartupPacket !OK");
@@ -369,14 +455,24 @@ extern void pg_startcma();
 
 __attribute__((export_name("interactive_one"))) void
 interactive_one() {
+    PGL_LOG_INFO("interactive_one: ENTRY - function called!");
+    PGL_LOG_INFO("interactive_one: cma_rsize=%d cma_wsize=%d", cma_rsize, cma_wsize);
+    PGL_LOG_INFO("interactive_one: is_wire=%d MyProcPort=%p", is_wire, (void*)MyProcPort);
+
     int	peek = -1;  /* preview of firstchar with no pos change */
 	int firstchar = 0;  /* character read from getc() */
     bool pipelining = true;
 	StringInfoData input_message;
 	StringInfoData *inBuf;
+
+#ifdef PGL_MOBILE
+    PGL_LOG_INFO("interactive_one: ENTRY - backend is running and ready to process messages");
+    PGL_LOG_INFO("interactive_one: MessageContext=%p", (void*)MessageContext);
+#endif
     FILE *stream ;
     FILE *fp = NULL;
     int packetlen;
+    bool repl_from_file = false; /* mobile: track REPL data source */
 
     bool had_notification = notifyInterruptPending;
     bool notified = false;
@@ -384,10 +480,68 @@ interactive_one() {
 if (cma_rsize<0)
     goto resume_on_error;
 
+
+
     if (!MyProcPort) {
         PDEBUG("# 353: client created");
+        PGL_LOG_INFO("interactive_one: calling io_init, port=%p", (void*)MyProcPort);
         io_init(is_wire, false);
+        PGL_LOG_INFO("interactive_one: after io_init, port=%p sock=%d", (void*)MyProcPort, MyProcPort?MyProcPort->sock:-1);
     }
+
+#ifdef PGL_MOBILE
+    /* Mobile: Use CMA buffer directly like WASM, no sockets needed */
+    PGL_LOG_INFO("interactive_one: Mobile section, is_wire=%d", is_wire);
+    if (is_wire) {
+        /* Ensure PostgreSQL has a valid port structure but no real socket */
+        if (!MyProcPort) {
+            MyProcPort = (Port *) calloc(1, sizeof(Port));
+            if (MyProcPort) {
+                MyProcPort->sock = -1; // No real socket, use CMA buffer directly
+                PGL_LOG_INFO("created MyProcPort with no socket (CMA mode)");
+            }
+        }
+        /* Mobile: Write CMA buffer to temporary file for PostgreSQL to read */
+        if (cma_rsize > 0) {
+            char *src = (char*)(intptr_t)get_buffer_addr(0);
+            unsigned char first_byte = (unsigned char)src[0];
+            PGL_LOG_INFO("CMA buffer ready: %d bytes, first_byte=0x%02x ('%c')",
+                  cma_rsize, first_byte, first_byte >= 32 && first_byte < 127 ? first_byte : '?');
+
+            /* Debug: log buffer content */
+            PGL_LOG_INFO("CMA buffer content (first 20 bytes):");
+            for (int i = 0; i < (cma_rsize < 20 ? cma_rsize : 20); i++) {
+                PGL_LOG_INFO("  [%d] = 0x%02x ('%c')", i, (unsigned char)src[i],
+                      src[i] >= 32 && src[i] < 127 ? src[i] : '?');
+            }
+
+            /* Reset CMA read offset for new request */
+            // No need to reset - PQcommMethods handles buffer management
+
+            /* Ensure mobile comm is installed before any auth messages are sent */
+            #ifdef PGL_MOBILE
+            extern void pgl_install_mobile_comm(void);
+            whereToSendOutput = DestRemote; /* now safe to ereport to client */
+            pgl_install_mobile_comm();
+            #endif
+
+            /* Kick off startup/auth once after first inbound data */
+            if (!mobile_auth_started && !ClientAuthInProgress) {
+                mobile_auth_started = true;
+                PGL_LOG_INFO("CMA setup: invoking startup_auth");
+                startup_auth();
+                /* Mobile: flush immediately after auth to publish AuthenticationOk/ParameterStatus */
+                pq_flush();
+                extern volatile int cma_wsize;
+                PGL_LOG_INFO("after startup_auth: cma_wsize=%d", cma_wsize);
+                /* Mark startup message as consumed to prevent SocketBackend from re-reading it */
+                PGL_LOG_INFO("Mobile: startup_auth complete, marking input buffer as consumed (cma_rsize %d -> 0)", cma_rsize);
+                cma_rsize = 0;
+            }
+        }
+        // PGL_LOG_INFO("wire setup: port=%p sock=%d wrote=%zd first_byte=0x%02x", (void*)MyProcPort, MyProcPort?MyProcPort->sock:-1, wrote, first_byte);
+    }
+#endif
 
 #if PGDEBUG
     if (notifyInterruptPending)
@@ -402,19 +556,33 @@ if (cma_rsize<0)
     }
 
     if (!cma_rsize) {
-        // no cma : reading from file. writing to file.
+        // no CMA input
+#ifndef PGL_MOBILE
         if (!SOCKET_FILE) {
-            SOCKET_FILE =  fopen(PGS_OLOCK, "w") ;
-            MyProcPort->sock = fileno(SOCKET_FILE);
+            SOCKET_FILE = fopen(PGS_OLOCK, "w");
+            if (SOCKET_FILE && MyProcPort) MyProcPort->sock = fileno(SOCKET_FILE);
+            else if (MyProcPort) MyProcPort->sock = -1;
         }
+#else
+        /* Mobile: CMA-only; do not open socket files */
+#endif
     } else {
-        // prepare file reply queue, just in case of cma overflow
-        // if unused the file will be kept open till next query.
+#ifndef PGL_MOBILE
+        // prepare file reply queue, just in case of overflow
         if (!SOCKET_FILE) {
-            SOCKET_FILE =  fopen(PGS_OLOCK, "w") ;
+            SOCKET_FILE = fopen(PGS_OLOCK, "w");
         }
+#else
+        /* Mobile: CMA-only; no socket file reply queue */
+#endif
     }
 
+    /* Defensive: ensure MessageContext exists (mobile may re-enter without setup) */
+    if (MessageContext == NULL) {
+        MessageContext = AllocSetContextCreate(TopMemoryContext,
+                                              "MessageContext",
+                                              ALLOCSET_DEFAULT_SIZES);
+    }
     MemoryContextSwitchTo(MessageContext);
     MemoryContextReset(MessageContext);
 
@@ -442,11 +610,24 @@ if (cma_rsize<0)
 // postgres.c 4627
     DoingCommandRead = true;
 
+#if defined(__ANDROID__) || defined(__APPLE__)
+    /* On mobile, avoid dereferencing address 1; use empty immutable buffer */
+    #undef IO
+    #define IO ((char *)"")
+    /* Access CMA buffer address for peeking the first byte */
+    #include "../mobile-build/sdk_port-mobile.h"
+#endif
+
 #if defined(EMUL_CMA)
     //  temp fix for -O0 but less efficient than literal
     #define IO ((char *)(1+(int)cma_port))
 #else
+  #if defined(__ANDROID__) || defined(__APPLE__)
+    // Mobile: do not reference CMA via IO; IO is unused on mobile. PQcomm reads CMA directly.
+    #define IO ((char *)"")
+  #else
     #define IO ((char *)(1))
+  #endif
 #endif
 
 /*
@@ -457,8 +638,27 @@ if (cma_rsize<0)
  * TODO: allow to redirect stdout for fully external repl.
  */
 
+#ifdef PGL_MOBILE
+    /* On mobile, peek directly from CMA input buffer to set firstchar correctly */
+    peek = ((const unsigned char*)(intptr_t)get_buffer_addr(0))[0];
+#else
     peek = IO[0];
+#endif
     packetlen = cma_rsize;
+
+
+#if PGDEBUG && !defined(PGL_MOBILE)
+    /* Debug: log what PostgreSQL reads from IO buffer vs socket */
+    if (packetlen > 0) {
+        PGL_LOG_INFO("PostgreSQL reads from IO[0]: peek=0x%02x ('%c'), packetlen=%d",
+              (unsigned char)peek, peek >= 32 && peek < 127 ? peek : '?', packetlen);
+        PGL_LOG_INFO("IO buffer content (first 10 bytes):");
+        for (int i = 0; i < (packetlen < 10 ? packetlen : 10); i++) {
+            PGL_LOG_INFO("  IO[%d] = 0x%02x ('%c')", i, (unsigned char)IO[i],
+                  IO[i] >= 32 && IO[i] < 127 ? IO[i] : '?');
+        }
+    }
+#endif
 
     if (packetlen) {
         sockfiles = false;
@@ -472,93 +672,76 @@ if (cma_rsize<0)
             whereToSendOutput = DestDebug;
         }
     } else {
+#ifndef PGL_MOBILE
         fp = fopen(PGS_IN, "r");
-puts("# 475:" PGS_IN "\r\n");
-        // read file in socket buffer for SocketBackend to consumme.
         if (fp) {
             fseek(fp, 0L, SEEK_END);
             packetlen = ftell(fp);
             if (packetlen) {
-                // set to always true if no REPL.
-//                is_wire = true;
                 resetStringInfo(inBuf);
                 rewind(fp);
                 /* peek on first char */
                 peek = getc(fp);
                 rewind(fp);
                 if (is_repl && !is_wire) {
-                    // sql in buffer
                     for (int i=0; i<packetlen; i++) {
                         appendStringInfoChar(inBuf, fgetc(fp));
                     }
                     sockfiles = false;
+                    repl_from_file = true;
                 } else {
-                    // auth won't go to REPL, ever.
                     whereToSendOutput = DestRemote;
-                    // wire in socket reader
                     pq_recvbuf_fill(fp, packetlen);
                     sockfiles = true;
                 }
-
-                /* is it startup/auth packet ? */
-                if (!peek) {
-                    startup_auth();
-                    peek = -1;
-                }
-                if (peek==112) {
-                    startup_pass(true);
-                    peek = -1;
-                }
+                if (!peek) { startup_auth(); peek = -1; }
+                if (peek==112) { startup_pass(true); peek = -1; }
             }
-
-            /* do not forget FD CLEANUP in all cases */
-//            fclose(fp);
-//            unlink(PGS_IN);
-
             if (packetlen) {
-                // it was startup/auth , write and return fast.
-                if (peek<0) {
-                    PDEBUG("# 492: handshake/auth/pass skip");
-                    goto wire_flush;
-                }
-
-                /* else it was wire msg or sql */
-#if PGDEBUG
-                if (is_wire) {
-                    force_echo = true;
-                }
-
-#endif
+                if (peek<0) { goto wire_flush; }
                 firstchar = peek;
                 goto incoming;
-            } // wire msg
-PDEBUG("# 507: NO DATA:" PGS_IN  "\n");
-        } // fp data read
+            }
+        }
+#else
+        /* Mobile: CMA-only; no file input */
+#endif
 
         // is it REPL in cma ?
+#ifndef PGL_MOBILE
         if (!peek)
             goto return_early;
 
         firstchar = peek ;
 
-        //REPL mode  in zero copy buffer ( lowest wasm memory segment )
+        // REPL mode in zero copy buffer (lowest wasm memory segment)
         packetlen = strlen(IO);
+#else
+        /* Mobile: CMA-only; skip REPL path entirely */
+        goto return_early;
+#endif
 
     } // !cma_rsize -> socketfiles -> repl
 
 #if PGDEBUG
+#ifndef PGL_MOBILE
     if (packetlen)
         IO[packetlen]=0; // wire blocks are not zero terminated
+#endif
     printf("\n# 524: fd=%d is_embed=%d is_repl=%d is_wire=%d fd %s,len=%d cma=%d peek=%d [%s]\n", MyProcPort->sock, is_embed, is_repl, is_wire, PGS_OLOCK, packetlen,cma_rsize, peek, IO);
 #endif
 
-    resetStringInfo(inBuf);
+    if (!repl_from_file) {
+        resetStringInfo(inBuf);
+    }
+#ifndef PGL_MOBILE
     // when cma buffer is used to fake stdin, data is not read by socket/wire backend.
-    if (is_repl) {
+    if (is_repl && !repl_from_file) {
         for (int i=0; i<packetlen; i++) {
             appendStringInfoChar(inBuf, IO[i]);
         }
     }
+#endif
 
     if (packetlen<2) {
         puts("# 536: WARNING: empty packet");
@@ -571,11 +754,11 @@ PDEBUG("# 507: NO DATA:" PGS_IN  "\n");
     }
 
 incoming:
-#if defined(__EMSCRIPTEN__) || defined(__wasi__) //PGDEBUG
+#if defined(__EMSCRIPTEN__) || defined(__wasi__) || defined(PGL_MOBILE)
 #   include "pgl_sjlj.c"
 #else
     #error "sigsetjmp unsupported"
-#endif // wasi
+#endif
 
 
     while (pipelining) {
@@ -586,28 +769,79 @@ incoming:
             /* stdio node repl */
 #if PGDEBUG
             printf("\n# 533: enforcing REPL mode, wire off, echo %d\n", force_echo);
+
 #endif
             whereToSendOutput = DestDebug;
         }
 
         DoingCommandRead = true;
+        /* Install mobile comm methods if present */
+#ifdef PGL_MOBILE
+        extern void pgl_install_mobile_comm(void);
+        pgl_install_mobile_comm();
+#endif
+
         if (is_wire) {
             /* wire on a socket or cma may auth */
             /* would be handled as error by pg_proto block */
+#ifdef PGL_MOBILE
+            if (peek==0 && !mobile_auth_started) {
+#else
             if (peek==0) {
+#endif
                 PDEBUG("# 540: handshake/auth");
                 startup_auth();
                 PDEBUG("# 542: auth request");
+                /* Mark startup message as consumed */
+                PGL_LOG_INFO("Mobile: startup_auth complete, marking input buffer as consumed (cma_rsize %d -> 0)", cma_rsize);
+                cma_rsize = 0;
                 break;
             }
+
+#ifdef PGL_MOBILE
+            /* Mobile: flush output but continue processing batch until complete */
+            pq_flush();
+            if (cma_wsize > 0) {
+                channel = 1;
+                // mobile_log("flush(after SocketBackend): published %d bytes to CMA", cma_wsize);
+            }
+            /* CMA mode: output is already in CMA buffer via PQcommMethods */
+            PGL_LOG_INFO("drain(after SocketBackend): CMA mode, cma_wsize=%d", cma_wsize);
+#endif
 
             if (peek==112) {
                 PDEBUG("# 547: password");
                 startup_pass(true);
+                /* Mark password message as consumed */
+                PGL_LOG_INFO("Mobile: startup_pass complete, marking input buffer as consumed (cma_rsize %d -> 0)", cma_rsize);
+                cma_rsize = 0;
                 break;
             }
 
+            // PGL_LOG_INFO("interactive_one: before SocketBackend, port=%p sock=%d", (void*)MyProcPort, MyProcPort?MyProcPort->sock:-1);
+            // PGL_LOG_INFO("interactive_one: cma_rsize=%d peek=%d", cma_rsize, peek);
+
+            /* CMA mode: no socket polling needed */
+
+            /* Mobile: Reset CMA read offset and use normal PostgreSQL flow */
+            // No need to reset - PQcommMethods handles buffer management
+            PGL_LOG_INFO("Mobile CMA mode: reset read offset, using SocketBackend");
+
+            /* Let SocketBackend handle message reading, pq_getbyte will read from CMA buffer */
             firstchar = SocketBackend(inBuf);
+            PGL_LOG_INFO("Mobile: SocketBackend returned firstchar=%d ('%c') inBuf->len=%d",
+                  firstchar, firstchar > 0 && firstchar < 127 ? firstchar : '?', inBuf->len);
+
+            /* Debug: log what SocketBackend read */
+            if (inBuf->len > 0) {
+                PGL_LOG_INFO("SocketBackend read (first 20 bytes):");
+                for (int i = 0; i < (inBuf->len < 20 ? inBuf->len : 20); i++) {
+                    PGL_LOG_INFO("  inBuf[%d] = 0x%02x ('%c')", i, (unsigned char)inBuf->data[i],
+                          inBuf->data[i] >= 32 && inBuf->data[i] < 127 ? inBuf->data[i] : '?');
+                }
+            }
+
+            /* Don't reset cma_rsize yet - let pipelining check handle remaining messages */
 
             pipelining = pq_buffer_remaining_data()>0;
         } else {
@@ -619,8 +853,22 @@ incoming:
                 appendStringInfoChar(inBuf, (char) '\0');
             	firstchar = 'Q';
             }
+#ifdef PGL_MOBILE
+            /* --- Mobile CMA mode: data is already in buffer --- */
+            PGL_LOG_INFO("Mobile CMA: data ready in buffer, cma_rsize=%d", cma_rsize);
+            /* --------------------------------------------------------------- */
+#endif
+
         }
         DoingCommandRead = false;
+#ifdef PGL_MOBILE
+            // Drain server replies from client end into CMA out
+            if (MyProcPort && MyProcPort->sock > 0) {
+                // We wrote into sv[1]; recover its fd by duplicating MyProcPort->sock?
+                // We stored both ends in local sv[], so add a static to retain them across scope
+            }
+#endif
+
 
         if (!ignore_till_sync) {
             /* initially, or after error */
@@ -646,6 +894,16 @@ incoming:
             }
         }
     }
+#ifdef PGL_MOBILE
+    /* Mobile: Ensure all output is flushed before marking batch as consumed */
+    if (cma_rsize > 0) {
+        /* Force a final flush to make sure all accumulated output is visible */
+        pq_flush();
+        PGL_LOG_INFO("Mobile: Pipelining complete, final flush done, cma_wsize=%d", cma_wsize);
+        PGL_LOG_INFO("Mobile: Pipelining complete, marking batch as consumed (cma_rsize %d -> 0)", cma_rsize);
+        cma_rsize = 0;
+    }
+#endif
 resume_on_error:
     if (!is_repl) {
 wire_flush:
@@ -662,18 +920,34 @@ wire_flush:
             } else {
                 PDEBUG("# 606: end packet - with no rfq\n");
             }
+#ifdef PGL_MOBILE
+            /* Mobile: flush output but let pipelining loop handle completion */
+            pq_flush();
+            if (cma_wsize > 0) {
+                channel = 1;
+                // mobile_log("flush(wire_flush): published %d bytes to CMA", cma_wsize);
+            } else {
+                // mobile_log("flush(wire_flush): no pending bytes");
+            }
+#endif
         } else {
             PDEBUG("# 609: end packet (ClientAuthInProgress - no rfq)\n");
         }
 
         if (SOCKET_DATA>0) {
+#ifdef PGL_MOBILE
+        if (cma_wsize > 0) {
+            /* Mobile PqComm already produced CMA output. Skip socket fallback. */
+        } else
+#endif
+
+#ifndef PGL_MOBILE
             if (sockfiles) {
                 channel = -1;
                 if (cma_wsize) {
                     puts("ERROR: cma was not flushed before socketfile interface");
                 }
             } else {
-                /* wsize may have increased with previous rfq so assign here */
                 cma_wsize = SOCKET_DATA;
                 channel = cma_rsize + 2;
             }
@@ -682,33 +956,47 @@ wire_flush:
                 fclose(SOCKET_FILE);
                 SOCKET_FILE = NULL;
                 SOCKET_DATA = 0;
-
+#if PGDEBUG
                 if (cma_wsize) {
                     PDEBUG("# 672: cma and sockfile ???\n");
                 }
-
                 if (sockfiles) {
-#if PGDEBUG
                     printf("# 675: client:ready -> read(%d) " PGS_OLOCK "->" PGS_OUT"\n", outb);
+                }
 #endif
+                if (sockfiles) {
                     rename(PGS_OLOCK, PGS_OUT);
                 }
-            } else {
+            }
+#else
+            /* Mobile: CMA-only; no socket fallback */
+#endif
+            {
 #if PGDEBUG
+#ifdef PGL_MOBILE
+            if (cma_wsize == 0)
+#endif
+
                 printf("\n# 681: in[%d] out[%d] flushed\n", cma_rsize, cma_wsize);
 #endif
                 SOCKET_DATA = 0;
             }
 
         } else {
+#ifndef PGL_MOBILE
             cma_wsize = 0;
+#else
+            /* Mobile: do not clear cma_wsize here. If PQcommMethods flushed output,
+               RN will read it after this function returns. */
+#endif
             PDEBUG("# 698: no data, send empty ?");
 // TODO: dedup 739
+#ifndef PGL_MOBILE
             if (sockfiles) {
-                fclose(SOCKET_FILE);
-                SOCKET_FILE = NULL;
+                if (SOCKET_FILE) { fclose(SOCKET_FILE); SOCKET_FILE = NULL; }
                 rename(PGS_OLOCK, PGS_OUT);
             }
+#endif
         }
     } else {
         pg_prompt();
@@ -721,8 +1009,7 @@ wire_flush:
         } else {
 // TODO: dedup 723
             if (sockfiles) {
-                fclose(SOCKET_FILE);
-                SOCKET_FILE = NULL;
+                if (SOCKET_FILE) { fclose(SOCKET_FILE); SOCKET_FILE = NULL; }
                 rename(PGS_OLOCK, PGS_OUT);
             }
         }
@@ -734,13 +1021,21 @@ return_early:;
     /* always FD CLEANUP */
     if (fp) {
         fclose(fp);
+#ifndef PGL_MOBILE
         unlink(PGS_IN);
+#endif
     }
 
 
     // always free kernel buffer !!!
     cma_rsize = 0;
+#ifndef PGL_MOBILE
     IO[0] = 0;
+#endif
+
+#ifdef PGL_MOBILE
+    /* CMA mode: no cleanup needed, just reset buffer */
+#endif
 
     #undef IO
 

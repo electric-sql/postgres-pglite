@@ -1,0 +1,39 @@
+# Android API 24+: vectored I/O exists, but some NDK/headers hide declarations.
+# Tell PostgreSQL to not use preadv/pwritev directly in headers (HAVE_DECL_* = no)
+# so pg_iovec.h takes the pg_pread/pg_pwrite fallback path.
+ac_cv_func_preadv=yes
+ac_cv_func_pwritev=yes
+ac_cv_have_decl_preadv=no
+ac_cv_have_decl_pwritev=no
+
+# Autotools cache for cross-compiling PostgreSQL for Android
+# Prevent configure from trying to run target binaries and preseed common checks
+ac_cv_func_getaddrinfo=yes
+ac_cv_func_getpwuid_r=yes
+ac_cv_header_pthread_h=yes
+ac_cv_header_locale_h=yes
+ac_cv_header_stdbool_h=yes
+ac_cv_func_getservbyname_r=no
+ac_cv_func_strlcat=no
+ac_cv_func_strlcpy=no
+
+# Android bionic does not provide <langinfo.h>/nl_langinfo(CODESET)
+# Force configure to avoid those code paths so chklocale.c doesn't use nl_langinfo
+ac_cv_header_langinfo_h=no
+ac_cv_func_nl_langinfo=no
+
+# Prefer to avoid SysV and POSIX shared memory on Android; force mmap fallback
+ac_cv_header_sys_shm_h=no
+ac_cv_header_sys_ipc_h=no
+ac_cv_func_shmget=no
+ac_cv_func_shmctl=no
+ac_cv_func_shmat=no
+ac_cv_func_shmdt=no
+ac_cv_func_shm_open=no
+ac_cv_func_shm_unlink=no
+# Disable POSIX named semaphores
+ac_cv_header_semaphore_h=no
+ac_cv_func_sem_open=no
+
+# Add more as needed based on configure output
+

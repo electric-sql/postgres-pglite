@@ -44,6 +44,11 @@
 
 #include "common/string.h"
 
+#if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_IPHONE_SIMULATOR)
+/* For iOS builds where system() is unavailable, return failure */
+#define system(cmd) (-1)
+#endif
+
 /* Inhibit mingw CRT's auto-globbing of command line arguments */
 #if defined(WIN32) && !defined(_MSC_VER)
 extern int	_CRT_glob = 0;		/* 0 turns off globbing; 1 turns it on */
