@@ -28,12 +28,6 @@
 
 // globals
 
-/*
- * MessageContext cleanup between queries relies on upstream semantics:
- * MemoryContextReset() deletes child contexts since v9.5.
- * Avoid redefining legacy MemoryContextResetAndDeleteChildren.
- */
-// #define SpinLockInit(...)
 
 
 
