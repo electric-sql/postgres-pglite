@@ -3,7 +3,7 @@
 # Package each contrib extension into its own .tar.gz archive
 
 prefix ?= /install/pglite
-BUILD_ROOT := /tmp/extensions/build
+CONTRIB_BUILD_ROOT := /tmp/extensions/build
 ARCHIVE_DIR := /install/pglite/extensions
 
 CONTRIBS := $(SUBDIRS)
@@ -14,14 +14,14 @@ dist: $(addsuffix .tar.gz,$(CONTRIBS))
 # Pattern rule: build $(EXT).tar.gz for each contrib
 %.tar.gz:
 	@echo "=== Staging $* ==="
-	rm -rf $(BUILD_ROOT)/$*
-	bash -c 'mkdir -p $(BUILD_ROOT)/$*/$(prefix)/{bin,lib,share/extension,share/doc,share/postgresql/extension,share/postgresql/tsearch_data,include}'
-	$(MAKE) -C $* install DESTDIR=$(BUILD_ROOT)/$*
+	rm -rf $(CONTRIB_BUILD_ROOT)/$*
+	bash -c 'mkdir -p $(CONTRIB_BUILD_ROOT)/$*/$(prefix)/{bin,lib,share/extension,share/doc,share/postgresql/extension,share/postgresql/tsearch_data,include}'
+	$(MAKE) -C $* install DESTDIR=$(CONTRIB_BUILD_ROOT)/$*
 	@echo "=== Packaging $* ==="
 	mkdir -p $(ARCHIVE_DIR)
-	cd $(BUILD_ROOT)/$*/$(prefix) && \
+	cd $(CONTRIB_BUILD_ROOT)/$*/$(prefix) && \
 	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
 	tar -czf $(ARCHIVE_DIR)/$*.tar.gz $$files
-# 	tar -C $(BUILD_ROOT)/$*/$(prefix) -czf $(ARCHIVE_DIR)/$*.tar.gz .
+# 	tar -C $(CONTRIB_BUILD_ROOT)/$*/$(prefix) -czf $(ARCHIVE_DIR)/$*.tar.gz .
 
 .PHONY: dist
