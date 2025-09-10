@@ -29,9 +29,9 @@ emmake make PORTNAME=emscripten -j || { echo 'error: emmake make PORTNAME=emscri
 emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 22; }
 
 # Step 3.1: make all contrib extensions - do not install
-emmake make PORTNAME=emscripten -C contrib/ -j || { echo 'emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
+emmake make PORTNAME=emscripten -C contrib/ -j || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
 # Step 3.2: make dist contrib extensions - this will create an archive for each extension
-emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }
+emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }
 # the above will also create a file with the imports that each extension needs - we pass these as input in the next step for emscripten to keep alive
 
 # Step 4: make and install other extensions
