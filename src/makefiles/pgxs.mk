@@ -252,7 +252,7 @@ endif # with_llvm
 ifeq ($(PORTNAME), emscripten)
 	$(LLVM_NM) -u *.o    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
 	$(LLVM_NM)    *.o    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
-	comm -23 undef.txt defs.txt > '$(DESTDIR)$(emscripten_extension_imports_dir)/$(MODULES).imports'
+	comm -23 undef.txt defs.txt > '$(emscripten_extension_imports_dir)/$(MODULES).imports'
 	rm -f undef.txt defs.txt
 endif # PORTNAME=emscripten
 endif # MODULES
@@ -280,7 +280,7 @@ endif # with_llvm
 ifeq ($(PORTNAME), emscripten)
 	$(LLVM_NM) -u $(OBJS)    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
 	$(LLVM_NM)    $(OBJS)    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
-	comm -23 undef.txt defs.txt > '$(DESTDIR)$(emscripten_extension_imports_dir)/$(MODULE_big).imports'
+	comm -23 undef.txt defs.txt > '$(emscripten_extension_imports_dir)/$(MODULE_big).imports'
 	rm -f undef.txt defs.txt
 endif # PORTNAME=emscripten
 
