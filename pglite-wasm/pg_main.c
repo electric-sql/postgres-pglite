@@ -32,8 +32,6 @@
 
 // globals
 
-#define MemoryContextResetAndDeleteChildren(...)
-// #define SpinLockInit(...)
 
 
 
