@@ -34,11 +34,11 @@ emmake make PORTNAME=emscripten LDFLAGS_SL="-sSIDE_MODULE=1" -C contrib/ -j || {
 emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }
 # the above will also create a file with the imports that each extension needs - we pass these as input in the next step for emscripten to keep alive
 
-# Step 4: make and install other extensions
+# Step 4: make and dist other extensions
 SAVE_PATH=$PATH
 PATH=$PATH:$INSTALL_FOLDER/bin
-emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 41; }
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ install || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 42; }
+emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite || { echo 'error: emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 41; }
+emmake make OPTFLAGS="" PORTNAME=emscripten LDFLAGS_SL="-sSIDE_MODULE=1" -C pglite/ dist || { echo 'error: make OPTFLAGS="" PORTNAME=emscripten LDFLAGS_SL="-sSIDE_MODULE=1" -C pglite/ dist ' ; exit 42; }
 PATH=$SAVE_PATH
 
 # Step 5: make and install pglite
