@@ -1,5 +1,6 @@
 ARG EMSDK_VER=3.1.74
-FROM emscripten/emsdk:${EMSDK_VER} AS builder
+ARG BUILDPLATFORM
+FROM --platform=$BUILDPLATFORM emscripten/emsdk:${EMSDK_VER}-arm64 AS builder
 
 ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
 
@@ -64,13 +65,16 @@ WORKDIR /src
 # RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
 RUN tar -xvf /src/uuid-1.6.2.tar.gz
 WORKDIR /src/uuid-1.6.2
-RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --enable-shared=no --enable-static=yes --with-perl=no --with-perl-compat=no --prefix=/install/libs --with-php=no --with-pic=yes
+RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --build=aarch64-unknown-linux-gnu --enable-shared=no --enable-static=yes --with-perl=no --with-perl-compat=no --prefix=/install/libs --with-php=no --with-pic=yes
 RUN emmake make -j && emmake make install || true # install tries to strip the wasm, but it doesnt recognize the format, so ignore atm
 WORKDIR /install/libs/lib
 RUN ln -s libuuid.a libossp-uuid.a # contrib extensions use -lossp-uuid
 RUN ${LLVM_NM} /install/libs/lib/libossp-uuid.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libossp-uuid.exports
 
-FROM emscripten/emsdk:${EMSDK_VER} AS runner
+ARG TARGETARCH
+FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
+FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
+FROM base-${TARGETARCH} AS runner
 
 RUN apt update && apt upgrade -y && apt install -y \
     xz-utils autoconf libtool automake pkgconf bison flex
