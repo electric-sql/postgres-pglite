@@ -8,6 +8,6 @@ docker run $@ \
   --workdir=${DOCKER_WORKSPACE} \
   -v .:${DOCKER_WORKSPACE}:rw \
   -v ./dist:/install/pglite:rw \
-  tdrz/pglite-builder-new \
+  electricsql/pglite-builder:3.1.74 \
   ./build-pglite.sh
   
