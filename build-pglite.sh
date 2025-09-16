@@ -42,4 +42,5 @@ emmake make OPTFLAGS="" PORTNAME=emscripten LDFLAGS_SL="-sSIDE_MODULE=1" -C pgli
 PATH=$SAVE_PATH
 
 # Step 5: make and install pglite
+# Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 PGLITE_CFLAGS=$PGLITE_CFLAGS emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }
