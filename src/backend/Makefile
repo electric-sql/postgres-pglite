@@ -81,11 +81,9 @@ LIBPGMAIN = $(top_builddir)/libpgmain.a
 PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
 PGMAIN = main/main.o tcop/postgres.o
 PGLITE_MAIN = pglite-wasm/pg_main.c
-EXPORTED_FUNCTIONS="_main,_use_wire,_pgl_initdb,_pgl_backend,_pgl_shutdown,_interactive_write,_interactive_read,_interactive_one,_get_channel,_get_buffer_size,_get_buffer_addr,_lowerstr"
 EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 PGROOT=/install/pglite
 PGPRELOAD=--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql --preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(top_builddir)/other/password@/tmp/pglite/password --preload-file $(top_builddir)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/postgres --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/initdb
-# -sEXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)
 postgres: $(OBJS)
 	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
 	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
@@ -105,7 +103,7 @@ pglite-exported-functions:
 	sed 's/^/_/' \
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
-# -sDYLINK_DEBUG=2
+# -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 # PGLITE_CFLAGS is something like "-O2" (aka release version) or "-g -gsource-map --no-wasm-opt" (aka debug version)
 pglite: pglite-exported-functions
 	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
