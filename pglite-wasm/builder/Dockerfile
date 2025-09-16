@@ -1,5 +1,8 @@
 ARG EMSDK_VER=3.1.74
 ARG BUILDPLATFORM
+# we only need to build on one platform, since we're interested in the WASM output
+# building on the native (BUILDPLATFORM) is much faster, so use that
+# remove "-arm64" suffix if building on x86_64
 FROM --platform=$BUILDPLATFORM emscripten/emsdk:${EMSDK_VER}-arm64 AS builder
 
 ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
@@ -13,8 +16,8 @@ RUN mkdir -p /install/libs /install/exports
 
 WORKDIR /install/libs
 
+# zlib CAN be installed by using the emsdk like this
 # RUN embuilder --pic --verbose build zlib
-
 
 WORKDIR /src
 
