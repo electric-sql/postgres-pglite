@@ -1,4 +1,4 @@
-# contrib/Makefile
+# Packages other extensions into individual tar.gz archives
 
 top_builddir = ..
 include $(top_builddir)/src/Makefile.global
