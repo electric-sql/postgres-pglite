@@ -37,8 +37,10 @@ emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make P
 # Step 4: make and dist other extensions
 SAVE_PATH=$PATH
 PATH=$PATH:$INSTALL_FOLDER/bin
+./pglite/build_postgis.sh || { echo 'error: ./pglite/build_postgis.sh failed' ; exit 41; }
 emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite || { echo 'error: emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 41; }
 emmake make OPTFLAGS="" PORTNAME=emscripten LDFLAGS_SL="-sSIDE_MODULE=1" -C pglite/ dist || { echo 'error: make OPTFLAGS="" PORTNAME=emscripten LDFLAGS_SL="-sSIDE_MODULE=1" -C pglite/ dist ' ; exit 42; }
+
 PATH=$SAVE_PATH
 
 # Step 5: make and install pglite
