@@ -21,7 +21,7 @@ dist: $(addsuffix .tar.gz,$(EXTENSIONS))
 %.tar.gz:
 	@echo "=== Staging $* ==="
 	rm -rf $(EXTENSIONS_BUILD_ROOT)/$*
-	bash -c 'mkdir -p $(EXTENSIONS_BUILD_ROOT)/$*/$(prefix)/{bin,lib,share/extension,share/doc,share/postgresql/extension,share/postgresql/tsearch_data,include}'
+	bash -c 'mkdir -p $(EXTENSIONS_BUILD_ROOT)/$*/$(prefix)/{bin,lib,share/extension,share/doc,share/postgresql/extension,share/postgresql/tsearch_data,include,share/postgresql/contrib/postgis-3.6/}'
 	$(MAKE) -C $* install DESTDIR=$(EXTENSIONS_BUILD_ROOT)/$*
 	@echo "=== Packaging $* ==="
 	mkdir -p $(ARCHIVE_DIR)

@@ -1,3 +1,12 @@
+__cxa_end_catch
+__cxa_pure_virtual
+__cxa_rethrow
+_ZNSt13runtime_errorD1Ev
+_ZNSt13runtime_errorD2Ev
+_ZTISt13runtime_error
+_ZTVN10__cxxabiv117__class_type_infoE
+_ZTVN10__cxxabiv120__si_class_type_infoE
+_ZTVN10__cxxabiv121__vmi_class_type_infoE
 close
 fcntl
 free
@@ -31,6 +40,7 @@ realloc
 searchstoplist
 socket
 srand
+stderr
 strcmp
 strftime
 strlen
