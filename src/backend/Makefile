@@ -120,7 +120,7 @@ pglite: pglite-exported-functions
         -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
         -sEXPORTED_RUNTIME_METHODS=$(EXPORTED_RUNTIME_METHODS) \
         -I./src/include -I./src/ -I./src/interfaces/libpq \
-        -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ \
+        -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ -L. \
         pglite.o \
 		-Ldict_snowball \
 		-lxslt \
