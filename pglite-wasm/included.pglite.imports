@@ -1,8 +1,6 @@
 close
 fcntl
 free
-get_buffer_addr
-get_buffer_size
 get_channel
 getpid
 gettimeofday

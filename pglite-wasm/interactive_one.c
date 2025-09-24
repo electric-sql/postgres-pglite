@@ -17,19 +17,6 @@ volatile int cma_wsize = 0;
 volatile int cma_rsize = 0;  // also defined in postgres.c for pqcomm
 volatile bool sockfiles = false; // also defined in postgres.c for pqcomm
 
-__attribute__((export_name("get_buffer_size")))
-int
-get_buffer_size(int fd) {
-    return (CMA_MB * 1024 * 1024) / CMA_FD;
-}
-
-// TODO add query size
-__attribute__((export_name("get_buffer_addr")))
-int
-get_buffer_addr(int fd) {
-    return 1 + ( get_buffer_size(fd) *fd);
-}
-
 __attribute__((export_name("get_channel")))
 int
 get_channel() {
@@ -54,46 +41,6 @@ extern void CleanupTransaction(void);
 extern void ClientAuthentication(Port *port);
 extern FILE* SOCKET_FILE;
 extern int SOCKET_DATA;
-
-
-
-/*
-init sequence
-___________________________________
-SubPostmasterMain / (forkexec)
-    InitPostmasterChild
-    shm attach
-    preload
-
-    BackendInitialize(Port *port) -> collect initial packet
-
-	    pq_init();
-	    whereToSendOutput = DestRemote;
-	    status = ProcessStartupPacket(port, false, false);
-            pq_startmsgread
-            pq_getbytes from pq_recvbuf
-            TODO: place PqRecvBuffer (8K) in lower mem for zero copy
-
-        PerformAuthentication
-        ClientAuthentication(port)
-        CheckPasswordAuth SYNC!!!!  ( sendAuthRequest flush -> recv_password_packet )
-    InitShmemAccess/InitProcess/CreateSharedMemoryAndSemaphores
-
-    BackendRun(port)
-        PostgresMain
-
-
--> pq_flush() is synchronous
-
-
-buffer sizes:
-
-    https://github.com/postgres/postgres/blob/master/src/backend/libpq/pqcomm.c#L118
-
-    https://github.com/postgres/postgres/blob/master/src/common/stringinfo.c#L28
-
-
-*/
 
 extern int	ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done);
 extern void pq_recvbuf_fill(FILE* fp, int packetlen);
