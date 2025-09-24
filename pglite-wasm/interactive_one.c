@@ -46,10 +46,71 @@ extern int	ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done);
 extern void pq_recvbuf_fill(FILE* fp, int packetlen);
 
 #define PG_MAX_AUTH_TOKEN_LENGTH	65535
+static char *
+recv_password_packet(Port *port) {
+	StringInfoData buf;
+	int			mtype;
 
-// defined as static char *recv_password_packet(Port *port); in auth.c
-// we still need access to it from here, so break the encapsulation by marking it extern
-extern char *recv_password_packet(Port *port);
+	pq_startmsgread();
+
+	/* Expect 'p' message type */
+	mtype = pq_getbyte();
+	if (mtype != 'p')
+	{
+		/*
+		 * If the client just disconnects without offering a password, don't
+		 * make a log entry.  This is legal per protocol spec and in fact
+		 * commonly done by psql, so complaining just clutters the log.
+		 */
+		if (mtype != EOF)
+			ereport(ERROR,
+					(errcode(ERRCODE_PROTOCOL_VIOLATION),
+					 errmsg("expected password response, got message type %d",
+							mtype)));
+		return NULL;			/* EOF or bad message type */
+	}
+
+	initStringInfo(&buf);
+	if (pq_getmessage(&buf, PG_MAX_AUTH_TOKEN_LENGTH))	/* receive password */
+	{
+		/* EOF - pq_getmessage already logged a suitable message */
+		pfree(buf.data);
+		return NULL;
+	}
+
+	/*
+	 * Apply sanity check: password packet length should agree with length of
+	 * contained string.  Note it is safe to use strlen here because
+	 * StringInfo is guaranteed to have an appended '\0'.
+	 */
+	if (strlen(buf.data) + 1 != buf.len)
+		ereport(ERROR,
+				(errcode(ERRCODE_PROTOCOL_VIOLATION),
+				 errmsg("invalid password packet size")));
+
+	/*
+	 * Don't allow an empty password. Libpq treats an empty password the same
+	 * as no password at all, and won't even try to authenticate. But other
+	 * clients might, so allowing it would be confusing.
+	 *
+	 * Note that this only catches an empty password sent by the client in
+	 * plaintext. There's also a check in CREATE/ALTER USER that prevents an
+	 * empty string from being stored as a user's password in the first place.
+	 * We rely on that for MD5 and SCRAM authentication, but we still need
+	 * this check here, to prevent an empty password from being used with
+	 * authentication methods that check the password against an external
+	 * system, like PAM, LDAP and RADIUS.
+	 */
+	if (buf.len == 1)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PASSWORD),
+				 errmsg("empty password returned by client")));
+
+	/* Do not echo password to logs, for security. */
+	elog(DEBUG5, "received password packet");
+	return buf.data;
+}
+
 
 int md5Salt_len  = 4;
 char md5Salt[4];
