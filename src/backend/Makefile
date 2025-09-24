@@ -75,9 +75,9 @@ endif
 
 ifeq ($(PORTNAME), emscripten)
 AR ?= llvm-ar
-LIBPGCORE ?= $(top_builddir)/libpgcore.a
-LIBPG = $(top_builddir)/libpostgres.a
-LIBPGMAIN = $(top_builddir)/libpgmain.a
+LIBPGCORE ?= libpgcore.a
+LIBPG = libpostgres.a
+LIBPGMAIN = libpgmain.a
 PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
 PGMAIN = main/main.o tcop/postgres.o
 PGLITE_MAIN = pglite-wasm/pg_main.c
