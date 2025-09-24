@@ -564,7 +564,6 @@ PDEBUG("# 498: initdb faking shutdown to complete WAL/OID states in single mode"
             argv[0], PGUSER, PGDATA, getenv("PGDATABASE"), getenv("REPL"));
 #endif
      progname = get_progname(argv[0]);
-     startup_hacks(progname);
      g_argv = argv;
      g_argc = argc;
 

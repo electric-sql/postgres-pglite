@@ -14,8 +14,6 @@
 // option_parse_int parse_sync_method
 #include "../src/fe_utils/option_utils.c"
 
-
-
 static void
 init_locale(const char *categoryname, int category, const char *locale) {
 	if (pg_perm_setlocale(category, locale) == NULL &&
