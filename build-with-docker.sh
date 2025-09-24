@@ -3,7 +3,7 @@
 DOCKER_WORKSPACE=$(pwd)
 GITHUB_ACTIONS=${GITHUB_ACTIONS:-"false"}
 ADDITIONAL_DOCKER_PARAMS=""
-if [ "$GITHUB_ACTIONS" == "true" ]; then
+if [ "$GITHUB_ACTIONS" = "true" ]; then
     echo "Running inside GitHub Actions"
     ADDITIONAL_DOCKER_PARAMS=""
 else
