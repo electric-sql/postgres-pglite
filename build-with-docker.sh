@@ -3,11 +3,13 @@
 DOCKER_WORKSPACE=$(pwd)
 
 docker run $@ \
+  -u $(id -u):$(id -g) \
+  -it \
   --rm \
   -e DEBUG=${DEBUG:-false} \
   --workdir=${DOCKER_WORKSPACE} \
   -v .:${DOCKER_WORKSPACE}:rw \
   -v ./dist:/install/pglite:rw \
-  electricsql/pglite-builder:3.1.74_1 \
+  electricsql/pglite-builder:3.1.74_2 \
   ./build-pglite.sh
   

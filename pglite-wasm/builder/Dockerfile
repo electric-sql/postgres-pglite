@@ -3,7 +3,7 @@ ARG BUILDPLATFORM
 # we only need to build on one platform, since we're interested in the WASM output
 # building on the native (BUILDPLATFORM) is much faster, so use that
 # remove "-arm64" suffix if building on x86_64
-FROM --platform=$BUILDPLATFORM emscripten/emsdk:${EMSDK_VER}-arm64 AS builder
+FROM --platform=$BUILDPLATFORM emscripten/emsdk:${EMSDK_VER} AS builder
 
 ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
 
@@ -60,6 +60,8 @@ RUN ${LLVM_NM} /install/libs/lib/libssl.a | awk '$2 ~ /^[TDB]$/ {print $3}' | se
 
 WORKDIR /src
 RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
+# COPY . .
+# RUN tar xvf uuid-1.6.2.tar.gz
 WORKDIR /src/uuid-1.6.2
 RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --build=aarch64-unknown-linux-gnu --enable-shared=no --enable-static=yes --with-perl=no --with-perl-compat=no --prefix=/install/libs --with-php=no --with-pic=yes
 RUN emmake make -j && emmake make install || true # install tries to strip the wasm, but it doesnt recognize the format, so ignore atm
@@ -84,6 +86,9 @@ ENV LIB_EXPORTS_DIR=${LIB_EXPORTS_DIR}
 
 COPY --from=builder /install/libs ${INSTALL_PREFIX}
 COPY --from=builder /install/exports ${LIB_EXPORTS_DIR}
+
+# allow access to anyone 
+RUN chmod -R 777 /install
 
 # needed in building pglite.wasm
 ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
