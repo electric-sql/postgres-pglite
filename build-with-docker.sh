@@ -4,7 +4,6 @@ DOCKER_WORKSPACE=$(pwd)
 
 docker run $@ \
   -u $(id -u):$(id -g) \
-  -it \
   --rm \
   -e DEBUG=${DEBUG:-false} \
   --workdir=${DOCKER_WORKSPACE} \
