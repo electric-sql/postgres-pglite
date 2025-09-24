@@ -22,6 +22,7 @@ fi
 echo "pglite: PGLITE_CFLAGS=$PGLITE_CFLAGS"
 
 # run ./configure only if config.status is older than this file
+# TODO: we should ALSO check if any of the PGLITE_CFLAGS have changed and trigger a ./configure if they did!!!
 REF_FILE="build-pglite.sh"
 CONFIG_STATUS="config.status"
 RUN_CONFIGURE=false
@@ -37,8 +38,7 @@ else
 fi
 
 # Step 1: configure the project
-if [ "$RUN_CONFIGURE" = true ]
-then
+if [ "$RUN_CONFIGURE" = true ] then
     LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0" CFLAGS="${PGLITE_CFLAGS} -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -DCMA_MB=12 -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types" emconfigure ./configure ac_cv_exeext=.cjs --disable-spinlocks --disable-largefile --without-llvm  --without-pam --disable-largefile --with-openssl=no --without-readline --without-icu --with-includes=$INSTALL_PREFIX/include:$INSTALL_PREFIX/include/libxml2 --with-libraries=$INSTALL_PREFIX/lib --with-uuid=ossp --with-zlib --with-libxml --with-libxslt --with-template=emscripten --prefix=$INSTALL_FOLDER || { echo 'error: emconfigure failed' ; exit 11; }
 else
     echo "Warning: configure has not been run because RUN_CONFIGURE=${RUN_CONFIGURE}"
@@ -62,5 +62,16 @@ emmake make OPTFLAGS="" PORTNAME=emscripten LDFLAGS_SL="-sSIDE_MODULE=1" -C pgli
 PATH=$SAVE_PATH
 
 # Step 5: make and install pglite
+# we define here "all" emscripten flags in order to allow native builds (like libpglite)
+EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
+PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
+-sSUPPORT_LONGJMP=emscripten \
+-sGLOBAL_BASE=12MB -sFORCE_FILESYSTEM=1 \
+-sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
+-sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
+-sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
+-sERROR_ON_UNDEFINED_SYMBOLS=1 \
+-sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS"
+
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
-PGLITE_CFLAGS=$PGLITE_CFLAGS emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }
+PGLITE_CFLAGS="$PGLITE_CFLAGS $PGLITE_EMSCRIPTEN_FLAGS" emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }
