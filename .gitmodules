@@ -4,3 +4,6 @@
 [submodule "pglite/pgvector"]
 	path = pglite/vector
 	url = https://github.com/pgvector/pgvector.git
+[submodule "pglite/postgis"]
+	path = pglite/postgis
+	url = https://git.osgeo.org/gitea/postgis/postgis.git

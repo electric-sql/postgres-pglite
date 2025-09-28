@@ -104,6 +104,8 @@ pglite-exported-functions:
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
+# -sEXPORTED_FUNCTIONS=@$(emscripten_imports_dir)/exported_functions.txt \
+# -sEXPORT_ALL=true \
 # PGLITE_CFLAGS is something like "-O2" (aka release version) or "-g -gsource-map --no-wasm-opt" (aka debug version)
 pglite: pglite-exported-functions
 	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
@@ -115,9 +117,11 @@ pglite: pglite-exported-functions
         -sGLOBAL_BASE=12MB -ferror-limit=1 \
         -sFORCE_FILESYSTEM=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
         -sMAIN_MODULE=2 \
+		-sDYLINK_DEBUG=2 \
+		-fexceptions \
 		-sEXPORTED_FUNCTIONS=@$(emscripten_imports_dir)/exported_functions.txt \
         -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=Module \
-        -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
+        -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=1 \
         -sEXPORTED_RUNTIME_METHODS=$(EXPORTED_RUNTIME_METHODS) \
         -I./src/include -I./src/ -I./src/interfaces/libpq \
         -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ \
@@ -125,6 +129,7 @@ pglite: pglite-exported-functions
 		-Ldict_snowball \
 		-lxslt \
         -lpgcore \
+		-lc++ \
         -lnodefs.js -lidbfs.js -lxml2 -lz
 endif
 
