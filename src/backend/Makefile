@@ -129,7 +129,7 @@ pglite: pglite-exported-functions
 		-Ldict_snowball \
 		-lxslt \
         -lpgcore \
-		-lc++ \
+		-lstdc++ \
         -lnodefs.js -lidbfs.js -lxml2 -lz
 endif
 
