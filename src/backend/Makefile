@@ -105,7 +105,8 @@ pglite-exported-functions:
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 # -sEXPORTED_FUNCTIONS=@$(emscripten_imports_dir)/exported_functions.txt \
-# -sEXPORT_ALL=true \
+# -sEXPORT_ALL=1 \
+# -lstdc++ \
 # PGLITE_CFLAGS is something like "-O2" (aka release version) or "-g -gsource-map --no-wasm-opt" (aka debug version)
 pglite: pglite-exported-functions
 	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -DCMA_MB=12 -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
