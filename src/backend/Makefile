@@ -99,7 +99,7 @@ pglite-exported-functions:
 	cat $(top_builddir)/pglite-wasm/excluded.*.imports $(top_builddir)/src/interfaces/libpq/exports.list $(LIB_EXPORTS_DIR)/libossp-uuid.exports | sort -u > '$(top_builddir)/pglite-wasm/excluded.imports'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite-wasm/included.pglite.imports' | \
 	sort -u | \
-	grep -Fvx -f '$(top_builddir)/pglite-wasm/excluded.imports' | \
+	grep -Fvx -f '$(top_builddir)/pglite-wasm/excluded.pglite.imports' | \
 	sed 's/^/_/' \
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
@@ -118,7 +118,6 @@ pglite: pglite-exported-functions
         -sGLOBAL_BASE=12MB -ferror-limit=1 \
         -sFORCE_FILESYSTEM=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
         -sMAIN_MODULE=2 \
-		-sDYLINK_DEBUG=2 \
 		-fexceptions \
 		-sEXPORTED_FUNCTIONS=@$(emscripten_imports_dir)/exported_functions.txt \
         -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=Module \

@@ -145,7 +145,7 @@ FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
 FROM base-${TARGETARCH} AS runner
 
 RUN apt update && apt upgrade -y && apt install -y \
-    xz-utils autoconf libtool automake pkgconf bison flex
+    xz-utils autoconf libtool automake pkgconf bison flex vim
 
 # this is where the libraries will be installed and subsequently where the LIBS and INCLUDES can be found
 ARG INSTALL_PREFIX=/install/libs
