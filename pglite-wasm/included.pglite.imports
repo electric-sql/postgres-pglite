@@ -34,3 +34,4 @@ strftime
 strlen
 strtoul
 use_wire
+set_read_write_cbs

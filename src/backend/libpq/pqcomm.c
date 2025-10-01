@@ -137,6 +137,53 @@ static int	PqRecvPointer;
 static int	PqRecvLength;
 volatile int querylen = 0;
 volatile FILE* queryfp = NULL;
+extern FILE* SOCKET_FILE;
+
+typedef ssize_t (*pglite_read_t)(void *buffer, size_t max_length);
+extern pglite_read_t pglite_read;
+	
+typedef ssize_t(*pglite_write_t)(void *buffer, size_t length);
+extern pglite_write_t pglite_write;	
+
+int EMSCRIPTEN_KEEPALIVE fcntl (int __fd, int __cmd, ...) {
+	// dummy 
+	return 0;
+}
+
+int EMSCRIPTEN_KEEPALIVE setsockopt (int __fd, int __level, int __optname,
+	const void *__optval, socklen_t __optlen) {
+		// dummy 
+		return 0;
+}
+
+int EMSCRIPTEN_KEEPALIVE getsockopt (int __fd, int __level, int __optname,
+	void *__restrict __optval,
+	socklen_t *__restrict __optlen) {
+		// dummy 
+		return 0;
+}
+
+int EMSCRIPTEN_KEEPALIVE getsockname (int __fd, struct sockaddr * __addr,
+	socklen_t *__restrict __len) {
+		// dummy 
+		return 0;
+	}
+
+ssize_t EMSCRIPTEN_KEEPALIVE
+	recv (int __fd, void *__buf, size_t __n, int __flags) {
+		// ssize_t got = fread(__buf, 1, __n, queryfp);
+		ssize_t got = pglite_read(__buf, n);
+		return got;
+	}
+
+
+ssize_t EMSCRIPTEN_KEEPALIVE
+	send (int __fd, const void *__buf, size_t __n, int __flags) {
+		// ssize_t wrote = fwrite(__buf, 1, __n, SOCKET_FILE);
+		ssize_t wrote = pglite_write(__buf, __n);
+		return wrote;
+	}
+
 #endif
 
 /* pglite specific */
@@ -200,7 +247,7 @@ pq_init(ClientSocket *client_sock)
 	port->sock = client_sock->sock;
 	memcpy(&port->raddr.addr, &client_sock->raddr.addr, client_sock->raddr.salen);
 	port->raddr.salen = client_sock->raddr.salen;
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+// #if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 	/* fill in the server (local) address */
 	port->laddr.salen = sizeof(port->laddr.addr);
 	if (getsockname(port->sock,
@@ -292,7 +339,7 @@ pq_init(ClientSocket *client_sock)
 		(void) pq_setkeepalivescount(tcp_keepalives_count, port);
 		(void) pq_settcpusertimeout(tcp_user_timeout, port);
 	}
-#endif /* WASM */
+// #endif /* WASM */
 
 	/* initialize state variables */
 	PqSendBufferSize = PQ_SEND_BUFFER_SIZE;
@@ -300,7 +347,7 @@ pq_init(ClientSocket *client_sock)
 	PqSendPointer = PqSendStart = PqRecvPointer = PqRecvLength = 0;
 	PqCommBusy = false;
 	PqCommReadingMsg = false;
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+// #if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 	/* set up process-exit hook to close the socket */
 	on_proc_exit(socket_close, 0);
 
@@ -330,10 +377,10 @@ pq_init(ClientSocket *client_sock)
 								  MyLatch, NULL);
 	AddWaitEventToSet(FeBeWaitSet, WL_POSTMASTER_DEATH, PGINVALID_SOCKET,
 					  NULL, NULL);
-#else /* WASM */
-    /* because we may fill before starting reading message */
-    PqRecvBuffer = &PqRecvBuffer_static[0];
-#endif /* WASM */
+// #else /* WASM */
+//     /* because we may fill before starting reading message */
+//     PqRecvBuffer = &PqRecvBuffer_static[0];
+// #endif /* WASM */
 	/*
 	 * The event positions match the order we added them, but let's sanity
 	 * check them to be sure.
@@ -932,20 +979,20 @@ pq_recvbuf(void)
 		else
 			PqRecvLength = PqRecvPointer = 0;
 	}
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
-    if (queryfp && querylen) {
-        int got = fread( PqRecvBuffer, 1, PQ_RECV_BUFFER_SIZE - PqRecvPointer, queryfp);
-        querylen -= got;
-        PqRecvLength += got;
-        if (querylen<=0) {
-            PDEBUG("# 931: could close fp early here " __FILE__);
-            queryfp = NULL;
-        }
-        if (got>0)
-    		return 0;
-    }
-    return EOF;
-#endif
+// #if defined(__EMSCRIPTEN__) || defined(__wasi__)
+//     if (queryfp && querylen) {
+//         int got = fread( PqRecvBuffer, 1, PQ_RECV_BUFFER_SIZE - PqRecvPointer, queryfp);
+//         querylen -= got;
+//         PqRecvLength += got;
+//         if (querylen<=0) {
+//             PDEBUG("# 931: could close fp early here " __FILE__);
+//             queryfp = NULL;
+//         }
+//         if (got>0)
+//     		return 0;
+//     }
+//     return EOF;
+// #endif
 
 	/* Ensure that we're in blocking mode */
 	socket_set_nonblocking(false);
@@ -1048,9 +1095,9 @@ pq_getbyte_if_available(unsigned char *c)
 		*c = PqRecvBuffer[PqRecvPointer++];
 		return 1;
 	}
-#if defined(__EMSCRIPTEN__) || (__wasi__)
-puts("# 1044: pq_getbyte_if_available N/I in " __FILE__ ); abort();
-#else
+// #if defined(__EMSCRIPTEN__) || (__wasi__)
+// puts("# 1044: pq_getbyte_if_available N/I in " __FILE__ ); abort();
+// #else
 	/* Put the socket into non-blocking mode */
 	socket_set_nonblocking(true);
 
@@ -1087,7 +1134,7 @@ puts("# 1044: pq_getbyte_if_available N/I in " __FILE__ ); abort();
 		/* EOF detected */
 		r = EOF;
 	}
-#endif
+// #endif
 	return r;
 }
 
@@ -1177,20 +1224,23 @@ pq_buffer_remaining_data(void)
  * --------------------------------
  */
 #if defined(__EMSCRIPTEN__) || defined(__wasi__)
-EMSCRIPTEN_KEEPALIVE void
+void EMSCRIPTEN_KEEPALIVE
 pq_recvbuf_fill(FILE* fp, int packetlen) {
-    if (packetlen>PQ_RECV_BUFFER_SIZE) {
-        int got = fread( PqRecvBuffer, 1, PQ_RECV_BUFFER_SIZE, fp);
-        queryfp = fp;
-        querylen = packetlen - got;
-        PqRecvLength = got;
-    } else {
-        fread( PqRecvBuffer, packetlen, 1, fp);
-        PqRecvLength = packetlen;
-        queryfp = NULL;
-        querylen = 0;
-    }
-    PqRecvPointer = 0;
+
+	queryfp = fp;
+
+    // if (packetlen>PQ_RECV_BUFFER_SIZE) {
+    //     int got = fread( PqRecvBuffer, 1, PQ_RECV_BUFFER_SIZE, fp);
+    //     queryfp = fp;
+    //     querylen = packetlen - got;
+    //     PqRecvLength = got;
+    // } else {
+    //     fread( PqRecvBuffer, packetlen, 1, fp);
+    //     PqRecvLength = packetlen;
+    //     queryfp = NULL;
+    //     querylen = 0;
+    // }
+    // PqRecvPointer = 0;
 }
 
 #endif
@@ -1207,29 +1257,29 @@ pq_startmsgread(void)
 		ereport(FATAL,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
 				 errmsg("terminating connection because protocol synchronization was lost")));
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
-    if (!pq_buffer_remaining_data()) {
-        if (sockfiles) {
-            PqRecvBuffer = &PqRecvBuffer_static[0];
-            if (PqSendBuffer_save)
-                PqSendBuffer=PqSendBuffer_save;
-            PqSendBufferSize = PQ_SEND_BUFFER_SIZE;
-        } else {
-            PqRecvPointer = 0;
-            PqRecvLength = cma_rsize;
-            PqRecvBuffer = (char*)0x1;
+// #if defined(__EMSCRIPTEN__) || defined(__wasi__)
+//     if (!pq_buffer_remaining_data()) {
+//         if (sockfiles) {
+//             PqRecvBuffer = &PqRecvBuffer_static[0];
+//             if (PqSendBuffer_save)
+//                 PqSendBuffer=PqSendBuffer_save;
+//             PqSendBufferSize = PQ_SEND_BUFFER_SIZE;
+//         } else {
+//             PqRecvPointer = 0;
+//             PqRecvLength = cma_rsize;
+//             PqRecvBuffer = (char*)0x1;
 
-            PqSendPointer = 0;
-            PqSendBuffer_save = PqSendBuffer;
-            PqSendBuffer = 2 + (char*)(cma_rsize);
-            PqSendBufferSize = (CMA_MB*1024*1024) - (int)(&PqSendBuffer[0]);
-        }
-    }
-#if PDEBUG
-        printf("# 1225: pq_startmsgread cma_rsize=%d PqRecvLength=%d buf=%p reply=%p\n", cma_rsize, PqRecvLength, &PqRecvBuffer[0], &PqSendBuffer[0]);
-#endif
+//             PqSendPointer = 0;
+//             PqSendBuffer_save = PqSendBuffer;
+//             PqSendBuffer = 2 + (char*)(cma_rsize);
+//             PqSendBufferSize = (CMA_MB*1024*1024) - (int)(&PqSendBuffer[0]);
+//         }
+//     }
+// #if PDEBUG
+//         printf("# 1225: pq_startmsgread cma_rsize=%d PqRecvLength=%d buf=%p reply=%p\n", cma_rsize, PqRecvLength, &PqRecvBuffer[0], &PqSendBuffer[0]);
+// #endif
 
-#endif
+// #endif
 	PqCommReadingMsg = true;
 }
 
@@ -1352,56 +1402,55 @@ pq_getmessage(StringInfo s, int maxlen)
 
 	return 0;
 }
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
-extern FILE* SOCKET_FILE;
-extern int SOCKET_DATA;
-static int
-internal_putbytes(const char *s, size_t len) {
-    size_t amount;
-    if (!sockfiles) {
-	    while (len > 0) {
-		    /* If buffer is full, then flush it out from cma to file and continue from there */
-		    if (PqSendPointer >= PqSendBufferSize) {
-                int redirected = fwrite(PqSendBuffer, 1, PqSendPointer, SOCKET_FILE);
-                sockfiles = true;
-#if PGDEBUG
-                fprintf(stderr, "# 1364: overflow %zu >= %d redirect=%d cma_rsize=%d CMA_MB=%d \n", PqSendPointer, PqSendBufferSize, redirected, cma_rsize, CMA_MB);
-#endif
-                break;
-		    }
-		    amount = PqSendBufferSize - PqSendPointer;
-		    if (amount > len)
-			    amount = len;
-		    memcpy(PqSendBuffer + PqSendPointer, s, amount);
-		    PqSendPointer += amount;
-		    s += amount;
-		    len -= amount;
-            SOCKET_DATA+=amount;
-	    }
-    }
+// #if defined(__EMSCRIPTEN__) || defined(__wasi__)
+// extern int SOCKET_DATA;
+// static int
+// internal_putbytes(const char *s, size_t len) {
+//     size_t amount;
+//     if (!sockfiles) {
+// 	    while (len > 0) {
+// 		    /* If buffer is full, then flush it out from cma to file and continue from there */
+// 		    if (PqSendPointer >= PqSendBufferSize) {
+//                 int redirected = fwrite(PqSendBuffer, 1, PqSendPointer, SOCKET_FILE);
+//                 sockfiles = true;
+// #if PGDEBUG
+//                 fprintf(stderr, "# 1364: overflow %zu >= %d redirect=%d cma_rsize=%d CMA_MB=%d \n", PqSendPointer, PqSendBufferSize, redirected, cma_rsize, CMA_MB);
+// #endif
+//                 break;
+// 		    }
+// 		    amount = PqSendBufferSize - PqSendPointer;
+// 		    if (amount > len)
+// 			    amount = len;
+// 		    memcpy(PqSendBuffer + PqSendPointer, s, amount);
+// 		    PqSendPointer += amount;
+// 		    s += amount;
+// 		    len -= amount;
+//             SOCKET_DATA+=amount;
+// 	    }
+//     }
 
-    if (sockfiles) {
-        int wc=      fwrite(s, 1, len, SOCKET_FILE);
-        SOCKET_DATA+=wc;
-    }
-    return 0;
-}
+//     if (sockfiles) {
+//         int wc=      fwrite(s, 1, len, SOCKET_FILE);
+//         SOCKET_DATA+=wc;
+//     }
+//     return 0;
+// }
 
-static int
-socket_flush(void) {
-    return internal_flush();
-}
+// static int
+// socket_flush(void) {
+//     return internal_flush();
+// }
 
-static int
-internal_flush(void) {
-    /*  no flush for raw wire */
-    if (sockfiles) {
-    	PqSendStart = PqSendPointer = 0;
-    }
-	return 0;
-}
+// static int
+// internal_flush(void) {
+//     /*  no flush for raw wire */
+//     if (sockfiles) {
+//     	PqSendStart = PqSendPointer = 0;
+//     }
+// 	return 0;
+// }
 
-#else
+// #else
 
 static inline int
 internal_putbytes(const char *s, size_t len)
@@ -1552,7 +1601,7 @@ internal_flush_buffer(const char *buf, size_t *start, size_t *end)
 	*start = *end = 0;
 	return 0;
 }
-#endif /* wasm */
+// #endif /* wasm */
 /* --------------------------------
  *		pq_flush_if_writable - flush pending output if writable without blocking
  *
