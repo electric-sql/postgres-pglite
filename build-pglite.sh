@@ -63,7 +63,7 @@ PATH=$SAVE_PATH
 
 # Step 5: make and install pglite
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
+EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction"
 PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sGLOBAL_BASE=12MB -sFORCE_FILESYSTEM=1 \

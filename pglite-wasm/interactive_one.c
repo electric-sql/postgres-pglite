@@ -116,7 +116,6 @@ buffer sizes:
 */
 
 extern int	ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done);
-extern void pq_recvbuf_fill(FILE* fp, int packetlen);
 
 #define PG_MAX_AUTH_TOKEN_LENGTH	65535
 static char *
