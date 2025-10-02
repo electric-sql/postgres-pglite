@@ -39,7 +39,7 @@ fi
 
 # Step 1: configure the project
 if [ "$RUN_CONFIGURE" = true ]; then
-    LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0" CFLAGS="${PGLITE_CFLAGS} -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -DCMA_MB=12 -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types" emconfigure ./configure ac_cv_exeext=.cjs --disable-spinlocks --disable-largefile --without-llvm  --without-pam --disable-largefile --with-openssl=no --without-readline --without-icu --with-includes=$INSTALL_PREFIX/include:$INSTALL_PREFIX/include/libxml2 --with-libraries=$INSTALL_PREFIX/lib --with-uuid=ossp --with-zlib --with-libxml --with-libxslt --with-template=emscripten --prefix=$INSTALL_FOLDER || { echo 'error: emconfigure failed' ; exit 11; }
+    LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0" CFLAGS="${PGLITE_CFLAGS} -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types" emconfigure ./configure ac_cv_exeext=.cjs --disable-spinlocks --disable-largefile --without-llvm  --without-pam --disable-largefile --with-openssl=no --without-readline --without-icu --with-includes=$INSTALL_PREFIX/include:$INSTALL_PREFIX/include/libxml2 --with-libraries=$INSTALL_PREFIX/lib --with-uuid=ossp --with-zlib --with-libxml --with-libxslt --with-template=emscripten --prefix=$INSTALL_FOLDER || { echo 'error: emconfigure failed' ; exit 11; }
 else
     echo "Warning: configure has not been run because RUN_CONFIGURE=${RUN_CONFIGURE}"
 fi
@@ -66,7 +66,7 @@ PATH=$SAVE_PATH
 EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction"
 PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
--sGLOBAL_BASE=12MB -sFORCE_FILESYSTEM=1 \
+-sFORCE_FILESYSTEM=1 \
 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
 -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \

@@ -9,32 +9,9 @@ volatile sigjmp_buf local_sigjmp_buf;
 // track back how many ex raised in steps of the loop until sucessfull clear_error
 volatile int canary_ex = 0;
 
-// track back mode used for last reply   <0 socketfiles , 0== repl , > 0 cma addr
-volatile int channel = 0;
-
 /* TODO : prevent multiple write and write while reading ? */
-volatile int cma_wsize = 0;
 volatile int cma_rsize = 0;  // also defined in postgres.c for pqcomm
 volatile bool sockfiles = false; // also defined in postgres.c for pqcomm
-
-__attribute__((export_name("get_buffer_size")))
-int
-get_buffer_size(int fd) {
-    return (CMA_MB * 1024 * 1024) / CMA_FD;
-}
-
-// TODO add query size
-__attribute__((export_name("get_buffer_addr")))
-int
-get_buffer_addr(int fd) {
-    return 1 + ( get_buffer_size(fd) *fd);
-}
-
-__attribute__((export_name("get_channel")))
-int
-get_channel() {
-    return channel;
-}
 
 // read FROM JS
 // (i guess return number of bytes written)
@@ -56,14 +33,6 @@ set_read_write_cbs(pglite_read_t read_cb, pglite_write_t write_cb) {
     pglite_read = read_cb;
     pglite_write = write_cb;
 }
-
-__attribute__((export_name("interactive_read")))
-int
-interactive_read() {
-    /* should cma_rsize should be reset here ? */
-    return cma_wsize;
-}
-
 
 static void pg_prompt() {
     fprintf(stdout,"pg> %c\n", 4);
@@ -213,15 +182,7 @@ static void io_init(bool in_auth, bool out_auth) {
 
 
 volatile bool is_wire = true;
-extern char * cma_port;
 extern void pq_startmsgread(void);
-
-__attribute__((export_name("interactive_write")))
-void
-interactive_write(int size) {
-    cma_rsize = size;
-    cma_wsize = 0;
-}
 
 __attribute__((export_name("use_wire")))
 void
@@ -298,16 +259,6 @@ clear_error() {
         send_ready_for_query = true;
 }
 
-void discard_input(){
-    if (!cma_rsize)
-        return;
-    pq_startmsgread();
-    for (int i = 0; i < cma_rsize; i++) {
-        pq_getbyte();
-    }
-    pq_endmsgread();
-}
-
 void
 startup_auth() {
     /* code is in handshake/auth domain so read whole msg now */
@@ -320,7 +271,6 @@ startup_auth() {
         sf_connected++;
         PDEBUG("# 273: sending auth request");
         //ClientAuthentication(MyProcPort);
-        discard_input();
 
 ClientAuthInProgress = true;
         md5Salt[0]=0x01;
@@ -358,7 +308,6 @@ startup_pass(bool check) {
         pfree(passwd);
     } else {
         PDEBUG("# 310: auth skip");
-        discard_input();
     }
     ClientAuthInProgress = false;
 
@@ -414,24 +363,24 @@ interactive_one(int packetlen, int peek) {
 
     // this could be pg_flush in sync mode.
     // but in fact we are writing socket data that was piled up previous frame async.
-    if (SOCKET_DATA>0) {
-        puts("# 361: ERROR flush after frame");
-        goto wire_flush;
-    }
+    // if (SOCKET_DATA>0) {
+    //     puts("# 361: ERROR flush after frame");
+    //     goto wire_flush;
+    // }
 
-    if (!cma_rsize) {
-        // no cma : reading from file. writing to file.
-        if (!SOCKET_FILE) {
-            SOCKET_FILE =  fopen(PGS_OLOCK, "w") ;
-            MyProcPort->sock = fileno(SOCKET_FILE);
-        }
-    } else {
-        // prepare file reply queue, just in case of cma overflow
-        // if unused the file will be kept open till next query.
-        if (!SOCKET_FILE) {
-            SOCKET_FILE =  fopen(PGS_OLOCK, "w") ;
-        }
-    }
+    // if (!cma_rsize) {
+    //     // no cma : reading from file. writing to file.
+    //     if (!SOCKET_FILE) {
+    //         SOCKET_FILE =  fopen(PGS_OLOCK, "w") ;
+    //         MyProcPort->sock = fileno(SOCKET_FILE);
+    //     }
+    // } else {
+    //     // prepare file reply queue, just in case of cma overflow
+    //     // if unused the file will be kept open till next query.
+    //     if (!SOCKET_FILE) {
+    //         SOCKET_FILE =  fopen(PGS_OLOCK, "w") ;
+    //     }
+    // }
 
     MemoryContextSwitchTo(MessageContext);
     MemoryContextReset(MessageContext);
@@ -459,13 +408,6 @@ interactive_one(int packetlen, int peek) {
     }
 // postgres.c 4627
     DoingCommandRead = true;
-
-#if defined(EMUL_CMA)
-    //  temp fix for -O0 but less efficient than literal
-    #define IO ((char *)(1+(int)cma_port))
-#else
-    #define IO ((char *)(1))
-#endif
 
 /*
  * in cma mode (cma_rsize>0), client call the wire loop itself waiting synchronously for the results
@@ -788,7 +730,7 @@ return_early:;
     // cma_rsize = 0;
     // IO[0] = 0;
 
-    #undef IO
+    // #undef IO
 
     // reset EX counter
     canary_ex = 0;
