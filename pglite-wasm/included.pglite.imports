@@ -525,6 +525,15 @@ TypenameGetTypid
 unlinkat
 use_wire
 uselocale
+uuid_cmp
+uuid_create
+uuid_error
+uuid_export
+uuid_import
+uuid_in
+uuid_load
+uuid_make
+uuid_out
 vasprintf
 wcrtomb
 wcscoll_l

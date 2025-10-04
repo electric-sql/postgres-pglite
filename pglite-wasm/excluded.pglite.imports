@@ -2452,15 +2452,6 @@ unit_normal
 unzigzag32
 unzigzag64
 unzigzag8
-uuid_cmp
-uuid_create
-uuid_error
-uuid_export
-uuid_import
-uuid_in
-uuid_load
-uuid_make
-uuid_out
 varint_s32_encode_buf
 varint_s64_decode
 varint_s64_encode_buf
