@@ -82,7 +82,7 @@ PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/l
 PGMAIN = main/main.o tcop/postgres.o
 PGLITE_MAIN = pglite-wasm/pg_main.c
 PGROOT=/install/pglite
-PGPRELOAD=--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql --preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(top_builddir)/other/password@/tmp/pglite/password --preload-file $(top_builddir)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/postgres --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/initdb
+PGPRELOAD=--preload-file /install/libs/share/proj@/install/libs/share/proj --preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql --preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(top_builddir)/other/password@/tmp/pglite/password --preload-file $(top_builddir)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/postgres --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/initdb
 postgres: $(OBJS)
 	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
 	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))

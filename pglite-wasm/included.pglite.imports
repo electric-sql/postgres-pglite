@@ -162,6 +162,7 @@ CacheMemoryContext
 close
 cosh
 CurrentMemoryContext
+dladdr
 errcode
 errfinish
 errhint
@@ -176,8 +177,11 @@ fclose
 fcntl
 find_option
 fmod
+fopen
 free
 freelocale
+fseek
+ftell
 get_extension_oid
 get_namespace_name
 getcwd

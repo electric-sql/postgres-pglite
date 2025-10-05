@@ -73,7 +73,8 @@ PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
 -sERROR_ON_UNDEFINED_SYMBOLS=1 \
--sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS"
+-sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
+-sNO_DISABLE_EXCEPTION_CATCHING"
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 PGLITE_CFLAGS="$PGLITE_CFLAGS $PGLITE_EMSCRIPTEN_FLAGS" emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }
