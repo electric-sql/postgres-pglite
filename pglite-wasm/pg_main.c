@@ -62,7 +62,6 @@ volatile int async_restart = 1;
 
 
 #define WASM_PGDATA WASM_PREFIX "/base"
-#define CMA_FD 1
 
 extern bool IsPostmasterEnvironment;
 
@@ -174,8 +173,8 @@ main_pre(int argc, char *argv[]) {
 #if defined(__EMSCRIPTEN__)
     EM_ASM( {
            Module.is_worker = (typeof WorkerGlobalScope !== 'undefined') && self instanceof WorkerGlobalScope;
-           Module.FD_BUFFER_MAX = $0; Module.emscripten_copy_to = console.warn;}
-           , (CMA_MB * 1024 * 1024) / CMA_FD);  /* ( global mem start / num fd max ) */
+           Module.FD_BUFFER_MAX = $0; Module.emscripten_copy_to = console.warn;} // tdrz: what is FD_BUFFER_MAX?
+           , (12 * 1024 * 1024));  /* ( global mem start / num fd max ) */ 
 
     if (is_node) {
         setenv("ENVIRONMENT", "node", 1);
@@ -564,7 +563,6 @@ PDEBUG("# 498: initdb faking shutdown to complete WAL/OID states in single mode"
             argv[0], PGUSER, PGDATA, getenv("PGDATABASE"), getenv("REPL"));
 #endif
      progname = get_progname(argv[0]);
-     startup_hacks(progname);
      g_argv = argv;
      g_argc = argc;
 

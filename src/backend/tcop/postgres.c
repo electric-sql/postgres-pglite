@@ -115,6 +115,12 @@ int			restrict_nonsystem_relation_kind;
 bool quote_all_identifiers = false;
 FILE* SOCKET_FILE = NULL;
 int SOCKET_DATA = 0;
+
+typedef ssize_t (*pglite_read_t)(void *buffer, size_t max_length);
+pglite_read_t pglite_read = NULL;
+
+typedef ssize_t(*pglite_write_t)(void *buffer, size_t length);
+pglite_write_t pglite_write = NULL;
 #endif // WASM
 
 

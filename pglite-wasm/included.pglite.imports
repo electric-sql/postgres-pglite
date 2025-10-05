@@ -479,6 +479,7 @@ repalloc
 rmdir
 ScanKeyInit
 searchstoplist
+set_read_write_cbs
 setlocale
 shared_gserialized_equal
 shared_gserialized_get
