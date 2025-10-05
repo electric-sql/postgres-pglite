@@ -52,6 +52,6 @@ pglite.data
 pglite.js
 pglite.html
 *.map
-pglite-wasm/excluded.imports
 *.defs.txt
 *.undef.txt
+excluded.pglite.exports

@@ -92,13 +92,13 @@ postgres: $(OBJS)
 
 # Extensions use functions from the core PG. These need to be exported by the emscripten compiler.
 # The following target gathers all extension imports + the default ones (included.pglite.imports),
-# excludes the one in excluded.pglite.imports and adds a leading _ to each.
+# excludes the one in excluded.pglite.exports and adds a leading _ to each.
 pglite-exported-functions:
 	$(MKDIR_P) '$(emscripten_imports_dir)'
-	cat $(top_builddir)/pglite-wasm/excluded.*.imports $(top_builddir)/src/interfaces/libpq/exports.list $(LIB_EXPORTS_DIR)/libossp-uuid.exports | sort -u > '$(top_builddir)/pglite-wasm/excluded.imports'
+	cat $(top_builddir)/pglite-wasm/default.excluded.exports $(top_builddir)/src/interfaces/libpq/exports.list $(LIB_EXPORTS_DIR)/libossp-uuid.exports $(LIB_EXPORTS_DIR)/libproj.exports | sort -u > '$(top_builddir)/pglite-wasm/excluded.pglite.exports'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite-wasm/included.pglite.imports' | \
 	sort -u | \
-	grep -Fvx -f '$(top_builddir)/pglite-wasm/excluded.pglite.imports' | \
+	grep -Fvx -f '$(top_builddir)/pglite-wasm/excluded.pglite.exports' | \
 	sed 's/^/_/' \
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
