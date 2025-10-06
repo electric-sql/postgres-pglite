@@ -24,6 +24,7 @@ read
 readstoplist
 realloc
 searchstoplist
+set_read_write_cbs
 socket
 srand
 strcmp
@@ -31,4 +32,3 @@ strftime
 strlen
 strtoul
 use_wire
-set_read_write_cbs
