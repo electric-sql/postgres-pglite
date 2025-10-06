@@ -67,7 +67,7 @@ RUN ${LLVM_NM} /install/libs/lib/libssl.a | awk '$2 ~ /^[TDB]$/ {print $3}' | se
 WORKDIR /src
 RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
 # COPY . .
-# RUN tar xvf uuid-1.6.2.tar.gz
+RUN tar xvf uuid-1.6.2.tar.gz
 WORKDIR /src/uuid-1.6.2
 RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --build=aarch64-unknown-linux-gnu --enable-shared=no --enable-static=yes --with-perl=no --with-perl-compat=no --prefix=/install/libs --with-php=no --with-pic=yes
 RUN emmake make -j && emmake make install || true # install tries to strip the wasm, but it doesnt recognize the format, so ignore atm
@@ -102,7 +102,7 @@ WORKDIR /src
 # RUN curl -L https://www.sqlite.org/2025/sqlite-src-3500400.zip | unzip
 RUN unzip sqlite-src-3500400.zip
 WORKDIR /src/sqlite-src-3500400
-RUN emconfigure ./configure --disable-shared --prefix=/install/libs --with-emsdk
+RUN emconfigure ./configure --disable-shared --prefix=/install/libs --with-emsdk --disable-threadsafe
 RUN emmake make -j && emmake make install 
 # we need a sqlite3 executable for the system on which we're building (needed by https://proj.org/en/stable/install.html#build-requirements)
 RUN emmake make clean && ./configure --disable-shared && make -j && cp sqlite3 /tmp/sqlite3

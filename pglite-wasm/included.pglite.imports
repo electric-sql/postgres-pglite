@@ -210,12 +210,14 @@ mbrtowc
 mbsnrtowcs
 mbsrtowcs
 mbtowc
+memchr
 memcmp
 memcpy
 MemoryContextAlloc
 MemoryContextAllocZero
 MemoryContextRegisterResetCallback
 MemoryContextStrdup
+memrchr
 memset
 mkdir
 mmap
