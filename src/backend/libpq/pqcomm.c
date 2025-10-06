@@ -132,7 +132,6 @@ static int	PqRecvLength;		/* End of data available in PqRecvBuffer */
 #if defined(__EMSCRIPTEN__) || defined(__wasi__)
 volatile int querylen = 0;
 volatile FILE* queryfp = NULL;
-extern FILE* SOCKET_FILE;
 
 typedef ssize_t (*pglite_read_t)(void *buffer, size_t max_length);
 extern pglite_read_t pglite_read;

@@ -109,8 +109,6 @@ int			restrict_nonsystem_relation_kind;
 
 #if (defined(__EMSCRIPTEN__) || defined(__wasi__))
 bool quote_all_identifiers = false;
-FILE* SOCKET_FILE = NULL;
-int SOCKET_DATA = 0;
 
 typedef ssize_t (*pglite_read_t)(void *buffer, size_t max_length);
 pglite_read_t pglite_read = NULL;

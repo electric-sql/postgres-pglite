@@ -30,55 +30,9 @@ set_read_write_cbs(pglite_read_t read_cb, pglite_write_t write_cb) {
     pglite_write = write_cb;
 }
 
-static void pg_prompt() {
-    fprintf(stdout,"pg> %c\n", 4);
-}
-
 extern void AbortTransaction(void);
 extern void CleanupTransaction(void);
 extern void ClientAuthentication(Port *port);
-extern FILE* SOCKET_FILE;
-extern int SOCKET_DATA;
-
-
-
-/*
-init sequence
-___________________________________
-SubPostmasterMain / (forkexec)
-    InitPostmasterChild
-    shm attach
-    preload
-
-    BackendInitialize(Port *port) -> collect initial packet
-
-	    pq_init();
-	    whereToSendOutput = DestRemote;
-	    status = ProcessStartupPacket(port, false, false);
-            pq_startmsgread
-            pq_getbytes from pq_recvbuf
-            TODO: place PqRecvBuffer (8K) in lower mem for zero copy
-
-        PerformAuthentication
-        ClientAuthentication(port)
-        CheckPasswordAuth SYNC!!!!  ( sendAuthRequest flush -> recv_password_packet )
-    InitShmemAccess/InitProcess/CreateSharedMemoryAndSemaphores
-
-    BackendRun(port)
-        PostgresMain
-
-
--> pq_flush() is synchronous
-
-
-buffer sizes:
-
-    https://github.com/postgres/postgres/blob/master/src/backend/libpq/pqcomm.c#L118
-
-    https://github.com/postgres/postgres/blob/master/src/common/stringinfo.c#L28
-
-
-*/
 
 extern int	ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done);
 
@@ -171,8 +125,6 @@ static void io_init(bool in_auth, bool out_auth) {
     MyProcPort->canAcceptConnections = CAC_OK;
 #endif
     ClientAuthInProgress = out_auth;
-    SOCKET_FILE = NULL;
-    SOCKET_DATA = 0;
     PDEBUG("\n\n\n# 165: io_init  --------- Ready for CLIENT ---------");
 }
 
