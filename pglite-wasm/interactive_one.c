@@ -489,6 +489,7 @@ wire_flush:
 return_early:;
     // reset EX counter
     canary_ex = 0;
+    pq_flush();
 }
 
 #undef PGL_LOOP
