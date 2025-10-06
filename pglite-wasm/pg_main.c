@@ -92,20 +92,7 @@ volatile bool send_ready_for_query = true;
 volatile bool idle_in_transaction_timeout_enabled = false;
 volatile bool idle_session_timeout_enabled = false;
 
-
-void
-pg_free(void *ptr) {
-    free(ptr);
-}
-
 #include "../backend/tcop/postgres.c"
-
-
-// initdb + start on fd (pipe emulation)
-
-
-static bool force_echo = false;
-
 
 #include "pgl_mains.c"
 
@@ -115,16 +102,11 @@ static bool force_echo = false;
 
 #include "pgl_initdb.c"
 
-
 // interactive_one, heart of the async loop.
-
 #include "./interactive_one.c"
-
 
 static void
 main_pre(int argc, char *argv[]) {
-
-
     char key[256];
     int i = 0;
 // extra env is always after normal args

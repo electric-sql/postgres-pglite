@@ -31,4 +31,3 @@ strcmp
 strftime
 strlen
 strtoul
-use_wire

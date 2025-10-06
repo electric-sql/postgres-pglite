@@ -132,25 +132,6 @@ static void io_init(bool in_auth, bool out_auth) {
 volatile bool is_wire = true;
 extern void pq_startmsgread(void);
 
-__attribute__((export_name("use_wire")))
-void
-use_wire(int state) {
-#if PGDEBUG
-    force_echo=true;
-#endif
-    if (state>0) {
-#if PGDEBUG
-        printf("\n\n# 194: PACKET START: wire mode, repl off, echo %d\n", force_echo);
-#endif
-        is_wire = true;
-    } else {
-#if PGDEBUG
-        printf("\n\n# 200: PACKET START: repl mode, no wire, echo %d\n", force_echo);
-#endif
-        is_wire = false;
-    }
-}
-
 __attribute__((export_name("clear_error")))
 void
 clear_error() {
