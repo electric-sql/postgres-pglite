@@ -178,11 +178,6 @@ ssize_t EMSCRIPTEN_KEEPALIVE
 
 #endif
 
-/* pglite specific */
-extern int cma_rsize;
-extern bool sockfiles;
-
-
 /*
  * Message status
  */

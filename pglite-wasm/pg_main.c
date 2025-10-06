@@ -45,7 +45,6 @@ volatile char *PGUSER;
 
 const char *progname;
 
-volatile bool is_repl = true;
 volatile bool is_node = true;
 volatile bool is_embed = false;
 volatile int pgl_idb_status;
@@ -193,7 +192,6 @@ main_pre(int argc, char *argv[]) {
                console.warn("prerun(C-web) worker=", Module.is_worker);}
         );
 #    endif
-        is_repl = true;
     }
 // *INDENT-OFF*
     EM_ASM({
@@ -562,34 +560,11 @@ PDEBUG("# 498: initdb faking shutdown to complete WAL/OID states in single mode"
      printf("# 550: argv0 (%s) PGUSER=%s PGDATA=%s\n PGDATABASE=%s REPL=%s\n",
             argv[0], PGUSER, PGDATA, getenv("PGDATABASE"), getenv("REPL"));
 #endif
-     progname = get_progname(argv[0]);
-     g_argv = argv;
-     g_argc = argc;
+    progname = get_progname(argv[0]);
+    g_argv = argv;
+    g_argc = argc;
+    is_embed = true;
 
-     is_repl = strlen(getenv("REPL")) && getenv("REPL")[0] != 'N';
-     is_embed = true;
-
-     if (!is_repl) {
-         PDEBUG("# 562: exit with live runtime (nodb)");
-         return 0;
-     }
-#if defined(__wasi__)
-
-
-#else
-    /*
-    main_post();
-
-    PDEBUG("# 565: repl");
-    // so it is repl
-    main_repl();
-
-    if (is_node) {
-        PDEBUG("# 570: node repl");
-        pg_repl_raf();
-    }
-    */
-     emscripten_force_exit(exit_code);
-#endif
+    emscripten_force_exit(exit_code);
     return exit_code;
 }
