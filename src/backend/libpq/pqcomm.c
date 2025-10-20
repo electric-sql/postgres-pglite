@@ -80,10 +80,6 @@
 #include "utils/guc_hooks.h"
 #include "utils/memutils.h"
 
-#if defined(__EMSCRIPTEN__)
-#include <emscripten/emscripten.h>
-#endif
-
 /*
  * Cope with the various platform-specific ways to spell TCP keepalive socket
  * options.  This doesn't cover Windows, which as usual does its own thing.
@@ -129,68 +125,6 @@ static size_t PqSendStart;		/* Next index to send a byte in PqSendBuffer */
 static char PqRecvBuffer[PQ_RECV_BUFFER_SIZE];
 static int	PqRecvPointer;		/* Next index to read a byte from PqRecvBuffer */
 static int	PqRecvLength;		/* End of data available in PqRecvBuffer */
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
-volatile int querylen = 0;
-volatile FILE* queryfp = NULL;
-
-// read FROM JS
-// (i guess return number of bytes written)
-// ssize_t pglite_read(/* ignored */ int socket, void *buffer, size_t length,/* ignored */ int flags,/* ignored */ void *address,/* ignored */ socklen_t *address_len);
-//typedef ssize_t (*pglite_read_t)(/* ignored */ int socket, void *buffer, size_t length,/* ignored */ int flags,/* ignored */ void *address,/* ignored */ unsigned int *address_len);
-typedef ssize_t (*pglite_read_t)(void *buffer, size_t max_length);
-pglite_read_t pglite_read;
-
-// write TO JS
-// (i guess return number of bytes read)
-// ssize_t pglite_write(/* ignored */ int sockfd, const void *buf, size_t len, /* ignored */ int flags);
-// typedef ssize_t (*pglite_write_t)(/* ignored */ int sockfd, const void *buf, size_t len, /* ignored */ int flags);
-typedef ssize_t (*pglite_write_t)(void *buffer, size_t length);
-pglite_write_t pglite_write;
-
-__attribute__((export_name("set_read_write_cbs")))
-void
-set_read_write_cbs(pglite_read_t read_cb, pglite_write_t write_cb) {
-    pglite_read = read_cb;
-    pglite_write = write_cb;
-}
-
-int EMSCRIPTEN_KEEPALIVE fcntl(int __fd, int __cmd, ...) {
-	// dummy 
-	return 0;
-}
-
-int EMSCRIPTEN_KEEPALIVE setsockopt(int __fd, int __level, int __optname,
-	const void *__optval, socklen_t __optlen) {
-		// dummy 
-		return 0;
-}
-
-int EMSCRIPTEN_KEEPALIVE getsockopt(int __fd, int __level, int __optname,
-	void *__restrict __optval,
-	socklen_t *__restrict __optlen) {
-		// dummy 
-		return 0;
-}
-
-int EMSCRIPTEN_KEEPALIVE getsockname(int __fd, struct sockaddr * __addr,
-	socklen_t *__restrict __len) {
-		// dummy 
-		return 0;
-	}
-
-ssize_t EMSCRIPTEN_KEEPALIVE
-	recv(int __fd, void *__buf, size_t __n, int __flags) {
-		ssize_t got = pglite_read(__buf, __n);
-		return got;
-	}
-
-ssize_t EMSCRIPTEN_KEEPALIVE
-	send(int __fd, const void *__buf, size_t __n, int __flags) {
-		ssize_t wrote = pglite_write(__buf, __n);
-		return wrote;
-	}
-
-#endif
 
 /*
  * Message status

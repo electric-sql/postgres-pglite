@@ -46,6 +46,7 @@ lib*.pc
 /dist
 
 # emscripten build excludes
+*.js
 *.cjs
 *.wasm
 pglite.data

@@ -93,6 +93,10 @@ int sdk_fd_seek(int fd, int  offset,int  whence, unsigned long long *retptr) {
 #endif
 #endif
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
+#endif
+
 typedef struct
 {
 	Oid			roleoid;		/* role's OID */
@@ -366,8 +370,10 @@ static TableInfo *getRootTableInfo(const TableInfo *tbinfo);
 static bool forcePartitionRootLoad(const TableInfo *tbinfo);
 static void read_dump_filters(const char *filename, DumpOptions *dopt);
 
-
-int
+int 
+#if defined(__EMSCRIPTEN__)
+EMSCRIPTEN_KEEPALIVE
+#endif
 main(int argc, char **argv)
 {
 	int			c;
