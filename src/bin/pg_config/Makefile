@@ -34,8 +34,9 @@ pg_config: $(OBJS) | submake-libpgport
 # the following rule creates a node script that calls the pg_config.cjs/.mjs
 # pg_config.wasm is implicitly expected to be in the same folder
 pg_config_sh: pg_config
-	echo "#!/usr/bin/env node" > pg_config
-	echo 'require("./pg_config$(X)")' >> pg_config
+	cp pg_config$(X) pg_config.mjs
+	echo "#!/bin/sh" > pg_config
+	echo 'node $(DESTDIR)$(bindir)/pg_config.mjs' >> pg_config
 	chmod +x pg_config
 
 install: all installdirs
@@ -43,6 +44,7 @@ install: all installdirs
 ifeq ($(PORTNAME), emscripten)
 	$(INSTALL_PROGRAM) pg_config.wasm '$(DESTDIR)$(bindir)/pg_config.wasm'
 	$(INSTALL_PROGRAM) pg_config '$(DESTDIR)$(bindir)/pg_config'
+	$(INSTALL_PROGRAM) pg_config.mjs '$(DESTDIR)$(bindir)/pg_config.mjs'
 endif
 
 installdirs:
