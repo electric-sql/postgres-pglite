@@ -71,6 +71,18 @@ int EMSCRIPTEN_KEEPALIVE
 		return 0;
 	}
 
+struct pollfd {
+    int   fd;         /* file descriptor */
+    short events;     /* requested events */
+	short revents;    /* returned events */
+};
+
+int EMSCRIPTEN_KEEPALIVE
+    poll(struct pollfd fds[], ssize_t nfds, int timeout) {
+		// dummy
+		return nfds;
+	}
+
 #endif
 
 #endif // ifndef PGLITE_COMM_H
