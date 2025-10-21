@@ -49,6 +49,7 @@ lib*.pc
 *.js
 *.data
 *.cjs
+pg_config.mjs
 *.wasm
 pglite.data
 pglite.js
