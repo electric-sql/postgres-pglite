@@ -38,7 +38,7 @@ else
 fi
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS"
 PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
@@ -47,7 +47,8 @@ PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
 -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
--sTOTAL_MEMORY=32MB"
+-sTOTAL_MEMORY=32MB \
+--preload-file $(pwd)/other/PGPASSFILE@/home/web_user/.pgpass"
 
 # Step 1: configure the project
 if [ "$RUN_CONFIGURE" = true ]; then
