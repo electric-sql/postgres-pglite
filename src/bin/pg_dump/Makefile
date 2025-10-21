@@ -59,8 +59,11 @@ install: all installdirs
 	$(INSTALL_PROGRAM) pg_dumpall$(X) '$(DESTDIR)$(bindir)'/pg_dumpall$(X)
 ifeq ($(PORTNAME), emscripten)
 	$(INSTALL_PROGRAM) pg_dump.wasm '$(DESTDIR)$(bindir)/pg_dump.wasm'
+	$(INSTALL_PROGRAM) pg_dump.data '$(DESTDIR)$(bindir)/pg_dump.data'
 	$(INSTALL_PROGRAM) pg_restore.wasm '$(DESTDIR)$(bindir)/pg_restore.wasm'
+	$(INSTALL_PROGRAM) pg_restore.data '$(DESTDIR)$(bindir)/pg_restore.data'
 	$(INSTALL_PROGRAM) pg_dumpall.wasm '$(DESTDIR)$(bindir)/pg_dumpall.wasm'
+	$(INSTALL_PROGRAM) pg_dumpall.data '$(DESTDIR)$(bindir)/pg_dumpall.data'
 endif
 
 installdirs:
@@ -83,4 +86,5 @@ clean distclean:
 	rm -rf tmp_check
 ifeq ($(PORTNAME), emscripten)
 	rm -f pg_dump.wasm pg_restore.wasm pg_dumpall.wasm
+	rm -f pg_dump.data pg_restore.data pg_dumpall.data
 endif
