@@ -107,7 +107,7 @@ pglite-exported-functions:
 # PGLITE_EMSCRIPTEN_FLAGS are the emscripten flags to be passed to the build. Ideally they would be completely transparent, such that we 
 # could build a libpglite with or without those flags (to switch between native and wasm builds)
 pglite: pglite-exported-functions
-	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
+	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -I/install/libs/include -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
 	$(CC) \
 	$(PGLITE_CFLAGS) \
 	-fPIC -m32 -D_FILE_OFFSET_BITS=64 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn \
@@ -115,7 +115,7 @@ pglite: pglite-exported-functions
         $(PGPRELOAD) \
         -ferror-limit=1 \
 		-sEXPORTED_FUNCTIONS=@$(emscripten_imports_dir)/exported_functions.txt \
-        -I./src/include -I./src/ -I./src/interfaces/libpq \
+        -I./src/include -I./src/ -I./src/interfaces/libpq -I/install/libs/include \
         -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ -L. \
         pglite.o \
 		-Ldict_snowball \
