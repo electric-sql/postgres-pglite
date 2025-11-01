@@ -3,7 +3,7 @@ ARG BUILDPLATFORM
 # we only need to build on one platform, since we're interested in the WASM output
 # building on the native (BUILDPLATFORM) is much faster, so use that
 # remove "-arm64" suffix if building on x86_64
-FROM --platform=$BUILDPLATFORM emscripten/emsdk:${EMSDK_VER} AS builder
+FROM --platform=$BUILDPLATFORM emscripten/emsdk:${EMSDK_VER}-arm64 AS builder
 
 ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
 
@@ -52,11 +52,12 @@ RUN ${LLVM_NM} /install/libs/lib/libxslt.a | awk '$2 ~ /^[TDB]$/ {print $3}' | s
 WORKDIR /src
 RUN curl -L https://github.com/openssl/openssl/releases/download/openssl-3.0.17/openssl-3.0.17.tar.gz | tar xz
 WORKDIR /src/openssl-3.0.17
-RUN emconfigure ./Configure no-tests linux-generic64 --prefix=/install/libs
+RUN emconfigure ./Configure no-tests linux-generic64 --prefix=/install/libs no-shared
 RUN sed -i 's|^CROSS_COMPILE.*$|CROSS_COMPILE=|g' Makefile # see https://github.com/emscripten-core/emscripten/issues/19597#issue-1754476454
 RUN emmake make -j && emmake make install
 # extract exported symbols - useful for passing them to emscripten as EXPORTED_FUNCTIONS 
 RUN ${LLVM_NM} /install/libs/lib/libssl.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libssl.exports
+RUN ${LLVM_NM} /install/libs/lib/libcrypto.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libcrypto.exports
 
 WORKDIR /src
 RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz

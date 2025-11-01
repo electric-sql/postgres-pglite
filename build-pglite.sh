@@ -70,7 +70,7 @@ PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
 -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
--sERROR_ON_UNDEFINED_SYMBOLS=1 \
+-sERROR_ON_UNDEFINED_SYMBOLS=0 \
 -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS"
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.

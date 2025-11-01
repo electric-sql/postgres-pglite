@@ -27,6 +27,7 @@ searchstoplist
 set_read_write_cbs
 socket
 srand
+stderr
 strcmp
 strftime
 strlen
