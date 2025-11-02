@@ -17,7 +17,6 @@ memcpy
 memset
 nanosleep
 open
-pg_free
 pgl_backend
 pgl_initdb
 pgl_shutdown
