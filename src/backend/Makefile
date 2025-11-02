@@ -121,6 +121,7 @@ pglite: pglite-exported-functions
 		-Ldict_snowball \
 		-lxslt \
         -lpgcore \
+		-lssl \
 		-lcrypto \
         -lnodefs.js -lidbfs.js -lxml2 -lz
 endif

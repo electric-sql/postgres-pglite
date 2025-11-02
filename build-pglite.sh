@@ -12,7 +12,7 @@ PGLITE_CFLAGS="-O2"
 if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
-    PGLITE_CFLAGS="-g -gsource-map --no-wasm-opt"
+    PGLITE_CFLAGS="-sDYLINK_DEBUG=2 -g -gsource-map --no-wasm-opt"
 else
     echo "pglite: building release version."
     # we shouldn't need to do this, but there's a bug somewhere that prevents a successful build if this is set
