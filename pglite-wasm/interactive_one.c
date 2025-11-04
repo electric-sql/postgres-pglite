@@ -1,10 +1,6 @@
 #include <unistd.h>  // access, unlink
 #define PGL_LOOP
-#if defined(__wasi__)
-// volatile sigjmp_buf void*;
-#else
 volatile sigjmp_buf local_sigjmp_buf;
-#endif
 
 // track back how many ex raised in steps of the loop until sucessfull clear_error
 volatile int canary_ex = 0;
