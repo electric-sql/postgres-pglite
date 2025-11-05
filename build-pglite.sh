@@ -78,6 +78,9 @@ emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist || { echo 'error: ma
 PATH=$SAVE_PATH
 
 # Step 5: make and install pglite
+PGROOT=/install/pglite
+PG_IMPORTS_DIR=$PGROOT/imports
+PGPRELOAD="--preload-file $PGROOT/share/postgresql@/tmp/pglite/share/postgresql --preload-file $PGROOT/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(pwd)/other/password@/tmp/pglite/password --preload-file $(pwd)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(pwd)/other/empty@/tmp/pglite/bin/postgres --preload-file $(pwd)/other/empty@/tmp/pglite/bin/initdb"
 EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction"
 PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
@@ -86,6 +89,9 @@ PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
--sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS"
+-sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
+-sEXPORTED_FUNCTIONS=@$PG_IMPORTS_DIR/exported_functions.txt \
+$PGPRELOAD \
+-lnodefs.js -lidbfs.js"
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 PGLITE_CFLAGS="$PGLITE_CFLAGS $PGLITE_EMSCRIPTEN_FLAGS" emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }

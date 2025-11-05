@@ -81,8 +81,6 @@ LIBPGMAIN = libpgmain.a
 PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
 PGMAIN = main/main.o tcop/postgres.o
 PGLITE_MAIN = pglite-wasm/pg_main.c
-PGROOT=/install/pglite
-PGPRELOAD=--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql --preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(top_builddir)/other/password@/tmp/pglite/password --preload-file $(top_builddir)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/postgres --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/initdb
 postgres: $(OBJS)
 	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
 	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
@@ -112,16 +110,13 @@ pglite: pglite-exported-functions
 	$(PGLITE_CFLAGS) \
 	-fPIC -m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn \
 	-DPG_PREFIX=/tmp/pglite -o pglite.html \
-        $(PGPRELOAD) \
-        -ferror-limit=1 \
-		-sEXPORTED_FUNCTIONS=@$(emscripten_imports_dir)/exported_functions.txt \
-        -I./src/include -I./src/ -I./src/interfaces/libpq \
-        -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ -L. \
-        pglite.o \
-		-Ldict_snowball \
-		-lxslt \
-        -lpgcore \
-        -lnodefs.js -lidbfs.js -lxml2 -lz
+    -ferror-limit=1 \
+    -I./src/include -I./src/ -I./src/interfaces/libpq \
+    -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ -L. \
+    pglite.o \
+	-Ldict_snowball \
+	-lxslt -lxml2 -lz \
+    -lpgcore 
 endif
 
 ifeq ($(PORTNAME), wasi)

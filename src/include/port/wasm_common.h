@@ -20,18 +20,6 @@
 #define WASM_USERNAME "postgres"
 #endif
 
-
-
-/* --------------- how to configure those when installed ? ---------------- */
-
-// socket emulation via file, need to go in PGDATA for nodefs mount in web mode
-#define PGS_ILOCK "/tmp/pglite/base/.s.PGSQL.5432.lock.in"
-#define PGS_IN    "/tmp/pglite/base/.s.PGSQL.5432.in"
-#define PGS_OLOCK "/tmp/pglite/base/.s.PGSQL.5432.lock.out"
-#define PGS_OUT   "/tmp/pglite/base/.s.PGSQL.5432.out"
-
-
-
 #if defined(PG_PREFIX)
 #define em_xstr(s) em_str(s)
 #define em_str(s) #s
