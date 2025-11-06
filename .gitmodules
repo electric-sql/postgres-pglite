@@ -4,3 +4,9 @@
 [submodule "pglite/pgvector"]
 	path = pglite/vector
 	url = https://github.com/pgvector/pgvector.git
+[submodule "pglite/pgtap"]
+	path = pglite/pgtap
+	url = https://github.com/theory/pgtap.git
+[submodule "pglite/pg_uuidv7"]
+	path = pglite/pg_uuidv7
+	url = https://github.com/fboulnois/pg_uuidv7/
