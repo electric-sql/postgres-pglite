@@ -3,11 +3,12 @@
 DOCKER_WORKSPACE=$(pwd)
 
 docker run $@ \
+  --name pglite-builder \
   --rm \
   -e DEBUG=${DEBUG:-false} \
   --workdir=${DOCKER_WORKSPACE} \
   -v .:${DOCKER_WORKSPACE}:rw \
   -v ./dist:/install/pglite:rw \
-  electricsql/pglite-builder:3.1.74_2-pgcrypto \
+  electricsql/pglite-builder:3.1.74_2-pgcrypto_2 \
   ./build-pglite.sh
   
