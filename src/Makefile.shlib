@@ -225,11 +225,11 @@ ifeq ($(SHLIB_EXPORTS),)
 endif
 
 ifeq ($(PORTNAME), emscripten)
-  LINK.shared       = $(COMPILER) -shared -sSIDE_MODULE=1 -Wno-unused-function
+  LINK.shared       = $(COMPILER)
   ifdef soname
     # emscripten uses unversioned shared libraries
     shlib     = $(shlib_bare)
-    soname        = $(shlib_bare)
+    soname    = $(shlib_bare)
   endif
   BUILD.exports     = ( $(AWK) '/^[^\#]/ {printf "%s\n",$$1}' $< ) | sort -u >$@
 #  BUILD.exports     = ( echo '{ global:'; $(AWK) '/^[^\#]/ {printf "%s;\n",$$1}' $<; echo ' local: *; };' ) >$@

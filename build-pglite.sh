@@ -53,7 +53,7 @@ PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 # Step 1: configure the project
 if [ "$RUN_CONFIGURE" = true ]; then
     LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0" \
-    LDFLAGS_SL="-sSIDE_MODULE=1" \
+    LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function" \
     LDFLAGS_EX=$PGLITE_EMSCRIPTEN_FLAGS \
     CFLAGS="${PGLITE_CFLAGS} -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types" emconfigure ./configure ac_cv_exeext=.js --host aarch64-unknown-linux-gnu --disable-spinlocks --disable-largefile --without-llvm  --without-pam --disable-largefile --with-openssl=no --without-readline --without-icu --with-includes=$INSTALL_PREFIX/include:$INSTALL_PREFIX/include/libxml2:$(pwd)/pglite/includes --with-libraries=$INSTALL_PREFIX/lib --with-uuid=ossp --with-zlib --with-libxml --with-libxslt --with-template=emscripten --prefix=$INSTALL_FOLDER || { echo 'error: emconfigure failed' ; exit 11; }
 else
@@ -82,6 +82,8 @@ PGROOT=/install/pglite
 PG_IMPORTS_DIR=$PGROOT/imports
 PGPRELOAD="--preload-file $PGROOT/share/postgresql@/tmp/pglite/share/postgresql --preload-file $PGROOT/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(pwd)/other/password@/tmp/pglite/password --preload-file $(pwd)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(pwd)/other/empty@/tmp/pglite/bin/postgres --preload-file $(pwd)/other/empty@/tmp/pglite/bin/initdb"
 EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction"
+
+# -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
