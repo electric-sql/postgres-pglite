@@ -3,7 +3,7 @@ ARG BUILDPLATFORM
 # we only need to build on one platform, since we're interested in the WASM output
 # building on the native (BUILDPLATFORM) is much faster, so use that
 # remove "-arm64" suffix if building on x86_64
-FROM --platform=$BUILDPLATFORM emscripten/emsdk:${EMSDK_VER}-arm64 AS builder
+FROM --platform=$BUILDPLATFORM emscripten/emsdk:${EMSDK_VER} AS builder
 
 ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
 
@@ -34,7 +34,7 @@ RUN ${LLVM_NM} /install/libs/lib/libz.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed 
 WORKDIR /src
 RUN curl -L https://gitlab.gnome.org/GNOME/libxml2/-/archive/v2.14.5/libxml2-v2.14.5.tar.gz | tar -xz
 WORKDIR /src/libxml2-v2.14.5
-RUN ./autogen.sh --with-python=no
+RUN ./autogen.sh --with-python=no --with-threads=no
 RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --enable-shared=no --enable-static=yes --with-python=no --prefix=/install/libs
 RUN emmake make -j && emmake make install
 # extract exported symbols - useful for passing them to emscripten as EXPORTED_FUNCTIONS 
@@ -52,9 +52,9 @@ RUN ${LLVM_NM} /install/libs/lib/libxslt.a | awk '$2 ~ /^[TDB]$/ {print $3}' | s
 WORKDIR /src
 RUN curl -L https://github.com/openssl/openssl/releases/download/openssl-3.0.17/openssl-3.0.17.tar.gz | tar xz
 WORKDIR /src/openssl-3.0.17
-RUN emconfigure ./Configure no-tests linux-generic64 --prefix=/install/libs no-shared
+RUN emconfigure ./Configure no-tests no-threads no-shared linux-generic64 --prefix=/install/libs
 RUN sed -i 's|^CROSS_COMPILE.*$|CROSS_COMPILE=|g' Makefile # see https://github.com/emscripten-core/emscripten/issues/19597#issue-1754476454
-RUN emmake make -j && emmake make install
+RUN emmake make -j && emmake make install_sw install_ssldirs
 # extract exported symbols - useful for passing them to emscripten as EXPORTED_FUNCTIONS 
 RUN ${LLVM_NM} /install/libs/lib/libssl.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libssl.exports
 RUN ${LLVM_NM} /install/libs/lib/libcrypto.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libcrypto.exports
