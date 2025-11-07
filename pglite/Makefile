@@ -6,7 +6,9 @@ include $(top_builddir)/src/Makefile.global
 SUBDIRS = \
 		pg_ivm \
 		vector \
-		postgis
+		pgtap \
+		pg_uuidv7 \
+		postgis		
 
 prefix ?= /install/pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build

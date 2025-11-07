@@ -1,84 +1,13 @@
 #include <unistd.h>  // access, unlink
 #define PGL_LOOP
-#if defined(__wasi__)
-// volatile sigjmp_buf void*;
-#else
 volatile sigjmp_buf local_sigjmp_buf;
-#endif
 
 // track back how many ex raised in steps of the loop until sucessfull clear_error
 volatile int canary_ex = 0;
 
-// read FROM JS
-// (i guess return number of bytes written)
-// ssize_t pglite_read(/* ignored */ int socket, void *buffer, size_t length,/* ignored */ int flags,/* ignored */ void *address,/* ignored */ socklen_t *address_len);
-//typedef ssize_t (*pglite_read_t)(/* ignored */ int socket, void *buffer, size_t length,/* ignored */ int flags,/* ignored */ void *address,/* ignored */ unsigned int *address_len);
-typedef ssize_t (*pglite_read_t)(void *buffer, size_t max_length);
-extern pglite_read_t pglite_read;
-
-// write TO JS
-// (i guess return number of bytes read)
-// ssize_t pglite_write(/* ignored */ int sockfd, const void *buf, size_t len, /* ignored */ int flags);
-// typedef ssize_t (*pglite_write_t)(/* ignored */ int sockfd, const void *buf, size_t len, /* ignored */ int flags);
-typedef ssize_t (*pglite_write_t)(void *buffer, size_t length);
-extern pglite_write_t pglite_write;
-
-__attribute__((export_name("set_read_write_cbs")))
-void
-set_read_write_cbs(pglite_read_t read_cb, pglite_write_t write_cb) {
-    pglite_read = read_cb;
-    pglite_write = write_cb;
-}
-
-static void pg_prompt() {
-    fprintf(stdout,"pg> %c\n", 4);
-}
-
 extern void AbortTransaction(void);
 extern void CleanupTransaction(void);
 extern void ClientAuthentication(Port *port);
-extern FILE* SOCKET_FILE;
-extern int SOCKET_DATA;
-
-
-
-/*
-init sequence
-___________________________________
-SubPostmasterMain / (forkexec)
-    InitPostmasterChild
-    shm attach
-    preload
-
-    BackendInitialize(Port *port) -> collect initial packet
-
-	    pq_init();
-	    whereToSendOutput = DestRemote;
-	    status = ProcessStartupPacket(port, false, false);
-            pq_startmsgread
-            pq_getbytes from pq_recvbuf
-            TODO: place PqRecvBuffer (8K) in lower mem for zero copy
-
-        PerformAuthentication
-        ClientAuthentication(port)
-        CheckPasswordAuth SYNC!!!!  ( sendAuthRequest flush -> recv_password_packet )
-    InitShmemAccess/InitProcess/CreateSharedMemoryAndSemaphores
-
-    BackendRun(port)
-        PostgresMain
-
-
--> pq_flush() is synchronous
-
-
-buffer sizes:
-
-    https://github.com/postgres/postgres/blob/master/src/backend/libpq/pqcomm.c#L118
-
-    https://github.com/postgres/postgres/blob/master/src/common/stringinfo.c#L28
-
-
-*/
 
 extern int	ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done);
 
@@ -171,33 +100,12 @@ static void io_init(bool in_auth, bool out_auth) {
     MyProcPort->canAcceptConnections = CAC_OK;
 #endif
     ClientAuthInProgress = out_auth;
-    SOCKET_FILE = NULL;
-    SOCKET_DATA = 0;
     PDEBUG("\n\n\n# 165: io_init  --------- Ready for CLIENT ---------");
 }
 
 
 volatile bool is_wire = true;
 extern void pq_startmsgread(void);
-
-__attribute__((export_name("use_wire")))
-void
-use_wire(int state) {
-#if PGDEBUG
-    force_echo=true;
-#endif
-    if (state>0) {
-#if PGDEBUG
-        printf("\n\n# 194: PACKET START: wire mode, repl off, echo %d\n", force_echo);
-#endif
-        is_wire = true;
-    } else {
-#if PGDEBUG
-        printf("\n\n# 200: PACKET START: repl mode, no wire, echo %d\n", force_echo);
-#endif
-        is_wire = false;
-    }
-}
 
 __attribute__((export_name("clear_error")))
 void

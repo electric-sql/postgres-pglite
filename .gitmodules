@@ -7,3 +7,9 @@
 [submodule "pglite/postgis"]
 	path = pglite/postgis
 	url = https://git.osgeo.org/gitea/postgis/postgis.git
+[submodule "pglite/pgtap"]
+	path = pglite/pgtap
+	url = https://github.com/theory/pgtap.git
+[submodule "pglite/pg_uuidv7"]
+	path = pglite/pg_uuidv7
+	url = https://github.com/fboulnois/pg_uuidv7/
