@@ -142,27 +142,3 @@ RUN emcmake cmake \
 
 RUN cmake --build . -j && cmake --build . --target install
 RUN ${LLVM_NM} /install/libs/lib/libgdal.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgdal.exports
-
-ARG TARGETARCH
-FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
-FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
-FROM base-${TARGETARCH} AS runner
-
-RUN apt update && apt upgrade -y && apt install -y \
-    xz-utils autoconf libtool automake pkgconf bison flex vim
-
-# this is where the libraries will be installed and subsequently where the LIBS and INCLUDES can be found
-ARG INSTALL_PREFIX=/install/libs
-ENV INSTALL_PREFIX=${INSTALL_PREFIX}
-
-ARG LIB_EXPORTS_DIR=/install/exports
-ENV LIB_EXPORTS_DIR=${LIB_EXPORTS_DIR}
-
-COPY --from=builder /install/libs ${INSTALL_PREFIX}
-COPY --from=builder /install/exports ${LIB_EXPORTS_DIR}
-
-# allow access to anyone 
-RUN chmod -R 777 /install
-
-# needed in building pglite.wasm
-ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm

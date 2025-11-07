@@ -306,7 +306,6 @@ text_left
 trunc
 TypenameGetTypid
 unlinkat
-use_wire
 uselocale
 uuid_cmp
 uuid_create
