@@ -66,7 +66,7 @@ emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=e
 
 # Step 3.1: make all contrib extensions - do not install
 # Step 3.1.1 pgcrypto - special case
-cd ./pglite/ && PGLITE_CFLAGS=$PGLITE_CFLAGS ./build-pgcrypto.sh && cd ../
+cd ./pglite/ && ./build-pgcrypto.sh && cd ../
 # Step 3.1.2 all the rest of contrib
 emmake make PORTNAME=emscripten -C contrib/ -j || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
 # Step 3.2: make dist contrib extensions - this will create an archive for each extension

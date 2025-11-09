@@ -57,6 +57,10 @@ else
 ALWAYS_SUBDIRS += pgcrypto sslinfo
 endif
 
+ifeq ($(PORTNAME), emscripten)
+SUBDIRS += pgcrypto
+endif
+
 ifneq ($(with_uuid),no)
 SUBDIRS += uuid-ossp
 else
