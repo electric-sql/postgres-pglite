@@ -128,8 +128,7 @@ WORKDIR /src
 # RUN curl -L https://github.com/OSGeo/gdal/releases/download/v3.11.4/gdal-3.11.4.tar.gz | tar xz
 RUN tar -xvf gdal-3.11.4.tar.gz
 WORKDIR /src/gdal-3.11.4/build
-# RUN emcmake cmake -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_APPS=OFF -DPROJ_LIBRARY=/install/libs/lib/libproj.a -DPROJ_INCLUDE_DIR=/install/libs/include/ -DCMAKE_PREFIX_PATH=/install/libs -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF -DCMAKE_INSTALL_PREFIX=/install/libs ..
-# RUN emcmake cmake -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_APPS=OFF -DCMAKE_PREFIX_PATH=/install/libs -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF -DCMAKE_INSTALL_PREFIX=/install/libs ..
+# Docs: https://gdal.org/en/stable/development/building_from_source.html
 RUN emcmake cmake \
 -DLIBXML2_INCLUDE_DIR=/install/libs/include/libxml2 -DLIBXML2_LIBRARY=/install/libs/lib/libxml2.a \
 -DZLIB_LIBRARY=/install/libs/lib/libz.a -DZLIB_INCLUDE_DIR=/install/libs/include \
