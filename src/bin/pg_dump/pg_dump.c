@@ -346,10 +346,8 @@ static TableInfo *getRootTableInfo(const TableInfo *tbinfo);
 static bool forcePartitionRootLoad(const TableInfo *tbinfo);
 static void read_dump_filters(const char *filename, DumpOptions *dopt);
 
-int 
-#if defined(__EMSCRIPTEN__)
-EMSCRIPTEN_KEEPALIVE
-#endif
+
+int
 main(int argc, char **argv)
 {
 	int			c;

@@ -152,9 +152,7 @@ main(int argc, char **argv)
 	if (find_my_exec(argv[0], my_exec_path) < 0)
 	{
 		fprintf(stderr, _("%s: could not find own program executable\n"), progname);
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 		exit(1);
-#endif
 	}
 
 	configdata = get_configdata(my_exec_path, &configdata_len);
