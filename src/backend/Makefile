@@ -100,36 +100,19 @@ pglite-exported-functions:
 	sed 's/^/_/' \
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
-# PGLITE_CFLAGS is something like "-O2" (aka release version) or "-g -gsource-map --no-wasm-opt" (aka debug version)
 pglite: pglite-exported-functions
 	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
 	$(CC) \
 	$(PGLITE_CFLAGS) \
-	-fPIC -m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn \
-	-DPG_PREFIX=/tmp/pglite -o pglite.html \
-    -ferror-limit=1 \
+	-fPIC -ferror-limit=1 \
+	-Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement \
+	-DPG_PREFIX=/tmp/pglite \
     -I./src/include -I./src/ -I./src/interfaces/libpq \
     -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ -L. \
     pglite.o \
 	-Ldict_snowball \
 	-lxslt -lxml2 -lz \
     -lpgcore 
-endif
-
-ifeq ($(PORTNAME), wasi)
-AR ?= llvm-ar
-LIBPGCORE ?= $(top_builddir)/libpgcore.a
-LIBPG = $(top_builddir)/libpostgres.a
-PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
-PGMAIN = main/main.o tcop/postgres.o
-postgres: $(OBJS)
-	$(AR) rcs $(top_builddir)/libpgmain.a $(PGMAIN)
-	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
-	$(CC) -r -o $(top_builddir)/libpgcore.o -Wl,--whole-archive $(PGCORE)
-	$(AR) rcs $(LIBPGCORE) $(top_builddir)/libpgcore.o
-	COPTS="$(LOPTS)" $(CC) $(MAIN_MODULE) $(CFLAGS) $(LDFLAGS) -nostartfiles -o $@ $(LIBPGCORE) $(top_builddir)/libpgmain.a $(LIBS)
-	mv $@ $@.wasi
-	touch $@
 endif
 
 ifeq ($(PORTNAME), cygwin)

@@ -3476,10 +3476,6 @@ printf("# 3245:" __FILE__ " calling pg_initdb_main for %s\n", progname);
 	if (icu_rules && locale_provider != COLLPROVIDER_ICU)
 		pg_fatal("%s cannot be specified unless locale provider \"%s\" is chosen",
 				 "--icu-rules", "icu");
-#if defined(__wasi__) || defined(__EMSCRIPTEN__)
-#pragma message "#TODO: atexit(cleanup_directories_atexit)"
-PDEBUG("# 3472:"__FILE__ "#TODO: atexit(cleanup_directories_atexit)");
-#endif
 	atexit(cleanup_directories_atexit);
 
 	/* If we only need to sync, just do it and exit */
