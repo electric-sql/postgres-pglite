@@ -234,7 +234,7 @@ PDEBUG("# 330: TODO: set a pgl started flag");
     volatile int sf_connected = 0;
 }
 
-void interactive_one(int packetlen, int peek) {
+void pgl_interactive_one(int packetlen, int peek) {
     // int	peek = -1;  /* preview of firstchar with no pos change */
 	int firstchar = 0;  /* character read from getc() */
     bool pipelining = true;
@@ -254,7 +254,7 @@ void interactive_one(int packetlen, int peek) {
     }
 
 #if PGDEBUG
-    puts("\n\n# 369: interactive_one");
+    puts("\n\n# 369: pgl_interactive_one");
     if (notifyInterruptPending)
         PDEBUG("# 371: has notification !");
 #endif

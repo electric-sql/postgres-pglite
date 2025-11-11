@@ -99,8 +99,8 @@ volatile bool idle_session_timeout_enabled = false;
 
 #include "pgl_initdb.c"
 
-// interactive_one, heart of the async loop.
-#include "./interactive_one.c"
+// pgl_interactive_one, heart of the async loop.
+#include "./pgl_interactive_one.c"
 
 static void
 main_pre(int argc, char *argv[]) {

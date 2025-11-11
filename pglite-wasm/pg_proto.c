@@ -1,6 +1,6 @@
 /*
  * this file is used by both interactive_file ( initdb boot/single )
- * and interactive_one()
+ * and pgl_interactive_one()
  *
  */
     switch (firstchar)

@@ -4,7 +4,6 @@ free
 getpid
 gettimeofday
 gmtime
-interactive_one
 ioctl
 isalnum
 isxdigit
@@ -18,13 +17,14 @@ nanosleep
 open
 pgl_backend
 pgl_initdb
+pgl_interactive_one
+pgl_set_rw_cbs
 pgl_shutdown
 rand
 read
 readstoplist
 realloc
 searchstoplist
-set_read_write_cbs
 socket
 srand
 strcmp
