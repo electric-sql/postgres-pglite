@@ -107,7 +107,6 @@ static void io_init(bool in_auth, bool out_auth) {
 volatile bool is_wire = true;
 extern void pq_startmsgread(void);
 
-__attribute__((export_name("clear_error")))
 void
 clear_error() {
     error_context_stack = NULL;
@@ -235,8 +234,7 @@ PDEBUG("# 330: TODO: set a pgl started flag");
     volatile int sf_connected = 0;
 }
 
-__attribute__((export_name("interactive_one"))) void
-interactive_one(int packetlen, int peek) {
+void interactive_one(int packetlen, int peek) {
     // int	peek = -1;  /* preview of firstchar with no pos change */
 	int firstchar = 0;  /* character read from getc() */
     bool pipelining = true;

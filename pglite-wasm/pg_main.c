@@ -32,9 +32,6 @@
 
 // globals
 
-
-
-
 int g_argc;
 char **g_argv;
 extern char **environ;
@@ -149,70 +146,6 @@ main_pre(int argc, char *argv[]) {
     PREFIX = setdefault("PREFIX", WASM_PREFIX);
     argv[0] = strcat_alloc(PREFIX, "/bin/postgres");
 
-
-
-#if defined(__EMSCRIPTEN__)
-    EM_ASM( {
-           Module.is_worker = (typeof WorkerGlobalScope !== 'undefined') && self instanceof WorkerGlobalScope;
-           Module.FD_BUFFER_MAX = $0; Module.emscripten_copy_to = console.warn;} // tdrz: what is FD_BUFFER_MAX?
-           , (12 * 1024 * 1024));  /* ( global mem start / num fd max ) */ 
-
-    if (is_node) {
-        setenv("ENVIRONMENT", "node", 1);
-        EM_ASM( {
-#    if defined(PGDEBUG_STARTUP)
-               console.warn("prerun(C-node) worker=", Module.is_worker);
-#    endif
-               Module['postMessage'] = function custom_postMessage(event) {
-               console.log("# pg_main_emsdk.c:544: onCustomMessage:", event);};}
-        );
-
-    } else {
-        setenv("ENVIRONMENT", "web", 1);
-#    if defined(PGDEBUG_STARTUP)
-        EM_ASM( {
-               console.warn("prerun(C-web) worker=", Module.is_worker);}
-        );
-#    endif
-    }
-// *INDENT-OFF*
-    EM_ASM({
-        if (Module.is_worker) {
-#if defined(PGDEBUG_STARTUP)
-            console.log("Main: running in a worker, setting onCustomMessage");
-#endif
-            function onCustomMessage(event) {
-                console.log("onCustomMessage:", event);
-            };
-            Module['onCustomMessage'] = onCustomMessage;
-        } else {
-#if defined(PGDEBUG_STARTUP)
-            console.log("Running in main thread, faking onCustomMessage");
-#endif
-            Module['postMessage'] = function custom_postMessage(event) {
-                switch (event.type) {
-                    case "raw" :  {
-                        //stringToUTF8( event.data, shm_rawinput, Module.FD_BUFFER_MAX);
-                        break;
-                    }
-
-                    case "stdin" :  {
-                        stringToUTF8( event.data, 1, Module.FD_BUFFER_MAX);
-                        break;
-                    }
-                    case "rcon" :  {
-                        //stringToUTF8( event.data, shm_rcon, Module.FD_BUFFER_MAX);
-                        break;
-                    }
-                    default : console.warn("custom_postMessage?", event);
-                }
-            };
-            //if (!window.vm)
-              //  window.vm = Module;
-        };
-    });
-// *INDENT-ON*
-#endif // __EMSCRIPTEN__
     chdir("/");
     mkdirp("/tmp");
     mkdirp(PREFIX);
@@ -315,9 +248,7 @@ main_post() {
     unsetenv("LC_ALL");
 }                               // main_post
 
-
-__attribute__ ((export_name("pgl_backend")))
-     void pgl_backend() {
+void pgl_backend() {
 #if PGDEBUG
     print_bits(sizeof(pgl_idb_status), &pgl_idb_status);
 #endif
@@ -394,14 +325,9 @@ __attribute__ ((export_name("pgl_backend")))
         puts("# 403: initdb done, oid base too low but OID range will be set because IsPostmasterEnvironment");
 #endif
     }
-     }
+}
 
-#if defined(__EMSCRIPTEN__)
-     EMSCRIPTEN_KEEPALIVE
-#else
-     __attribute__ ((export_name("pgl_initdb")))
-#endif
-     int pgl_initdb() {
+int pgl_initdb() {
     PDEBUG("# 412: pg_initdb()");
     optind = 1;
     pgl_idb_status |= IDB_FAILED;
@@ -481,28 +407,7 @@ __attribute__ ((export_name("pgl_backend")))
         puts("# 482: warning oid base too low, will need to set OID range after initdb(bootstrap/single)");
 #endif
     }
-/*
-    {
-#if PGDEBUG
-        fprintf(stdout, "\n\n\n# 483: restarting in single mode for initdb with user '%s' instead of %s\n", getenv("PGUSER"), PGUSER);
-#endif
-        char *single_argv[] = {
-            WASM_PREFIX "/bin/postgres",
-            "--single",
-            "-d", "1", "-B", "16", "-S", "512", "-f", "siobtnmh",
-            "-D", PGDATA,
-            "-F", "-O", "-j",
-            WASM_PGOPTS,
-            "template1",
-            NULL
-        };
-        int single_argc = sizeof(single_argv) / sizeof(char*) - 1;
-        optind = 1;
-        RePostgresSingleUserMain(single_argc, single_argv, WASM_USERNAME);
-PDEBUG("# 498: initdb faking shutdown to complete WAL/OID states in single mode");
-        async_restart = 1;
-    }
-*/
+
     async_restart = 1;
   initdb_done:;
     pgl_idb_status |= IDB_CALLED;
@@ -534,7 +439,6 @@ PDEBUG("# 498: initdb faking shutdown to complete WAL/OID states in single mode"
     PGOPTIONS
 */
 
-// __attribute__((export_name("main")))
  int main(int argc, char **argv) {
      int exit_code = 0;
      main_pre(argc, argv);

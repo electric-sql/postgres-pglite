@@ -6,27 +6,16 @@ volatile bool inloop = false;
 volatile sigjmp_buf local_sigjmp_buf;
 bool repl = false;
 
-__attribute__((export_name("pgl_shutdown")))
-void
-pg_shutdown() {
-    PDEBUG("# 11:" __FILE__": pg_shutdown");
+void pgl_shutdown() {
+    PDEBUG("# 11:" __FILE__": pgl_shutdown");
     proc_exit(66);
-}
-
-__attribute__((export_name("pgl_closed")))
-int
-pgl_closed() {
-    if (sf_connected>0)
-        return 1;
-    return 0;
 }
 
 #if FIXME
 extern bool startswith(const char *str, const char *prefix);
 #endif
 
-void
-interactive_file() {
+void interactive_file() {
 	int			firstchar = 0;
 	int			c = 0;				/* character read from getc() */
 	StringInfoData input_message;

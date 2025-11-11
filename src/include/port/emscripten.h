@@ -13,8 +13,4 @@
 #include "port/wasm_common.h"
 
 
-#define BOOT_END_MARK "build indices"
-#define FD_BUFFER_MAX 16384
-
-
 #endif // I_WASM
