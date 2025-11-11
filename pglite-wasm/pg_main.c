@@ -327,7 +327,7 @@ void pgl_backend() {
     }
 }
 
-int pgl_initdb() {
+int EMSCRIPTEN_KEEPALIVE pgl_initdb() {
     PDEBUG("# 412: pg_initdb()");
     optind = 1;
     pgl_idb_status |= IDB_FAILED;

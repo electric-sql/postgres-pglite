@@ -107,7 +107,7 @@ static void io_init(bool in_auth, bool out_auth) {
 volatile bool is_wire = true;
 extern void pq_startmsgread(void);
 
-void
+void EMSCRIPTEN_KEEPALIVE
 clear_error() {
     error_context_stack = NULL;
     HOLD_INTERRUPTS();
