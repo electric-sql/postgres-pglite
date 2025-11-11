@@ -22,7 +22,8 @@ pglite_read_t pglite_read;
 typedef ssize_t (*pglite_write_t)(void *buffer, size_t length);
 pglite_write_t pglite_write;
 
-void pgl_set_rw_cbs(pglite_read_t read_cb, pglite_write_t write_cb) {
+void EMSCRIPTEN_KEEPALIVE
+pgl_set_rw_cbs(pglite_read_t read_cb, pglite_write_t write_cb) {
     pglite_read = read_cb;
     pglite_write = write_cb;
 }
