@@ -307,11 +307,7 @@ InitProcess(void)
 		elog(PANIC, "proc header uninitialized");
 
 	if (MyProc != NULL)
-#if defined(__wasi__) || defined(__EMSCRIPTEN__)
-		elog(WARNING, "# 309: you already exist");
-#else
-		elog(ERROR, "# 309: you already exist");
-#endif
+		elog(ERROR, "you already exist");
 
 	/*
 	 * Decide which list should supply our PGPROC.  This logic must match the
@@ -542,7 +538,7 @@ InitAuxiliaryProcess(void)
 		elog(PANIC, "proc header uninitialized");
 
 	if (MyProc != NULL)
-		elog(ERROR, "# 522: you already exist");
+		elog(ERROR, "you already exist");
 
 	/*
 	 * We use the ProcStructLock to protect assignment and releasing of
