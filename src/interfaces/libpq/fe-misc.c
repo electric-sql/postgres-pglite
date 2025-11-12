@@ -826,11 +826,7 @@ pqSendSome(PGconn *conn, int len)
 		int			sent;
 
 #ifndef WIN32
-#if defined(__wasi__)
-        sent = send(conn->sock, ptr, len, 0);
-#else
 		sent = pqsecure_write(conn, ptr, len);
-#endif /* __wasi__ */
 #else
 
 		/*
@@ -963,9 +959,7 @@ pqFlush(PGconn *conn)
 
 		return pqSendSome(conn, conn->outCount);
 	}
-#if defined(__wasi__)
-    sdk_sock_flush();
-#endif /* __wasi__ */
+
 	return 0;
 }
 
@@ -1046,9 +1040,6 @@ pqWriteReady(PGconn *conn)
 static int
 pqSocketCheck(PGconn *conn, int forRead, int forWrite, pg_usec_time_t end_time)
 {
-#if defined(__wasi__)
-    return 1;
-#else
 	int			result;
 
 	if (!conn)
@@ -1082,7 +1073,6 @@ pqSocketCheck(PGconn *conn, int forRead, int forWrite, pg_usec_time_t end_time)
 	}
 
 	return result;
-#endif
 }
 
 

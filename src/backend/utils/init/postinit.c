@@ -898,12 +898,12 @@ puts("# 766:"__FILE__);
 	}
 	else if (!IsUnderPostmaster)
 	{
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__)
 if (!strcmp( username , WASM_USERNAME )) {
 #endif
 		InitializeSessionUserIdStandalone();
 		am_superuser = true;
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__)
 } else {
         //puts("# 894: switching session id");
         InitializeSessionUserId(username, InvalidOid, false);

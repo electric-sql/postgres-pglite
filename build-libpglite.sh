@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ### NOTES ###
-# $INSTALL_PREFIX is expected to point to the installation folder of various libraries built to wasm (see pglite-builder)
+# $INSTALL_PREFIX is expected to point to the installation folder of various libraries needed by libpglite (see libpglite-builder)
 #############
 
 # final output folder

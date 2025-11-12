@@ -815,7 +815,7 @@ cleanup_directories_atexit(void)
 static char *
 get_id(void)
 {
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(__EMSCRIPTEN__)
 	const char *username;
 
 #ifndef WIN32
@@ -1079,7 +1079,7 @@ set_null_conf(void)
 static const char *
 choose_dsm_implementation(void)
 {
-#if defined(__wasi__) || defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__)
     return "posix";
 #endif
 #if defined(HAVE_SHM_OPEN) && !defined(__sun__)
@@ -2653,7 +2653,7 @@ setup_bin_paths(const char *argv0)
 			strlcpy(full_path, progname, sizeof(full_path));
 
 		if (ret == -1)
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__)
 			printf("# WARNING: program \"%s\" is needed by %s but was not found in the same directory as \"%s\"\n",
 					 "postgres", progname, full_path);
 #else

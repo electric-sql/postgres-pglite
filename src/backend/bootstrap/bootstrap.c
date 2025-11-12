@@ -195,7 +195,7 @@ CheckerModeMain(void)
  *	 to shared memory sizing, options work (or at least do not cause an error
  *	 up to shared memory creation).
  */
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(__EMSCRIPTEN__)
 void
 #else
 int
@@ -369,7 +369,7 @@ BootstrapModeMain(int argc, char *argv[], bool check_only)
 
 	/* Clean up and exit */
 	cleanup();
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(__EMSCRIPTEN__)
 	proc_exit(0);
 #else
 	puts("# 338 cleanup(boot): " __FILE__);

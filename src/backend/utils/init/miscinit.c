@@ -144,7 +144,7 @@ InitPostmasterChild(void)
 	 * children, but for consistency we make all postmaster child processes do
 	 * this.
 	 */
-#if defined(HAVE_SETSID) && !defined(__wasi__)
+#if defined(HAVE_SETSID)
 	if (setsid() < 0)
 		elog(FATAL, "setsid() failed: %m");
 #endif
@@ -375,7 +375,7 @@ checkDataDir(void)
 	 *
 	 * XXX can we safely enable this check on Windows?
 	 */
-#if !defined(WIN32) && !defined(__CYGWIN__) && !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(WIN32) && !defined(__CYGWIN__) && !defined(__EMSCRIPTEN__)
 	if (stat_buf.st_uid != geteuid())
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -395,7 +395,7 @@ checkDataDir(void)
 	 * be proper support for Unix-y file permissions.  Need to think of a
 	 * reasonable check to apply on Windows.
 	 */
-#if !defined(WIN32) && !defined(__CYGWIN__) && !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(WIN32) && !defined(__CYGWIN__) && !defined(__EMSCRIPTEN__)
 	if (stat_buf.st_mode & PG_MODE_MASK_GROUP)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -416,7 +416,7 @@ checkDataDir(void)
 	 * Suppress when on Windows, because there may not be proper support for
 	 * Unix-y file permissions.
 	 */
-#if !defined(WIN32) && !defined(__CYGWIN__) && !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(WIN32) && !defined(__CYGWIN__) && !defined(__EMSCRIPTEN__)
 	SetDataDirectoryCreatePerm(stat_buf.st_mode);
 
 	umask(pg_mode_mask);
@@ -1267,12 +1267,8 @@ CreateLockFile(const char *filename, bool amPostmaster,
 		 * comments below.
 		 */
 
-#if defined(__wasi__)
-printf("# 1228: CreateLockFile(%s) w+ (forced)\n", filename);
-		fd = fileno(fopen(filename, "w+"));
-#else
 		fd = open(filename, O_RDWR | O_CREAT | O_EXCL, pg_file_create_mode);
-#endif
+
 		if (fd >= 0)
 			break;				/* Success; exit the retry loop */
 

@@ -288,7 +288,7 @@ SharedInvalBackendInit(bool sendOnly)
 	 * set hasMessages appropriately.
 	 */
 	LWLockAcquire(SInvalWriteLock, LW_EXCLUSIVE);
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__)
     (void)oldPid;
 #else
 	oldPid = stateP->procPid;

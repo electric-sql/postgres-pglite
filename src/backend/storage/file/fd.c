@@ -524,7 +524,7 @@ pg_file_exists(const char *name)
 void
 pg_flush_data(int fd, off_t offset, off_t nbytes)
 {
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__)
     //int res = sync_file_range(fd, offset, nbytes, SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER);
     (void)fsync(fd);
     // fprintf(stderr, "# pg_flush_data(int fd=%d, off_t offset=%lld, off_t nbytes=%lld res=%d\n", fd,offset,nbytes, res);
@@ -2678,7 +2678,7 @@ OpenTransientFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
 
 	return -1;					/* failure */
 }
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(__EMSCRIPTEN__)
 /*
  * Routines that want to initiate a pipe stream should use OpenPipeStream
  * rather than plain popen().  This lets fd.c deal with freeing FDs if

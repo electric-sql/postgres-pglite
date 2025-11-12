@@ -98,7 +98,7 @@ pg_signal_backend(int pid, int sig)
 	 */
 
 	/* If we have setsid(), signal the backend's whole process group */
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__)
 #   if PGDEBUG
     printf("# 103: FIXME: kill(pid=%d, sig=%d) ", pid, sig);
 #   endif

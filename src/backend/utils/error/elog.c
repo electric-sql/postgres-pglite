@@ -348,7 +348,7 @@ errstart(int elevel, const char *domain)
 	ErrorData  *edata;
 	bool		output_to_server;
 	bool		output_to_client = false;
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__)
 #   warning "FIXME: error levels"
 #else
 	int			i;
@@ -591,7 +591,7 @@ errfinish(const char *filename, int lineno, const char *funcname)
 		 * FATAL termination.  The postmaster may or may not consider this
 		 * worthy of panic, depending on which subprocess returns it.
 		 */
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__)
         puts("# 600: proc_exit(FATAL) ignored\r\n");
 #else
 		proc_exit(1);

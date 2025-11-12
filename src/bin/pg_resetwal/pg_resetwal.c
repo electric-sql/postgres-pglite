@@ -334,7 +334,7 @@ main(int argc, char *argv[])
 	 * -- any other user won't have sufficient permissions to modify files in
 	 * the data directory.
 	 */
-#if !defined(WIN32) && !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(WIN32) && !defined(__EMSCRIPTEN__)
 	if (geteuid() == 0)
 	{
 		pg_log_error("cannot be executed by \"root\"");

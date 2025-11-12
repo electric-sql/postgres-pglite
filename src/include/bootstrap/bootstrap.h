@@ -32,7 +32,7 @@ extern PGDLLIMPORT Relation boot_reldesc;
 extern PGDLLIMPORT Form_pg_attribute attrtypes[MAXATTR];
 extern PGDLLIMPORT int numattr;
 
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__)
     int BootstrapModeMain(int argc, char *argv[], bool check_only);
 #else
 extern void BootstrapModeMain(int argc, char *argv[], bool check_only) pg_attribute_noreturn();

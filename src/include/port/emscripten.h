@@ -1,5 +1,3 @@
-/* src/include/port/{wasi/emscripten}.h */
-
 #ifndef I_WASM
 #define I_WASM
 

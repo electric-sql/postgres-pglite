@@ -103,7 +103,7 @@ static int	on_proc_exit_index,
 void
 proc_exit(int code)
 {
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__EMSCRIPTEN__)
 	if (code==66) {
 		fprintf(stderr,"# 108:fake shutdown\n");
 		proc_exit_inprogress = true;
@@ -405,7 +405,7 @@ before_shmem_exit(pg_on_exit_callback function, Datum arg)
 void
 on_shmem_exit(pg_on_exit_callback function, Datum arg)
 {
-#if defined(__wasi__) || defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__)
     if (!atexit_callback_setup) {
         PDEBUG("# 410:" __FILE__ " on_shmem_exit(pg_on_exit_callback function, Datum arg) FIRST CALL");
         if (on_shmem_exit_index >= MAX_ON_EXITS) {

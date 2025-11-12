@@ -16,13 +16,8 @@
 #ifndef STRING_UTILS_H
 #define STRING_UTILS_H
 
-#if !defined(__wasi__)
 #include "libpq-fe.h"
 #include "pqexpbuffer.h"
-#else
-#include "../interfaces/libpq/libpq-fe.h"
-#include "../interfaces/libpq/pqexpbuffer.h"
-#endif
 
 /* Global variables controlling behavior of fmtId() and fmtQualifiedId() */
 extern PGDLLIMPORT bool quote_all_identifiers;
