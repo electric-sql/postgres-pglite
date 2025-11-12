@@ -6,6 +6,7 @@
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
 #else
+#define EMSCRIPTEN_KEEPALIVE
 // TODO: an include for libpglite
 #endif
 

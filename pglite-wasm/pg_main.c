@@ -26,9 +26,7 @@
 #include <unistd.h>             /* chdir */
 #include <sys/stat.h>           /* mkdir */
 
-#if defined(__PGLITE__)
 #include <emscripten.h>
-#endif
 
 // globals
 
