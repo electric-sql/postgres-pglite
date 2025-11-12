@@ -5,6 +5,8 @@
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
+#else
+// TODO: an include for libpglite
 #endif
 
 volatile int querylen = 0;
@@ -75,8 +77,7 @@ struct pollfd {
 	short revents;    /* returned events */
 };
 
-int EMSCRIPTEN_KEEPALIVE
-    poll(struct pollfd fds[], ssize_t nfds, int timeout) {
+int poll(struct pollfd fds[], ssize_t nfds, int timeout) {
 		// dummy
 		return nfds;
 	}
