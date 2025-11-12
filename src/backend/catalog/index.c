@@ -2967,7 +2967,7 @@ index_build(Relation heapRelation,
 		indexInfo->ii_ParallelWorkers =
 			plan_create_index_workers(RelationGetRelid(heapRelation),
 									  RelationGetRelid(indexRelation));
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	if (indexInfo->ii_ParallelWorkers == 0)
 		ereport(DEBUG1,
 				(errmsg_internal("building index \"%s\" on table \"%s\" serially",

@@ -1,6 +1,6 @@
 
 // for handling REVOKE exception in initdb
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #   define FIXME 1
 #else
 #   define FIXME 0
@@ -26,7 +26,7 @@
 #include <unistd.h>             /* chdir */
 #include <sys/stat.h>           /* mkdir */
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #include <emscripten.h>
 #endif
 

@@ -5163,7 +5163,7 @@ _bt_allequalimage(Relation rel, bool debugmessage)
 			break;
 		}
 	}
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	if (debugmessage)
 	{
 		if (allequalimage)

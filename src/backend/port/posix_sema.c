@@ -298,7 +298,7 @@ PGSemaphoreReset(PGSemaphore sema)
 	 * There's no direct API for this in POSIX, so we have to ratchet the
 	 * semaphore down to 0 with repeated trywait's.
 	 */
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
     sem_trywait(PG_SEM_REF(sema));
     return;
 #else

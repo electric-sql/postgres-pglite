@@ -804,7 +804,7 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 				ListenStmt *stmt = (ListenStmt *) parsetree;
 
 				CheckRestrictedOperation("LISTEN");
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 				/*
 				 * We don't allow LISTEN in background processes, as there is
 				 * no mechanism for them to collect NOTIFY messages, so they'd

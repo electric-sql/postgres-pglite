@@ -23,7 +23,7 @@
  * Determine which dynamic shared memory implementations will be supported
  * on this platform, and which one will be the default.
  */
-#if 0 // defined(__EMSCRIPTEN__)
+#if 0 // defined(__PGLITE__)
     #define DEFAULT_DYNAMIC_SHARED_MEMORY_TYPE		DSM_IMPL_SYSV
     #define USE_DSM_SYSV
     extern PGDLLIMPORT int dynamic_shared_memory_type;
@@ -31,7 +31,7 @@
     #define PG_DYNSHMEM_DIR					"/tmp/pglite"
     #define PG_DYNSHMEM_MMAP_FILE_PREFIX	"mmap."
 
-#elif 0 // defined(__EMSCRIPTEN__)
+#elif 0 // defined(__PGLITE__)
     #define DEFAULT_DYNAMIC_SHARED_MEMORY_TYPE		DSM_IMPL_MMAP
     #define USE_DSM_MMAP
     extern PGDLLIMPORT int dynamic_shared_memory_type;
@@ -39,7 +39,7 @@
     #define PG_DYNSHMEM_DIR					"/tmp/pglite"
     #define PG_DYNSHMEM_MMAP_FILE_PREFIX	"mmap."
 
-#elif defined(__EMSCRIPTEN__)
+#elif defined(__PGLITE__)
     #define DEFAULT_DYNAMIC_SHARED_MEMORY_TYPE		DSM_IMPL_POSIX
     #define USE_DSM_POSIX
     extern PGDLLIMPORT int dynamic_shared_memory_type;
@@ -63,7 +63,7 @@
 #   endif
 #define USE_DSM_MMAP
 
-#endif /* defined(__EMSCRIPTEN__) */
+#endif /* defined(__PGLITE__) */
 
 
 

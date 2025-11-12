@@ -1,9 +1,11 @@
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 
 #ifndef PGLITE_COMM_H
 #define PGLITE_COMM_H
 
+#if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
+#endif
 
 volatile int querylen = 0;
 volatile FILE* queryfp = NULL;

@@ -723,7 +723,7 @@ EventTriggerDDLCommandStart(Node *parsetree)
 	List	   *runlist;
 	EventTriggerData trigdata;
 
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	/*
 	 * Event Triggers are completely disabled in standalone mode.  There are
 	 * (at least) two reasons for this:
@@ -778,7 +778,7 @@ EventTriggerDDLCommandEnd(Node *parsetree)
 {
 	List	   *runlist;
 	EventTriggerData trigdata;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	/*
 	 * See EventTriggerDDLCommandStart for a discussion about why event
 	 * triggers are disabled in single user mode or via GUC.
@@ -829,7 +829,7 @@ EventTriggerSQLDrop(Node *parsetree)
 {
 	List	   *runlist;
 	EventTriggerData trigdata;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	/*
 	 * See EventTriggerDDLCommandStart for a discussion about why event
 	 * triggers are disabled in single user mode or via a GUC.
@@ -905,7 +905,7 @@ EventTriggerOnLogin(void)
 {
 	List	   *runlist;
 	EventTriggerData trigdata;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	/*
 	 * See EventTriggerDDLCommandStart for a discussion about why event
 	 * triggers are disabled in single user mode or via a GUC.  We also need a
@@ -1019,7 +1019,7 @@ EventTriggerTableRewrite(Node *parsetree, Oid tableOid, int reason)
 {
 	List	   *runlist;
 	EventTriggerData trigdata;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	/*
 	 * See EventTriggerDDLCommandStart for a discussion about why event
 	 * triggers are disabled in single user mode or via a GUC.

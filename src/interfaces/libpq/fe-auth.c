@@ -1169,7 +1169,7 @@ char *
 pg_fe_getusername(uid_t user_id, PQExpBuffer errorMessage)
 {
 	char	   *result = NULL;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	const char *name = NULL;
 
 #ifdef WIN32

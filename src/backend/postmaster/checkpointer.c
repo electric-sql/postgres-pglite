@@ -947,7 +947,7 @@ RequestCheckpoint(int flags)
 	/*
 	 * If in a standalone backend, just do it ourselves.
 	 */
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	if (!IsPostmasterEnvironment)
 #endif
 	{

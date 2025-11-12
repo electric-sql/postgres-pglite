@@ -14,7 +14,7 @@
  */
 
 #include "postgres_fe.h"
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 #ifdef quote_all_identifiers
 #undef quote_all_identifiers
 #endif

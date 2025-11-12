@@ -2805,7 +2805,7 @@ AbortTransaction(void)
 	 * handler.  We do this fairly early in the sequence so that the timeout
 	 * infrastructure will be functional if needed while aborting.
 	 */
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	sigprocmask(SIG_SETMASK, &UnBlockSig, NULL);
 #endif
 
@@ -5214,7 +5214,7 @@ AbortSubTransaction(void)
 	 * handler.  We do this fairly early in the sequence so that the timeout
 	 * infrastructure will be functional if needed while aborting.
 	 */
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	sigprocmask(SIG_SETMASK, &UnBlockSig, NULL);
 #endif
 

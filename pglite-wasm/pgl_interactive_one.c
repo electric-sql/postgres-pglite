@@ -302,11 +302,11 @@ void pgl_interactive_one(int packetlen, int peek) {
     }
 
 incoming:
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #   include "pgl_sjlj.c"
 #else
     #error "sigsetjmp unsupported"
-#endif // __EMSCRIPTEN__
+#endif // __PGLITE__
 
 
     while (pipelining) {
