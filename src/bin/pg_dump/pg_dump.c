@@ -69,10 +69,6 @@
 #include "pg_dump.h"
 #include "storage/block.h"
 
-#if defined(__EMSCRIPTEN__)
-#include <emscripten/emscripten.h>
-#endif
-
 typedef struct
 {
 	Oid			roleoid;		/* role's OID */
