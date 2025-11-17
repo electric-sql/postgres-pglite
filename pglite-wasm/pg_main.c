@@ -40,7 +40,6 @@ volatile char *PGUSER;
 const char *progname;
 
 volatile bool is_node = true;
-volatile bool is_embed = false;
 volatile int pgl_idb_status;
 
 // now backend start manually after initdb.
@@ -385,7 +384,6 @@ int EMSCRIPTEN_KEEPALIVE pgl_initdb() {
     progname = get_progname(argv[0]);
     g_argv = argv;
     g_argc = argc;
-    is_embed = true;
 
     emscripten_force_exit(exit_code);
     return exit_code;

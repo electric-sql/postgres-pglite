@@ -291,7 +291,7 @@ void pgl_interactive_one(int packetlen, int peek) {
 #if PGDEBUG
     if (packetlen)
         IO[packetlen]=0; // wire blocks are not zero terminated
-    printf("\n# 524: fd=%d is_embed=%d is_repl=%d is_wire=%d fd %s,len=%d peek=%d [%s]\n", MyProcPort->sock, is_embed, is_repl, is_wire, PGS_OLOCK, packetlen, peek, IO);
+    printf("\n# 524: fd=%d is_repl=%d is_wire=%d fd %s,len=%d peek=%d [%s]\n", MyProcPort->sock, is_repl, is_wire, PGS_OLOCK, packetlen, peek, IO);
 #endif
 
     resetStringInfo(inBuf);
