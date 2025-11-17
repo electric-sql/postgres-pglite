@@ -99,51 +99,6 @@ volatile bool idle_session_timeout_enabled = false;
 // pgl_interactive_one, heart of the async loop.
 #include "./pgl_interactive_one.c"
 
-static void
-main_pre(int argc, char *argv[]) {
-
-    // get default or set default if not set
-    PREFIX = setdefault("PREFIX", WASM_PREFIX);
-    argv[0] = strcat_alloc(PREFIX, "/bin/postgres");
-
-    chdir("/");
-    mkdirp("/tmp");
-    mkdirp(PREFIX);
-
-    // postgres does not know where to find the server configuration file.
-    // also we store the fake locale file there.
-    // postgres.js:1605 You must specify the --config-file or -D invocation option or set the PGDATA environment variable.
-
-    /* enforce ? */
-    setenv("PGSYSCONFDIR", PREFIX, 1);
-    setenv("PGCLIENTENCODING", "UTF8", 1);
-
-    setenv("PGDATABASE", "template1", 0);
-    setenv("PG_COLOR", "always", 0);
-
-
-    /* defaults with possible user setup */
-    PGUSER = setdefault("PGUSER", WASM_USERNAME);
-
-    /* temp override for inidb */
-    setenv("PGUSER", WASM_USERNAME, 1);
-
-    strconcat(tmpstr, PREFIX, "/base");
-    PGDATA = setdefault("PGDATA", tmpstr);
-
-
-#if PGDEBUG
-    puts("# ============= env dump ==================");
-    for (char **env = environ; *env != 0; env++) {
-        char *drefp = *env;
-        printf("# %s\n", drefp);
-    }
-    puts("# =========================================");
-#endif
-}                               // main_pre
-
-
-
 void
 main_post() {
     PDEBUG("# 280: main_post()");
@@ -387,8 +342,45 @@ int EMSCRIPTEN_KEEPALIVE pgl_initdb() {
 */
 
  int main(int argc, char **argv) {
-     int exit_code = 0;
-     main_pre(argc, argv);
+    int exit_code = 0;
+     
+    // get default or set default if not set
+    PREFIX = setdefault("PREFIX", WASM_PREFIX);
+    argv[0] = strcat_alloc(PREFIX, "/bin/postgres");
+
+    chdir("/");
+    mkdirp("/tmp");
+    mkdirp(PREFIX);
+
+    // postgres does not know where to find the server configuration file.
+    // also we store the fake locale file there.
+    // postgres.js:1605 You must specify the --config-file or -D invocation option or set the PGDATA environment variable.
+
+    /* enforce ? */
+    setenv("PGSYSCONFDIR", PREFIX, 1);
+    setenv("PGCLIENTENCODING", "UTF8", 1);
+
+    setenv("PGDATABASE", "template1", 0);
+    setenv("PG_COLOR", "always", 0);
+
+    /* defaults with possible user setup */
+    PGUSER = setdefault("PGUSER", WASM_USERNAME);
+
+    /* temp override for inidb */
+    setenv("PGUSER", WASM_USERNAME, 1);
+
+    strconcat(tmpstr, PREFIX, "/base");
+    PGDATA = setdefault("PGDATA", tmpstr);
+
+
+#if PGDEBUG
+    puts("# ============= env dump ==================");
+    for (char **env = environ; *env != 0; env++) {
+        char *drefp = *env;
+        printf("# %s\n", drefp);
+    }
+    puts("# =========================================");
+#endif
 #if PGDEBUG
      printf("# 550: argv0 (%s) PGUSER=%s PGDATA=%s\n PGDATABASE=%s",
             argv[0], PGUSER, PGDATA, getenv("PGDATABASE")));
