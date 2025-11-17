@@ -360,9 +360,6 @@ int EMSCRIPTEN_KEEPALIVE pgl_initdb() {
     setenv("PGSYSCONFDIR", PREFIX, 1);
     setenv("PGCLIENTENCODING", "UTF8", 1);
 
-    setenv("PGDATABASE", "template1", 0);
-    setenv("PG_COLOR", "always", 0);
-
     /* defaults with possible user setup */
     PGUSER = setdefault("PGUSER", WASM_USERNAME);
 
