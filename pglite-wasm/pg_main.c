@@ -101,43 +101,6 @@ volatile bool idle_session_timeout_enabled = false;
 
 static void
 main_pre(int argc, char *argv[]) {
-//     char key[256];
-//     int i = 0;
-// // extra env is always after normal args
-//     PDEBUG("# ============= extra argv dump ==================\n");
-//     {
-//         for (; i < argc; i++) {
-//             const char *kv = argv[i];
-//             for (int sk = 0; sk < strlen(kv); sk++)
-//                 if (kv[sk] == '=')
-//                     goto extra_env;
-// #if PGDEBUG
-//             printf("arg[%d]: %s\n", i, kv);
-// #endif
-//         }
-//     }
-//   extra_env:;
-//     PDEBUG("\n# ============= arg->env dump ==================\n");
-//     {
-//         for (; i < argc; i++) {
-//             const char *kv = argv[i];
-//             for (int sk = 0; sk < strlen(kv); sk++) {
-//                 if (sk > 255) {
-//                     puts("buffer overrun on extra env at:");
-//                     puts(kv);
-//                     continue;
-//                 }
-//                 if (kv[sk] == '=') {
-//                     memcpy(key, kv, sk);
-//                     key[sk] = 0;
-// #if PGDEBUG
-//                     printf("%s='%s'\n", &(key[0]), &(kv[sk + 1]));
-// #endif
-//                     setenv(key, &kv[sk + 1], 1);
-//                 }
-//             }
-//         }
-//     }
 
     // get default or set default if not set
     PREFIX = setdefault("PREFIX", WASM_PREFIX);
@@ -155,16 +118,6 @@ main_pre(int argc, char *argv[]) {
     setenv("PGSYSCONFDIR", PREFIX, 1);
     setenv("PGCLIENTENCODING", "UTF8", 1);
 
-/*
- * we cannot run "locale -a" either from web or node. the file getenv("PGSYSCONFDIR") / "locale"
- * serves as popen output
- */
-    setenv("LC_CTYPE", "en_US.UTF-8", 1);
-
-    /* defaults */
-
-    setenv("TZ", "UTC", 0);
-    setenv("PGTZ", "UTC", 0);
     setenv("PGDATABASE", "template1", 0);
     setenv("PG_COLOR", "always", 0);
 
