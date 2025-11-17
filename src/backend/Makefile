@@ -75,18 +75,18 @@ endif
 
 ifeq ($(PORTNAME), emscripten)
 AR ?= llvm-ar
-LIBPGCORE ?= libpgcore.a
-LIBPG = libpostgres.a
-LIBPGMAIN = libpgmain.a
-PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
+LIBPOSTGRES = libpostgres.a # postgres specific
+LIBPGCORE ?= libpgcore.a # pglite specific
+LIBPGMAIN = libpgmain.a # pglite specific
+PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPOSTGRES) # all postgres specific
 PGMAIN = main/main.o tcop/postgres.o
 PGLITE_MAIN = pglite-wasm/pg_main.c
 postgres: $(OBJS)
 	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
-	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
+	$(AR) rcs $(LIBPOSTGRES) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
 	$(CC) -r -o $(top_builddir)/libpgcore.o -Wl,--whole-archive $(PGCORE)
 	$(AR) rcs $(LIBPGCORE) $(top_builddir)/libpgcore.o
-	COPTS="$(LOPTS)" $(CC) $(MAIN_MODULE) $(CFLAGS) $(LDFLAGS) -o $@$(X) $(LIBPGCORE) $(LIBPGMAIN) $(LIBS)
+	$(LD) $(MAIN_MODULE) $(LDFLAGS) -o $@$(X) $(LIBPGCORE) $(LIBPGMAIN) $(LIBS)
 
 # Extensions use functions from the core PG. These need to be exported by the emscripten compiler.
 # The following target gathers all extension imports + the default ones (included.pglite.imports),
@@ -228,7 +228,7 @@ ifeq ($(MAKE_DLL), true)
 endif
 endif
 ifeq ($(PORTNAME), emscripten)
-	$(INSTALL_DATA) $(LIBPG) '$(DESTDIR)$(libdir)/libpostgres.a'
+	$(INSTALL_DATA) $(LIBPOSTGRES) '$(DESTDIR)$(libdir)/libpostgres.a'
 	$(INSTALL_DATA) $(LIBPGCORE) '$(DESTDIR)$(libdir)/libpgcore.a'
 	$(INSTALL_DATA) $(LIBPGMAIN) '$(DESTDIR)$(libdir)/libpgmain.a'
 endif

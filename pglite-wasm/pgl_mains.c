@@ -213,31 +213,10 @@ PDEBUG("# 164:" __FILE__);
 
     if (!ignore_till_sync)
         send_ready_for_query = true;	/* initially, or after error */
-/*
-    if (!inloop) {
-        inloop = true;
-        PDEBUG("# 335: REPL(initdb-single):Begin " __FILE__ );
-
-        while (repl) { interactive_file(); }
-    } else {
-        // signal error
-        optind = -1;
-    }
-*/
 
   interactive_file();
   fclose(single_mode_feed);
   single_mode_feed = NULL;
-
-/*
-    while (repl) { interactive_file(); }
-    PDEBUG("# 240: REPL:End Raising a 'RuntimeError Exception' to halt program NOW");
-    {
-        void (*npe)() = NULL;
-        npe();
-    }
-    // unreachable.
-*/
 
     PDEBUG("# 248: no line-repl requested, exiting and keeping runtime alive");
 }

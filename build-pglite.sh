@@ -40,7 +40,7 @@ else
 fi
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,callMain"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,callMain,ENV"
 PGLITE_LDFLAGS_EX="-sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
@@ -85,11 +85,12 @@ PATH=$SAVE_PATH
 PGROOT=/install/pglite
 PG_IMPORTS_DIR=$PGROOT/imports
 PGPRELOAD="--preload-file $PGROOT/share/postgresql@/tmp/pglite/share/postgresql --preload-file $PGROOT/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(pwd)/other/password@/tmp/pglite/password --preload-file $(pwd)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(pwd)/other/empty@/tmp/pglite/bin/postgres --preload-file $(pwd)/other/empty@/tmp/pglite/bin/initdb"
-EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction"
+EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 #WASM_COMPILE_FLAGS="-m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling"
 PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
+-sINVOKE_RUN=0 \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \

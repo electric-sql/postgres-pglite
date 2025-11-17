@@ -8,7 +8,6 @@
 
 #define PGL_MAIN
 #define PGL_INITDB_MAIN
-#define REPL 0
 // #define PGDEBUG_STARTUP
 
 // MEMFS files for os pipe simulation
@@ -155,9 +154,6 @@ main_pre(int argc, char *argv[]) {
     /* enforce ? */
     setenv("PGSYSCONFDIR", PREFIX, 1);
     setenv("PGCLIENTENCODING", "UTF8", 1);
-
-    // default now is no repl loop
-    setenv("REPL", "N", 0);
 
 /*
  * we cannot run "locale -a" either from web or node. the file getenv("PGSYSCONFDIR") / "locale"
@@ -441,8 +437,8 @@ int EMSCRIPTEN_KEEPALIVE pgl_initdb() {
      int exit_code = 0;
      main_pre(argc, argv);
 #if PGDEBUG
-     printf("# 550: argv0 (%s) PGUSER=%s PGDATA=%s\n PGDATABASE=%s REPL=%s\n",
-            argv[0], PGUSER, PGDATA, getenv("PGDATABASE"), getenv("REPL"));
+     printf("# 550: argv0 (%s) PGUSER=%s PGDATA=%s\n PGDATABASE=%s",
+            argv[0], PGUSER, PGDATA, getenv("PGDATABASE")));
 #endif
     progname = get_progname(argv[0]);
     g_argv = argv;
