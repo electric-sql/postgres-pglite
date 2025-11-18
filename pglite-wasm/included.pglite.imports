@@ -8,7 +8,6 @@ ioctl
 isalnum
 isxdigit
 lowerstr
-main
 malloc
 memcmp
 memcpy

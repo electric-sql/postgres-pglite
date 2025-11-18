@@ -340,7 +340,7 @@ int EMSCRIPTEN_KEEPALIVE pgl_initdb() {
     PGOPTIONS
 */
 
- int main(int argc, char **argv) {
+ int EMSCRIPTEN_KEEPALIVE pgl_startup(int argc, char **argv) {
     int exit_code = 0;
      
     // get default or set default if not set
@@ -384,6 +384,5 @@ int EMSCRIPTEN_KEEPALIVE pgl_initdb() {
     g_argv = argv;
     g_argc = argc;
 
-    emscripten_force_exit(exit_code);
     return exit_code;
 }
