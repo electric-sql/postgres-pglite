@@ -357,7 +357,7 @@ int EMSCRIPTEN_KEEPALIVE pgl_initdb() {
 
     /* enforce ? */
     setenv("PGSYSCONFDIR", PREFIX, 1);
-    setenv("PGCLIENTENCODING", "UTF8", 1);
+    // setenv("PGCLIENTENCODING", "UTF8", 1);
 
     /* defaults with possible user setup */
     PGUSER = setdefault("PGUSER", WASM_USERNAME);
