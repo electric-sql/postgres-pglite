@@ -7,7 +7,7 @@
 # final output folder
 INSTALL_FOLDER=${INSTALL_FOLDER:-"/install/pglite"}
 
-PGLITE_BASE_CFLAGS="-D__PGLITE__"
+PGLITE_BASE_CFLAGS="-D__PGLITE__ -DPG_PREFIX=/tmp/pglite"
 
 # build with optimizations by default aka release
 PGLITE_CFLAGS="$PGLITE_BASE_CFLAGS -O2"
@@ -66,7 +66,8 @@ fi
 
 # Step 2: make and install all except pglite
 emmake make PORTNAME=emscripten -j || { echo 'error: emmake make PORTNAME=emscripten -j' ; exit 21; }
-emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 22; }
+emmake make PORTNAME=emscripten -j -C src/backend postgres-pglite || { echo 'error: emmake make PORTNAME=emscripten -j postgres-pglite' ; exit 22; }
+emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 23; }
 
 # Step 3.1: make all contrib extensions - do not install
 emmake make PORTNAME=emscripten -C contrib/ -j || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }

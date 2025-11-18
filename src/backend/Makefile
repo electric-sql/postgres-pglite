@@ -62,14 +62,12 @@ override LDFLAGS := $(LDFLAGS) $(LDFLAGS_EX) $(LDFLAGS_EX_BE)
 
 all: submake-libpgport submake-catalog-headers submake-utils-headers postgres $(POSTGRES_IMP)
 
-ifneq ($(PORTNAME), emscripten)
 ifneq ($(PORTNAME), cygwin)
 ifneq ($(PORTNAME), win32)
 
 postgres: $(OBJS)
-	$(CC) $(CFLAGS) $(call expand_subsys,$^) $(LDFLAGS) $(LIBS) -o $@
+	$(CC) $(CFLAGS) $(call expand_subsys,$^) $(LDFLAGS) $(LIBS) -o $@$(X)
 
-endif
 endif
 endif
 
@@ -81,7 +79,7 @@ LIBPGMAIN = libpgmain.a # pglite specific
 PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPOSTGRES) # all postgres specific
 PGMAIN = main/main.o tcop/postgres.o
 PGLITE_MAIN = pglite-wasm/pg_main.c
-postgres: $(OBJS)
+postgres-pglite: $(OBJS)
 	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
 	$(AR) rcs $(LIBPOSTGRES) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
 	$(CC) -r -o $(top_builddir)/libpgcore.o -Wl,--whole-archive $(PGCORE)
@@ -91,7 +89,7 @@ postgres: $(OBJS)
 # Extensions use functions from the core PG. These need to be exported by the emscripten compiler.
 # The following target gathers all extension imports + the default ones (included.pglite.imports),
 # excludes the one in excluded.pglite.imports and adds a leading _ to each.
-pglite-exported-functions:
+pglite-exported-functions: postgres-pglite
 	$(MKDIR_P) '$(emscripten_imports_dir)'
 	cat $(top_builddir)/pglite-wasm/excluded.*.imports $(top_builddir)/src/interfaces/libpq/exports.list $(LIB_EXPORTS_DIR)/libossp-uuid.exports | sort -u > '$(top_builddir)/pglite-wasm/excluded.imports'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite-wasm/included.pglite.imports' | \
@@ -101,18 +99,17 @@ pglite-exported-functions:
 	> '$(emscripten_imports_dir)/exported_functions.txt'
 
 pglite: pglite-exported-functions
-	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
+	$(CC) $(CFLAGS) $(LDFLAGS) -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
 	$(CC) \
 	$(PGLITE_CFLAGS) \
 	-fPIC -ferror-limit=1 \
 	-Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement \
-	-DPG_PREFIX=/tmp/pglite \
     -I./src/include -I./src/ -I./src/interfaces/libpq \
     -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ -L. \
     pglite.o \
 	-Ldict_snowball \
 	-lxslt -lxml2 -lz \
-    -lpgcore 
+    $(LIBPGCORE) 
 endif
 
 ifeq ($(PORTNAME), cygwin)
