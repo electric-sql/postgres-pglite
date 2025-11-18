@@ -347,7 +347,6 @@ int EMSCRIPTEN_KEEPALIVE pgl_initdb() {
     PREFIX = setdefault("PREFIX", WASM_PREFIX);
     argv[0] = strcat_alloc(PREFIX, "/bin/postgres");
 
-    chdir("/");
     mkdirp("/tmp");
     mkdirp(PREFIX);
 
