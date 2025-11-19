@@ -249,6 +249,14 @@ ifeq ($(MAKE_EXPORTS), true)
 	$(MKDIR_P) '$(DESTDIR)$(pgxsdir)/$(MKLDEXPORT_DIR)'
 endif
 
+ifeq ($(PORTNAME), emscripten)
+install-pglite: pglite
+	$(INSTALL_PROGRAM) pglite.wasm '$(DESTDIR)$(bindir)/pglite.wasm'
+	$(INSTALL_PROGRAM) pglite.js '$(DESTDIR)$(bindir)/pglite.js'
+	$(INSTALL_PROGRAM) pglite.data '$(DESTDIR)$(bindir)/pglite.data'
+endif
+
+.PHONY: install-pglite
 
 ##########################################################################
 
