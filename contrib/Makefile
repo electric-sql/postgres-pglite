@@ -4,6 +4,39 @@ subdir = contrib
 top_builddir = ..
 include $(top_builddir)/src/Makefile.global
 
+ifeq ($(PORTNAME), emscripten)
+SUBDIRS = amcheck		\
+		auto_explain	\
+		bloom		\
+		btree_gin	\
+		btree_gist	\
+		citext		\
+		cube		\
+		dict_int	\
+		dict_xsyn	\
+		earthdistance	\
+		file_fdw	\
+		fuzzystrmatch	\
+		hstore		\
+		intarray	\
+		isn		\
+		lo		\
+		ltree		\
+		pageinspect	\
+		pg_buffercache	\
+		pg_freespacemap \
+		pg_surgery	\
+		pg_trgm		\
+		pg_visibility	\
+		pg_walinspect	\
+		seg		\
+		tablefunc	\
+		tcn		\
+		tsm_system_rows \
+		tsm_system_time \
+		unaccent
+else
+
 SUBDIRS = \
 		amcheck		\
 		auth_delay	\
@@ -50,6 +83,7 @@ SUBDIRS = \
 		tsm_system_time \
 		unaccent	\
 		vacuumlo
+endif
 
 ifeq ($(with_ssl),openssl)
 SUBDIRS += pgcrypto sslinfo
@@ -90,6 +124,7 @@ endif
 # Missing:
 #		start-scripts	\ (does not have a makefile)
 
+include ./dist.mk
 
 $(recurse)
 $(recurse_always)

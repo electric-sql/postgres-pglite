@@ -1,6 +1,6 @@
 #if defined(__PGLITE__)
 
-typedef ssize_t (*pglite_system)(void *command);
+typedef ssize_t (*pglite_system_t)(void *command);
 pglite_system_t pglite_system = NULL;
 
 int system(const char *command) {
