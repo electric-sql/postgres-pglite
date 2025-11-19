@@ -69,7 +69,7 @@ fi
 
 # Step 2: make and install all
 emmake make PORTNAME=emscripten -j || { echo 'error: emmake make PORTNAME=emscripten -j' ; exit 21; }
-# emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 23; }
+emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 23; }
 
 # Step 3.1: make ported contrib extensions - do not install
 emmake make PORTNAME=emscripten -C contrib/ -j || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
@@ -80,11 +80,14 @@ emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make P
 # Step 4: make and dist other extensions
 SAVE_PATH=$PATH
 PATH=$PATH:$INSTALL_FOLDER/bin
-emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite || { echo 'error: emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 41; }
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist || { echo 'error: make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist ' ; exit 42; }
+emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions -j || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite/other_extensions' ; exit 41; }
+emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist' ; exit 42; }
 PATH=$SAVE_PATH
 
-# Step 5: make and install pglite
+# Step 5: get exported functions
+emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
+
+# Step 6: make and install pglite
 PGROOT=/install/pglite
 PG_IMPORTS_DIR=$PGROOT/imports
 PGPRELOAD="--preload-file $PGROOT/share/postgresql@/tmp/pglite/share/postgresql \

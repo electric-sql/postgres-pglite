@@ -60,6 +60,7 @@ override LDFLAGS := $(LDFLAGS) $(LDFLAGS_EX) $(LDFLAGS_EX_BE)
 
 all: submake-libpgport submake-catalog-headers submake-utils-headers postgres $(POSTGRES_IMP)
 
+ifneq ($(PORTNAME), emscripten)
 ifneq ($(PORTNAME), cygwin)
 ifneq ($(PORTNAME), win32)
 
@@ -68,8 +69,12 @@ postgres: $(OBJS)
 
 endif
 endif
+endif
 
 ifeq ($(PORTNAME), emscripten)
+
+postgres: $(OBJS)
+	$(CC) $(CFLAGS) $(call expand_subsys,$^) $(LDFLAGS) $(LIBS) -o $@$(X)
 
 # Extensions use functions from the core PG. These need to be exported by the emscripten compiler.
 # The following target gathers all extension imports + the default ones (included.pglite.imports),
