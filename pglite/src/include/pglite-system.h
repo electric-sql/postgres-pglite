@@ -41,6 +41,22 @@ popen(const char *command, const char *mode) {
     return NULL;
 }
 
+typedef int (*pglite_pclose_t)(const FILE* fd);
+pglite_pclose_t pglite_pclose = NULL;
+
+void EMSCRIPTEN_KEEPALIVE
+pgl_set_pclose_fn(pglite_pclose_t pclose_fn) {
+    pglite_pclose = pclose_fn;
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pclose(FILE* fd) {
+    if (pglite_pclose) {
+        return pglite_pclose(fd);
+    }
+    return 0;
+}
+
 typedef char* (*pglite_fgets_t)(char * restrict str, int size, FILE * restrict stream);
 pglite_fgets_t pglite_fgets = NULL;
 
