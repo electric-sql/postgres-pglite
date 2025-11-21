@@ -82,10 +82,6 @@
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 
-#if defined(__PGLITE__)
-#include "pglite-system.h"
-#endif
-
 /* Ideally this would be in a .h file, but it hardly seems worth the trouble */
 extern const char *select_default_timezone(const char *share_path);
 

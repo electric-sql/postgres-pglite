@@ -76,6 +76,10 @@ static char *pg_realpath(const char *fname);
 static BOOL GetTokenUser(HANDLE hToken, PTOKEN_USER *ppTokenUser);
 #endif
 
+#if defined(__PGLITE__)
+#include "pglite-system.h"
+#endif
+
 /*
  * validate_exec -- validate "path" as an executable file
  *
