@@ -1,5 +1,8 @@
 #if defined(__PGLITE__)
 
+#ifndef _PGLITE_SYSTEM_
+#define _PGLITE_SYSTEM_
+
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
 #else
@@ -22,4 +25,21 @@ int system(const char *command) {
     return 123;
 }
 
+typedef FILE* (*pglite_popen_t)(const char *command, const char *mode);
+pglite_popen_t pglite_popen = NULL;
+
+void EMSCRIPTEN_KEEPALIVE
+pgl_set_popen_fn(pglite_popen_t popen_fn) {
+    pglite_popen = popen_fn;
+}
+
+FILE* EMSCRIPTEN_KEEPALIVE
+popen(const char *command, const char *mode) {
+    if (pglite_popen) {
+        return pglite_popen(command);
+    }
+    return NULL;
+}
+
+#endif
 #endif

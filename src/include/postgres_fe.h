@@ -26,4 +26,8 @@
 
 #include "common/fe_memutils.h"
 
+#if defined(__PGLITE__)
+#include "pglite-system.h"
+#endif
+
 #endif							/* POSTGRES_FE_H */

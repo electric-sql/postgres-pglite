@@ -46,6 +46,10 @@
 #include "utils/elog.h"
 #include "utils/palloc.h"
 
+#if defined(__PGLITE__)
+#include "pglite-system.h"
+#endif
+
 /* ----------------------------------------------------------------
  *				Section 1:	Datum type + support functions
  * ----------------------------------------------------------------
