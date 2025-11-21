@@ -66,6 +66,9 @@ get_user_name(char **errstr)
 #endif
 }
 
+#ifdef __PGLITE__
+const char web_user[9] = "web_user";
+#endif
 
 /*
  * Returns the current user name in a static buffer or exits
@@ -76,8 +79,11 @@ get_user_name_or_exit(const char *progname)
 	const char *user_name;
 	char	   *errstr;
 
+#ifdef __PGLITE__
+	user_name = web_user;
+#else
 	user_name = get_user_name(&errstr);
-
+#endif
 	if (!user_name)
 	{
 		fprintf(stderr, "%s: %s\n", progname, errstr);

@@ -3,6 +3,8 @@
 #ifndef PGLITE_SYSTEM_H
 #define PGLITE_SYSTEM_H
 
+#include <unistd.h>
+
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
 #else
@@ -71,6 +73,10 @@ fgets(char * restrict str, int size, FILE * restrict stream) {
         return pglite_fgets(str, size, stream);
     }
     return NULL;
+}
+
+uid_t geteuid(void) {
+    return 1234;   // your custom value
 }
 
 #endif
