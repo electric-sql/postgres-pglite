@@ -41,5 +41,21 @@ popen(const char *command, const char *mode) {
     return NULL;
 }
 
+typedef char* (*pglite_fgets_t)(char * restrict str, int size, FILE * restrict stream);
+pglite_fgets_t pglite_fgets = NULL;
+
+void EMSCRIPTEN_KEEPALIVE
+pgl_set_fgets_fn(pglite_fgets_t fgets_fn) {
+    pglite_fgets = fgets_fn;
+}
+
+char* EMSCRIPTEN_KEEPALIVE
+fgets(char * restrict str, int size, FILE * restrict stream) {
+    if (pglite_fgets) {
+        return pglite_fgets(str, size, stream);
+    }
+    return NULL;
+}
+
 #endif
 #endif
