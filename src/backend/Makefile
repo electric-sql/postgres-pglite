@@ -80,7 +80,7 @@ postgres: $(OBJS)
 # The following target gathers all extension imports + the default ones (included.pglite.imports),
 # excludes the one in excluded.pglite.imports and adds a leading _ to each.
 pglite-exported-functions:
-	$(MKDIR_P) '$(emscripten_imports_dir)'
+	$(MKDIR_P) /install/pglite
 	cat $(top_builddir)/pglite/static/excluded.*.exports \
 	$(top_builddir)/src/interfaces/libpq/exports.list \
 	$(DESTDIR)$(emscripten_extension_imports_dir)/postgres_fdw.imports \
@@ -90,7 +90,7 @@ pglite-exported-functions:
 	sort -u | \
 	grep -Fvx -f '$(top_builddir)/pglite/out/excluded.exports' | \
 	sed 's/^/_/' \
-	> '$(emscripten_imports_dir)/exported_functions.txt'
+	> '/install/pglite/exported_functions.txt'
 
 pglite: $(OBJS)
 	$(CC) $(CFLAGS) $(call expand_subsys,$^) $(LDFLAGS) $(LIBS) $(POSTGRES_PGLITE_FLAGS) -o $@$(X)	
@@ -250,7 +250,7 @@ ifeq ($(MAKE_EXPORTS), true)
 endif
 
 ifeq ($(PORTNAME), emscripten)
-install-pglite: pglite
+install-pglite:
 	$(INSTALL_PROGRAM) pglite.wasm '$(DESTDIR)$(bindir)/pglite.wasm'
 	$(INSTALL_PROGRAM) pglite.js '$(DESTDIR)$(bindir)/pglite.js'
 	$(INSTALL_PROGRAM) pglite.data '$(DESTDIR)$(bindir)/pglite.data'

@@ -51,4 +51,3 @@ lib*.pc
 *.wasm
 *.map
 pglite-wasm/excluded.imports
-/dist

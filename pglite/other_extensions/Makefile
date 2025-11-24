@@ -9,9 +9,9 @@ SUBDIRS = \
 		pgtap \
 		pg_uuidv7
 
-prefix ?= /install/pglite
+prefix ?= /tmp/pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build
-ARCHIVE_DIR := /install/pglite/extensions
+ARCHIVE_DIR := /tmp/pglite/extensions
 
 EXTENSIONS := $(SUBDIRS)
 

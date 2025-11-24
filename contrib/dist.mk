@@ -2,9 +2,9 @@
 #
 # Package each contrib extension into its own .tar.gz archive
 
-prefix ?= /install/pglite
+prefix ?= /tmp/pglite
 CONTRIB_BUILD_ROOT := /tmp/extensions/build
-ARCHIVE_DIR := /install/pglite/extensions
+ARCHIVE_DIR := /tmp/pglite/extensions
 
 CONTRIBS := $(SUBDIRS)
 

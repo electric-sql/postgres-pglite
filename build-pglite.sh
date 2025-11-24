@@ -5,7 +5,7 @@
 #############
 
 # final output folder
-INSTALL_FOLDER=${INSTALL_FOLDER:-"/install/pglite"}
+INSTALL_FOLDER=${INSTALL_FOLDER:-"/tmp/pglite"}
 
 PGLITE_BASE_CFLAGS="-D__PGLITE__ -DPG_PREFIX=/tmp/pglite"
 
@@ -43,7 +43,7 @@ PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0"
 PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,callMain,ENV"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,callMain,ENV"
 PGLITE_LDFLAGS_EX="-sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
@@ -54,11 +54,8 @@ PGLITE_LDFLAGS_EX="-sWASM_BIGINT \
 -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
 -sTOTAL_MEMORY=32MB \
 -sINVOKE_RUN=0 \
---embed-file $(pwd)/pglite/static/PGPASSFILE@/home/web_user/.pgpass \
---embed-file $(pwd)/pglite/static/empty@/var/bin/postgresql/initdb \
---embed-file $(pwd)/pglite/static/empty@/var/bin/postgresql/pg_dump \
---embed-file $(pwd)/pglite/static/empty@/var/bin/postgresql/postgres \
--sEXPORTED_FUNCTIONS=_main"
+-sEXPORTED_FUNCTIONS=_main \
+-lproxyfs.js"
 
 # Step 1: configure the project
 if [ "$RUN_CONFIGURE" = true ]; then
@@ -91,14 +88,16 @@ PATH=$SAVE_PATH
 emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
 
 # Step 6: make and install pglite
-PGROOT=/install/pglite
+PGROOT=/tmp/pglite
 PG_IMPORTS_DIR=$PGROOT/imports
-PGPRELOAD="--preload-file $PGROOT/share/postgresql@/tmp/pglite/share/postgresql \
+PGPRELOAD="\
+--preload-file $(pwd)/pglite/static/PGPASSFILE@/home/web_user/.pgpass \
+--preload-file $(pwd)/pglite/static/empty@/tmp/pglite/bin/initdb \
+--preload-file $(pwd)/pglite/static/empty@/tmp/pglite/bin/pg_dump \
+--preload-file $(pwd)/pglite/static/empty@/tmp/pglite/bin/postgres \
+--preload-file $PGROOT/share/postgresql@/tmp/pglite/share/postgresql \
 --preload-file $PGROOT/lib/postgresql@/tmp/pglite/lib/postgresql \
 --preload-file $(pwd)/pglite/static/password@/tmp/pglite/password"
-PGEMBED="--embed-file $(pwd)/pglite/static/empty@/var/bin/postgresql/initdb \
---embed-file $(pwd)/pglite/static/empty@/var/bin/postgresql/pg_dump \
---embed-file $(pwd)/pglite/static/empty@/var/bin/postgresql/postgres"
 PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
@@ -119,9 +118,8 @@ PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,s
 
 POSTGRES_PGLITE_FLAGS="\
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
--sEXPORTED_FUNCTIONS=@$PG_IMPORTS_DIR/exported_functions.txt \
+-sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
 $PGPRELOAD \
-$PGEMBED \
 -lnodefs.js -lidbfs.js"
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
