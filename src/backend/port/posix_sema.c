@@ -294,6 +294,10 @@ PGSemaphoreCreate(void)
 void
 PGSemaphoreReset(PGSemaphore sema)
 {
+#ifdef __PGLITE__
+    sem_trywait(PG_SEM_REF(sema));
+    return;
+#else
 	/*
 	 * There's no direct API for this in POSIX, so we have to ratchet the
 	 * semaphore down to 0 with repeated trywait's.
@@ -309,6 +313,7 @@ PGSemaphoreReset(PGSemaphore sema)
 			elog(FATAL, "sem_trywait failed: %m");
 		}
 	}
+#endif
 }
 
 /*
