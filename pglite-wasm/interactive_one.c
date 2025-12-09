@@ -304,7 +304,7 @@ interactive_one(int packetlen, int peek) {
     }
 
 incoming:
-#if defined(__EMSCRIPTEN__) || defined(__wasi__) //PGDEBUG
+#if defined(__PGLITE__) //PGDEBUG
 #   include "pgl_sjlj.c"
 #else
     #error "sigsetjmp unsupported"

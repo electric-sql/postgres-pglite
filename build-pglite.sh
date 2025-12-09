@@ -8,7 +8,7 @@
 INSTALL_FOLDER=${INSTALL_FOLDER:-"/install/pglite"}
 
 # build with optimizations by default aka release
-PGLITE_CFLAGS="-O2"
+PGLITE_CFLAGS="-D__PGLITE_WASM__ -O2"
 if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."

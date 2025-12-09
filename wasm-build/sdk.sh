@@ -98,14 +98,14 @@ else
         cat > /tmp/sdk/hello_em.c <<END
 #include <stdio.h>
 #include <assert.h>
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #include "emscripten.h"
 #endif
 
 #define IO ((char *)(1))
 
 int main(int argc, char**arv){
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #   if defined(__PYDK__)
         printf("pydk" " %d.%d.%d\n",__EMSCRIPTEN_major__, __EMSCRIPTEN_minor__, __EMSCRIPTEN_tiny__);
 #   else

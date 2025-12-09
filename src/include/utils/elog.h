@@ -137,7 +137,7 @@ struct Node;
  * prevents gcc from making the unreachability deduction at optlevel -O0.
  *----------
  */
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__PGLITE__)
 #define ereport_domain(elevel, domain, ...)	\
 	do { \
 		pg_prevent_errno_in_scope(); \

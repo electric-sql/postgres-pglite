@@ -1,6 +1,6 @@
 
 // for handling REVOKE exception in initdb
-#if defined(__wasi__) || defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #   define FIXME 1
 #else
 #   define FIXME 0
@@ -26,7 +26,7 @@
 #include <unistd.h>             /* chdir */
 #include <sys/stat.h>           /* mkdir */
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #include <emscripten.h>
 #endif
 
@@ -151,7 +151,7 @@ main_pre(int argc, char *argv[]) {
 
 
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
     EM_ASM( {
            Module.is_worker = (typeof WorkerGlobalScope !== 'undefined') && self instanceof WorkerGlobalScope;
            Module.FD_BUFFER_MAX = $0; Module.emscripten_copy_to = console.warn;} // tdrz: what is FD_BUFFER_MAX?
@@ -212,7 +212,7 @@ main_pre(int argc, char *argv[]) {
         };
     });
 // *INDENT-ON*
-#endif // __EMSCRIPTEN__
+#endif // __PGLITE__
     chdir("/");
     mkdirp("/tmp");
     mkdirp(PREFIX);
@@ -396,7 +396,7 @@ __attribute__ ((export_name("pgl_backend")))
     }
      }
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
      EMSCRIPTEN_KEEPALIVE
 #else
      __attribute__ ((export_name("pgl_initdb")))

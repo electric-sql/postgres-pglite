@@ -116,7 +116,7 @@ static void
 insert_timeout(TimeoutId id, int index)
 {
 	int			i;
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__PGLITE__)
     if (!insert_timeout_warned) //(index<0)
     {
         insert_timeout_warned = true;

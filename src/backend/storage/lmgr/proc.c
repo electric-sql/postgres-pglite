@@ -307,7 +307,7 @@ InitProcess(void)
 		elog(PANIC, "proc header uninitialized");
 
 	if (MyProc != NULL)
-#if defined(__wasi__) || defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 		elog(WARNING, "# 309: you already exist");
 #else
 		elog(ERROR, "# 309: you already exist");

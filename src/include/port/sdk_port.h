@@ -1,4 +1,4 @@
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #include <emscripten.h>
 
 #elif defined(__wasi__)
@@ -258,5 +258,5 @@ extern ssize_t recvfrom_bc(int socket, void *buffer, size_t length, int flags, v
 #endif // I_WASI
 
 #else
-    #error "unknown port mode should be __EMSCRIPTEN__ or __wasi__"
-#endif // __EMSCRIPTEN__
+    #error "unknown port mode should be __PGLITE__"
+#endif // __PGLITE__

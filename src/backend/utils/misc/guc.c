@@ -2647,7 +2647,7 @@ ReportGUCOption(struct config_generic *record)
 		pq_sendstring(&msgbuf, val);
 		pq_endmessage(&msgbuf);
 
-#ifndef __EMSCRIPTEN__
+#ifndef __PGLITE__
 		/*
 		 * We need a long-lifespan copy.  If guc_strdup() fails due to OOM,
 		 * we'll set last_reported to NULL and thereby possibly make a
