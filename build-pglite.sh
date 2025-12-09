@@ -117,7 +117,9 @@ PGLITE_PRELOAD="\
 --preload-file $(pwd)/other/empty@/tmp/pglite/bin/initdb"
 
 PGLITE_EMSCRIPTEN_LIBS="-lnodefs.js -lidbfs.js"
+EXPORTED_FUNCTIONS="-sEXPORTED_FUNCTIONS=@/tmp/exported_functions.txt"
 
+# -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
-PGLITE_FLAGS="$PGLITE_CFLAGS $PGLITE_EMSCRIPTEN_FLAGS $PGLITE_PRELOAD $PGLITE_EMSCRIPTEN_LIBS" emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }
+PGLITE_FLAGS="$PGLITE_CFLAGS $PGLITE_EMSCRIPTEN_FLAGS $PGLITE_PRELOAD $PGLITE_EMSCRIPTEN_LIBS $EXPORTED_FUNCTIONS" emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }
