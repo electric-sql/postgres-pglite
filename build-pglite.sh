@@ -12,9 +12,9 @@ PGLITE_CFLAGS="-D__PGLITE__"
 if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
-    PGLITE_CFLAGS="$PGLITE_FLAGS -g -gsource-map --no-wasm-opt"
+    PGLITE_CFLAGS="$PGLITE_CFLAGS -g -gsource-map --no-wasm-opt"
 else
-    PGLITE_CFLAGS="$PGLITE_FLAGS -O2"
+    PGLITE_CFLAGS="$PGLITE_CFLAGS -O2"
     echo "pglite: building release version."
     # we shouldn't need to do this, but there's a bug somewhere that prevents a successful build if this is set
     unset DEBUG
