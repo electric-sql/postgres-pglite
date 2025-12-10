@@ -69,7 +69,7 @@
 #include "pg_dump.h"
 #include "storage/block.h"
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #include <emscripten/emscripten.h>
 #endif
 
@@ -347,7 +347,7 @@ static bool forcePartitionRootLoad(const TableInfo *tbinfo);
 static void read_dump_filters(const char *filename, DumpOptions *dopt);
 
 int 
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 EMSCRIPTEN_KEEPALIVE
 #endif
 main(int argc, char **argv)

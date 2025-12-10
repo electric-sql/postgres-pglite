@@ -81,8 +81,6 @@ LIBPGMAIN = libpgmain.a
 PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
 PGMAIN = main/main.o tcop/postgres.o
 PGLITE_MAIN = pglite-wasm/pg_main.c
-PGROOT=/install/pglite
-PGPRELOAD=--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql --preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql --preload-file $(top_builddir)/other/password@/tmp/pglite/password --preload-file $(top_builddir)/other/PGPASSFILE@/home/web_user/.pgpass --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/postgres --preload-file $(top_builddir)/other/empty@/tmp/pglite/bin/initdb
 postgres: $(OBJS)
 	$(AR) rcs $(LIBPGMAIN) $(PGMAIN)
 	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
@@ -94,50 +92,27 @@ postgres: $(OBJS)
 # The following target gathers all extension imports + the default ones (included.pglite.imports),
 # excludes the one in excluded.pglite.imports and adds a leading _ to each.
 pglite-exported-functions:
-	$(MKDIR_P) '$(emscripten_imports_dir)'
 	cat $(top_builddir)/pglite-wasm/excluded.*.imports $(top_builddir)/src/interfaces/libpq/exports.list $(LIB_EXPORTS_DIR)/libossp-uuid.exports | sort -u > '$(top_builddir)/pglite-wasm/excluded.imports'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite-wasm/included.pglite.imports' | \
 	sort -u | \
 	grep -Fvx -f '$(top_builddir)/pglite-wasm/excluded.imports' | \
 	sed 's/^/_/' \
-	> '$(emscripten_imports_dir)/exported_functions.txt'
+	> '/tmp/exported_functions.txt'
 
-# -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
-# PGLITE_CFLAGS is something like "-O2" (aka release version) or "-g -gsource-map --no-wasm-opt" (aka debug version)
-# PGLITE_EMSCRIPTEN_FLAGS are the emscripten flags to be passed to the build. Ideally they would be completely transparent, such that we 
-# could build a libpglite with or without those flags (to switch between native and wasm builds)
 pglite: pglite-exported-functions
 	$(CC) $(CFLAGS) $(LDFLAGS) -DPG_PREFIX=/tmp/pglite -I$(top_builddir)/src/include -I$(top_builddir)/src/ -I$(top_builddir)/src/interfaces/libpq -o pglite.o -c $(top_builddir)/$(PGLITE_MAIN) -Wno-incompatible-pointer-types-discards-qualifiers
 	$(CC) \
-	$(PGLITE_CFLAGS) \
-	-fPIC -m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn \
-	-DPG_PREFIX=/tmp/pglite -o pglite.html \
-        $(PGPRELOAD) \
-        -ferror-limit=1 \
-		-sEXPORTED_FUNCTIONS=@$(emscripten_imports_dir)/exported_functions.txt \
-        -I./src/include -I./src/ -I./src/interfaces/libpq \
-        -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ -L. \
-        pglite.o \
-		-Ldict_snowball \
-		-lxslt \
-        -lpgcore \
-        -lnodefs.js -lidbfs.js -lxml2 -lz
-endif
-
-ifeq ($(PORTNAME), wasi)
-AR ?= llvm-ar
-LIBPGCORE ?= $(top_builddir)/libpgcore.a
-LIBPG = $(top_builddir)/libpostgres.a
-PGCORE = $(top_builddir)/src/common/libpgcommon_srv.a $(top_builddir)/src/port/libpgport_srv.a $(LIBPG)
-PGMAIN = main/main.o tcop/postgres.o
-postgres: $(OBJS)
-	$(AR) rcs $(top_builddir)/libpgmain.a $(PGMAIN)
-	$(AR) rcs $(LIBPG) $(filter-out $(PGMAIN),$(call expand_subsys,$(ONLYOBJS)))
-	$(CC) -r -o $(top_builddir)/libpgcore.o -Wl,--whole-archive $(PGCORE)
-	$(AR) rcs $(LIBPGCORE) $(top_builddir)/libpgcore.o
-	COPTS="$(LOPTS)" $(CC) $(MAIN_MODULE) $(CFLAGS) $(LDFLAGS) -nostartfiles -o $@ $(LIBPGCORE) $(top_builddir)/libpgmain.a $(LIBS)
-	mv $@ $@.wasi
-	touch $@
+	$(PGLITE_FLAGS) \
+	-DPG_PREFIX=/tmp/pglite \
+	-o pglite.html \
+    -ferror-limit=1 \
+    -I./src/include -I./src/ -I./src/interfaces/libpq \
+    -L/install/libs/lib -L$(top_builddir) -L$(top_builddir)/src/interfaces/libpq/ -L. \
+    pglite.o \
+	-Ldict_snowball \
+	-lxslt \
+    -lpgcore \
+    -lxml2 -lz
 endif
 
 ifeq ($(PORTNAME), cygwin)

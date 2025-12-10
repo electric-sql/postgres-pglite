@@ -32,7 +32,7 @@
 #include "tcop/tcopprot.h"
 #include "utils/wait_event.h"
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #include "pglite-comm.h"
 #endif
 

@@ -1651,7 +1651,7 @@ SignalBackends(void)
 		 * NotifyQueueLock; which is unlikely but certainly possible. So we
 		 * just log a low-level debug message if it happens.
 		 */
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__PGLITE__)
         HandleNotifyInterrupt();
 #else
 		if (SendProcSignal(pid, PROCSIG_NOTIFY_INTERRUPT, procnos[i]) < 0)

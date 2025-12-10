@@ -815,7 +815,7 @@ cleanup_directories_atexit(void)
 static char *
 get_id(void)
 {
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(__PGLITE__)
 	const char *username;
 
 #ifndef WIN32
@@ -1079,7 +1079,7 @@ set_null_conf(void)
 static const char *
 choose_dsm_implementation(void)
 {
-#if defined(__wasi__) || defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
     return "posix";
 #endif
 #if defined(HAVE_SHM_OPEN) && !defined(__sun__)
@@ -1245,14 +1245,14 @@ test_specific_config_settings(int test_conns, int test_buffs)
 					  DEVNULL, DEVNULL);
 
 	fflush(NULL);
-	#if defined(__EMSCRIPTEN__)
+	#if defined(__PGLITE__)
 	// emscripten supports (some?) syscalls, but that's not actually what we want, because we want to remain inside the wasm sandbox
 	// so just return a dummy value until we decide how to handle syscalls.
 	// TODO: https://github.com/electric-sql/pglite/issues/798
 	status = 123;
 	#else
 	status = system(cmd.data);
-	#endif // #if defined(__EMSCRIPTEN__)
+	#endif // #if defined(__PGLITE__)
 
 	termPQExpBuffer(&cmd);
 
@@ -2653,7 +2653,7 @@ setup_bin_paths(const char *argv0)
 			strlcpy(full_path, progname, sizeof(full_path));
 
 		if (ret == -1)
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__PGLITE__)
 			printf("# WARNING: program \"%s\" is needed by %s but was not found in the same directory as \"%s\"\n",
 					 "postgres", progname, full_path);
 #else
@@ -3476,7 +3476,7 @@ printf("# 3245:" __FILE__ " calling pg_initdb_main for %s\n", progname);
 	if (icu_rules && locale_provider != COLLPROVIDER_ICU)
 		pg_fatal("%s cannot be specified unless locale provider \"%s\" is chosen",
 				 "--icu-rules", "icu");
-#if defined(__wasi__) || defined(__EMSCRIPTEN__)
+#if defined(__PGLITE__)
 #pragma message "#TODO: atexit(cleanup_directories_atexit)"
 PDEBUG("# 3472:"__FILE__ "#TODO: atexit(cleanup_directories_atexit)");
 #endif

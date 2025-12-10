@@ -7,13 +7,14 @@
 # final output folder
 INSTALL_FOLDER=${INSTALL_FOLDER:-"/install/pglite"}
 
+PGLITE_CFLAGS="-D__PGLITE__"
 # build with optimizations by default aka release
-PGLITE_CFLAGS="-O2"
 if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
-    PGLITE_CFLAGS="-sDYLINK_DEBUG=2 -g -gsource-map --no-wasm-opt"
+    PGLITE_CFLAGS="$PGLITE_CFLAGS -g -gsource-map --no-wasm-opt"
 else
+    PGLITE_CFLAGS="$PGLITE_CFLAGS -O2"
     echo "pglite: building release version."
     # we shouldn't need to do this, but there's a bug somewhere that prevents a successful build if this is set
     unset DEBUG
@@ -50,12 +51,31 @@ PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sTOTAL_MEMORY=32MB \
 --embed-file $(pwd)/other/PGPASSFILE@/home/web_user/.pgpass"
 
+CONFIGURE_PARAMS="\
+ac_cv_exeext=.js \
+--host aarch64-unknown-linux-gnu \
+--disable-spinlocks \
+--disable-largefile \
+--without-llvm \
+--without-pam \
+--with-openssl=no \
+--without-readline \
+--without-icu \
+--with-uuid=ossp \
+--with-zlib \
+--with-libxml \
+--with-libxslt \
+--with-template=emscripten \
+--with-includes=$INSTALL_PREFIX/include:$INSTALL_PREFIX/include/libxml2:$(pwd)/pglite/includes \
+--with-libraries=$INSTALL_PREFIX/lib \
+--prefix=$INSTALL_FOLDER"
+
 # Step 1: configure the project
 if [ "$RUN_CONFIGURE" = true ]; then
     LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0" \
     LDFLAGS_SL="-sSIDE_MODULE=1" \
     LDFLAGS_EX=$PGLITE_EMSCRIPTEN_FLAGS \
-    CFLAGS="${PGLITE_CFLAGS} -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types" emconfigure ./configure ac_cv_exeext=.js --host aarch64-unknown-linux-gnu --disable-spinlocks --disable-largefile --without-llvm  --without-pam --disable-largefile --with-openssl=no --without-readline --without-icu --with-includes=$INSTALL_PREFIX/include:$INSTALL_PREFIX/include/libxml2:$(pwd)/pglite/includes --with-libraries=$INSTALL_PREFIX/lib --with-uuid=ossp --with-zlib --with-libxml --with-libxslt --with-template=emscripten --prefix=$INSTALL_FOLDER || { echo 'error: emconfigure failed' ; exit 11; }
+    CFLAGS="${PGLITE_CFLAGS} -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types" emconfigure ./configure $CONFIGURE_PARAMS || { echo 'error: emconfigure failed' ; exit 11; }
 else
     echo "Warning: configure has not been run because RUN_CONFIGURE=${RUN_CONFIGURE}"
 fi
@@ -93,5 +113,20 @@ PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
 -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS"
+
+PGROOT=/install/pglite
+PGLITE_PRELOAD="\
+--preload-file ${PGROOT}/share/postgresql@/tmp/pglite/share/postgresql \
+--preload-file ${PGROOT}/lib/postgresql@/tmp/pglite/lib/postgresql \
+--preload-file $(pwd)/other/password@/tmp/pglite/password \
+--preload-file $(pwd)/other/PGPASSFILE@/home/web_user/.pgpass \
+--preload-file $(pwd)/other/empty@/tmp/pglite/bin/postgres \
+--preload-file $(pwd)/other/empty@/tmp/pglite/bin/initdb"
+
+PGLITE_EMSCRIPTEN_LIBS="-lnodefs.js -lidbfs.js"
+EXPORTED_FUNCTIONS="-sEXPORTED_FUNCTIONS=@/tmp/exported_functions.txt"
+
+# -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
+
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
-PGLITE_CFLAGS="$PGLITE_CFLAGS $PGLITE_EMSCRIPTEN_FLAGS" emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }
+PGLITE_FLAGS="$PGLITE_CFLAGS $PGLITE_EMSCRIPTEN_FLAGS $PGLITE_PRELOAD $PGLITE_EMSCRIPTEN_LIBS $EXPORTED_FUNCTIONS" emmake make PORTNAME=emscripten -j -C src/backend/ install-pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 51; }

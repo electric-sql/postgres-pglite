@@ -32,7 +32,7 @@
 int
 getpeereid(int sock, uid_t *uid, gid_t *gid)
 {
-#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+#if defined(__PGLITE__)
 	/* No implementation available on this platform */
 	errno = ENOSYS;
 	return -1;

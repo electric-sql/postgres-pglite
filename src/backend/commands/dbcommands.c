@@ -1834,7 +1834,7 @@ dropdb(const char *dbname, bool missing_ok, bool force)
 	RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE | CHECKPOINT_WAIT);
 
 	/* Close all smgr fds in all backends. */
-#if !defined(__wasi__) && !defined(__EMSCRIPTEN__)
+#if !defined(__PGLITE__)
 	WaitForProcSignalBarrier(EmitProcSignalBarrier(PROCSIGNAL_BARRIER_SMGRRELEASE));
 #endif
 	/*

@@ -107,7 +107,7 @@ int			client_connection_check_interval = 0;
 /* flags for non-system relation kinds to restrict use */
 int			restrict_nonsystem_relation_kind;
 
-#if (defined(__EMSCRIPTEN__) || defined(__wasi__))
+#if (defined(__PGLITE__))
 bool quote_all_identifiers = false;
 #endif // WASM
 
