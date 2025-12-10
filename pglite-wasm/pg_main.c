@@ -313,17 +313,12 @@ main_post() {
      * variables installed by pg_perm_setlocale have force.
      */
     unsetenv("LC_ALL");
-}                               // main_post
+}// main_post
 
+void pgl_backend() {
 
-__attribute__ ((export_name("pgl_backend")))
-     void pgl_backend() {
-#if PGDEBUG
-    print_bits(sizeof(pgl_idb_status), &pgl_idb_status);
-#endif
     if (!(pgl_idb_status & IDB_CALLED)) {
         puts("# 336: initdb must be called before starting/resuming backend");
-        //abort();
     }
 
     if (async_restart) {
@@ -377,8 +372,6 @@ __attribute__ ((export_name("pgl_backend")))
 #endif
     setenv("PGUSER", PGUSER, 1);
 
-
-
     AsyncPostgresSingleUserMain(single_argc, single_argv, PGUSER, async_restart);
 
 
@@ -394,15 +387,9 @@ __attribute__ ((export_name("pgl_backend")))
         puts("# 403: initdb done, oid base too low but OID range will be set because IsPostmasterEnvironment");
 #endif
     }
-     }
+}
 
-#if defined(__PGLITE__)
-     EMSCRIPTEN_KEEPALIVE
-#else
-     __attribute__ ((export_name("pgl_initdb")))
-#endif
-     int pgl_initdb() {
-    PDEBUG("# 412: pg_initdb()");
+int pgl_initdb() {
     optind = 1;
     pgl_idb_status |= IDB_FAILED;
 
@@ -414,29 +401,15 @@ __attribute__ ((export_name("pgl_backend")))
 
             /* assume auth success for now */
             pgl_idb_status |= IDB_HASUSER;
-#if PGDEBUG
-            fprintf(stdout, "# 427: pg_initdb: db exists at : %s TODO: test for db name : %s \n", PGDATA, getenv("PGDATABASE"));
-#endif // PGDEBUG
 
             async_restart = 0;
             goto initdb_done;
         }
         chdir("/");
-#if PGDEBUG
-        fprintf(stderr, "# 435: pg_initdb no db found at : %s\n", PGDATA);
-#endif // PGDEBUG
-    } else {
-#if PGDEBUG
-        fprintf(stderr, "# 439: pg_initdb db folder not found at : %s\n", PGDATA);
-#endif // PGDEBUG
     }
 
     int initdb_rc = pgl_initdb_main();
 
-#if PGDEBUG
-    fprintf(stderr, "\n\n# 444: " __FILE__ "pgl_initdb_main = %d\n", initdb_rc);
-#endif // PGDEBUG
-    PDEBUG("# 448:" __FILE__);
     /* save stdin and use previous initdb output to feed boot mode */
     int saved_stdin = dup(STDIN_FILENO);
     {
@@ -459,52 +432,19 @@ __attribute__ ((export_name("pgl_backend")))
         optind = 1;
         BootstrapModeMain(boot_argc, boot_argv, false);
         fclose(stdin);
-#if PGDEBUG
-        puts("BOOT FILE:");
-        puts(IDB_PIPE_BOOT);
-#else
+
         remove(IDB_PIPE_BOOT);
-#endif
+
         // tdrz: I've commented this out!!!
         // stdin = fdopen(saved_stdin, "r");
 
         PDEBUG("# 479: initdb faking shutdown to complete WAL/OID states");
         pg_proc_exit(66);
     }
-
-    /* use previous initdb output to feed single mode */
-
-    /* or resume a previous db */
-    //IsPostmasterEnvironment = true;
-    if (TransamVariables->nextOid < ((Oid) FirstNormalObjectId)) {
-#if PGDEBUG
-        puts("# 482: warning oid base too low, will need to set OID range after initdb(bootstrap/single)");
-#endif
-    }
-/*
-    {
-#if PGDEBUG
-        fprintf(stdout, "\n\n\n# 483: restarting in single mode for initdb with user '%s' instead of %s\n", getenv("PGUSER"), PGUSER);
-#endif
-        char *single_argv[] = {
-            WASM_PREFIX "/bin/postgres",
-            "--single",
-            "-d", "1", "-B", "16", "-S", "512", "-f", "siobtnmh",
-            "-D", PGDATA,
-            "-F", "-O", "-j",
-            WASM_PGOPTS,
-            "template1",
-            NULL
-        };
-        int single_argc = sizeof(single_argv) / sizeof(char*) - 1;
-        optind = 1;
-        RePostgresSingleUserMain(single_argc, single_argv, WASM_USERNAME);
-PDEBUG("# 498: initdb faking shutdown to complete WAL/OID states in single mode");
-        async_restart = 1;
-    }
-*/
+    
     async_restart = 1;
-  initdb_done:;
+
+initdb_done:;
     pgl_idb_status |= IDB_CALLED;
 
     if (optind > 0) {
@@ -517,7 +457,7 @@ PDEBUG("# 498: initdb faking shutdown to complete WAL/OID states in single mode"
         // TODO raise js exception
     }
     return pgl_idb_status;
-}                          // pgl_initdb
+}
 
 
 
