@@ -12,6 +12,7 @@ PGLITE_CFLAGS="-D__PGLITE__"
 if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
+    # -sDYLINK_DEBUG=2
     PGLITE_CFLAGS="$PGLITE_CFLAGS -g -gsource-map --no-wasm-opt"
 else
     PGLITE_CFLAGS="$PGLITE_CFLAGS -O2"

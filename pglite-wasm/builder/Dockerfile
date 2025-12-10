@@ -22,7 +22,7 @@ WORKDIR /install/libs
 WORKDIR /src
 
 # ENV EMCC_COMMON_FLAGS="-fPIC -sWASM_BIGINT -sMIN_SAFARI_VERSION=150000 -O2 -m32 -D_FILE_OFFSET_BITS=64 -sSUPPORT_LONGJMP=emscripten -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn"
-ENV EMCC_COMMON_FLAGS="-O2 -fPIC"
+ENV EMCC_COMMON_FLAGS="-O2 -fPIC -sWASM_BIGINT"
 
 WORKDIR /src
 RUN curl -L https://www.zlib.net/zlib-1.3.1.tar.gz | tar -xz
@@ -52,7 +52,7 @@ RUN ${LLVM_NM} /install/libs/lib/libxslt.a | awk '$2 ~ /^[TDB]$/ {print $3}' | s
 WORKDIR /src
 RUN curl -L https://github.com/openssl/openssl/releases/download/openssl-3.0.17/openssl-3.0.17.tar.gz | tar xz
 WORKDIR /src/openssl-3.0.17
-RUN emconfigure ./Configure no-tests no-threads no-shared linux-generic64 --prefix=/install/libs
+RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./config no-sse2 no-hw no-asm no-tests no-threads no-shared linux-generic32 --prefix=/install/libs
 RUN sed -i 's|^CROSS_COMPILE.*$|CROSS_COMPILE=|g' Makefile # see https://github.com/emscripten-core/emscripten/issues/19597#issue-1754476454
 RUN emmake make -j && emmake make install_sw install_ssldirs
 # extract exported symbols - useful for passing them to emscripten as EXPORTED_FUNCTIONS 

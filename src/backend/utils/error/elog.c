@@ -506,6 +506,9 @@ errfinish(const char *filename, int lineno, const char *funcname)
 		matches_backtrace_functions(edata->funcname))
 		set_backtrace(edata, 2);
 
+	#if defined(__PGLITE__)
+	# warning "FIXME: error levels"
+	#else		
 	/*
 	 * Call any context callback functions.  Errors occurring in callback
 	 * functions will be treated as recursive errors --- this ensures we will
@@ -515,7 +518,8 @@ errfinish(const char *filename, int lineno, const char *funcname)
 		 econtext != NULL;
 		 econtext = econtext->previous)
 		econtext->callback(econtext->arg);
-
+		
+	#endif
 	/*
 	 * If ERROR (not more nor less) we pass it off to the current handler.
 	 * Printing it and popping the stack is the responsibility of the handler.
