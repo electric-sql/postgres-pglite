@@ -9,7 +9,7 @@ INSTALL_FOLDER=${INSTALL_FOLDER:-"/install/pglite"}
 
 # build with optimizations by default aka release
 # PGLITE_CFLAGS="-sDYLINK_DEBUG=2 -g -gsource-map --no-wasm-opt -Wbad-function-cast -Wcast-function-type"
-PGLITE_CFLAGS="-sDYLINK_DEBUG=2 -O2"
+PGLITE_CFLAGS="-sDYLINK_DEBUG=2 --emit-symbol-map -O2"
 # if [ "$DEBUG" = true ]
 # then
 #     echo "pglite: building debug version."
@@ -40,7 +40,7 @@ else
 fi
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,wasmTable"
 PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
@@ -83,7 +83,7 @@ emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist || { echo 'error: ma
 PATH=$SAVE_PATH
 
 # Step 5: make and install pglite
-EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction"
+EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,wasmTable"
 PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
