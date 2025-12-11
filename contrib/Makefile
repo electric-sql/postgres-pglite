@@ -57,7 +57,7 @@ else
 ALWAYS_SUBDIRS += pgcrypto sslinfo
 endif
 
-ifeq ($(PORTNAME), emscripten)
+ifeq ($(PGLITE_WITH_PGCRYPTO), 1)
 SUBDIRS += pgcrypto
 endif
 
