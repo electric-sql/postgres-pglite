@@ -6,6 +6,7 @@ appendStringInfoString
 atexit
 atoi
 bind
+BuildTupleFromCStrings
 calloc
 chmod
 clearerr
@@ -18,7 +19,14 @@ cstring_to_text
 cstring_to_text_with_len
 deconstruct_array_builtin
 downcase_truncate_identifier
+end_MultiFuncCall
 enlargeStringInfo
+errcode
+errfinish
+errmsg
+errmsg_internal
+errstart
+errstart_cold
 fclose
 fcntl
 fdopen
@@ -53,6 +61,8 @@ getsockopt
 gettimeofday
 getuid
 gmtime
+HeapTupleHeaderGetDatum
+init_MultiFuncCall
 initStringInfo
 interactive_one
 ioctl
@@ -67,6 +77,8 @@ memchr
 memcmp
 memcpy
 memmove
+MemoryContextAlloc
+MemoryContextAllocZero
 memset
 mlock
 mmap
@@ -79,6 +91,7 @@ opendir
 openlog
 palloc
 palloc0
+per_MultiFuncCall
 perror
 pfree
 pg_any_to_server
@@ -92,6 +105,7 @@ pg_vsnprintf
 pgl_backend
 pgl_initdb
 pgl_shutdown
+ProcessInterrupts
 pstrdup
 puts
 qsort
@@ -148,6 +162,7 @@ text_to_cstring
 text_to_cstring_buffer
 time
 tolower
+TupleDescGetAttInMetadata
 usleep
 vfprintf
 vsnprintf
