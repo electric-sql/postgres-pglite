@@ -9,7 +9,7 @@ INSTALL_FOLDER=${INSTALL_FOLDER:-"/install/pglite"}
 
 # build with optimizations by default aka release
 # PGLITE_CFLAGS="-sDYLINK_DEBUG=2 -g -gsource-map --no-wasm-opt -Wbad-function-cast -Wcast-function-type"
-PGLITE_CFLAGS="-sDYLINK_DEBUG=2 --emit-symbol-map -O2"
+PGLITE_CFLAGS="--emit-symbol-map -O2"
 # if [ "$DEBUG" = true ]
 # then
 #     echo "pglite: building debug version."
