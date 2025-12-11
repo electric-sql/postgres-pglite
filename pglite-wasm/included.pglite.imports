@@ -19,6 +19,7 @@ cstring_to_text
 cstring_to_text_with_len
 deconstruct_array_builtin
 downcase_truncate_identifier
+dtoi2
 end_MultiFuncCall
 enlargeStringInfo
 errcode
@@ -121,6 +122,7 @@ ResourceOwnerForget
 ResourceOwnerRemember
 searchstoplist
 select
+SendSharedInvalidMessages
 sendto
 set_read_write_cbs
 setbuf
