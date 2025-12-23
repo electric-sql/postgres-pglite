@@ -1,4 +1,3 @@
-# Packages other extensions into individual tar.gz archives
 
 top_builddir = ..
 include $(top_builddir)/src/Makefile.global
@@ -7,7 +6,8 @@ SUBDIRS = \
 		pg_ivm \
 		vector \
 		pgtap \
-		pg_uuidv7
+		pg_uuidv7 \
+		age
 
 prefix ?= /install/pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build

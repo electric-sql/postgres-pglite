@@ -31,3 +31,8 @@ strcmp
 strftime
 strlen
 strtoul
+post_parse_analyze_hook
+set_rel_pathlist_hook
+ProcessUtility_hook
+RegisterExtensibleNodeMethods
+object_access_hook
