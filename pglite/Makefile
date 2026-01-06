@@ -14,6 +14,7 @@ SUBDIRS = \
 prefix ?= /install/pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build
 ARCHIVE_DIR := /install/pglite/extensions
+POSTGIS_ARCHIVE_DIR := /install/pglite/extensions/postgis
 
 EXTENSIONS := $(SUBDIRS)
 
@@ -31,7 +32,10 @@ dist: $(addsuffix .tar.gz,$(EXTENSIONS))
 	cd $(EXTENSIONS_BUILD_ROOT)/$*/$(prefix) && \
 	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
 	tar -czf $(ARCHIVE_DIR)/$*.tar.gz $$files
-# 	tar -C $(EXTENSIONS_BUILD_ROOT)/$*/$(prefix) -czf $(ARCHIVE_DIR)/$*.tar.gz .
+
+dist-postgis:
+	@echo "=== Moving postgis ==="
+	mkdir -p $(POSTGIS_ARCHIVE_DIR) && mv $(ARCHIVE_DIR)/postgis.tar.gz $(POSTGIS_ARCHIVE_DIR)
 
 .PHONY: dist
 
