@@ -49,7 +49,9 @@ WORKDIR /src
 RUN tar -xvf libxslt-v1.1.43.tar.gz
 WORKDIR /src/libxslt-v1.1.43
 RUN ./autogen.sh --with-python=no
-RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --enable-shared=no --enable-static=yes --with-python=no --prefix=/install/libs --with-libxml-src=/src/libxml2-v2.14.5/ --with-pic=yes
+RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" \
+emconfigure ./configure \
+--enable-shared=no --enable-static=yes --with-python=no --prefix=/install/libs --with-libxml-src=/src/libxml2-v2.14.5/ --with-pic=yes
 RUN emmake make -j && emmake make install
 # extract exported symbols - useful for passing them to emscripten as EXPORTED_FUNCTIONS 
 RUN ${LLVM_NM} /install/libs/lib/libxslt.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libxslt.exports
@@ -75,17 +77,26 @@ WORKDIR /install/libs/lib
 RUN ln -s libuuid.a libossp-uuid.a # contrib extensions use -lossp-uuid
 RUN ${LLVM_NM} /install/libs/lib/libossp-uuid.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libossp-uuid.exports
 
+# for postgis
 WORKDIR /src
 RUN git clone --depth 1 --single-branch --branch=json-c-0.18-20240915 https://github.com/json-c/json-c.git
 WORKDIR /src/json-c/build
-RUN emcmake cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_BUILD_TYPE=release -DENABLE_THREADING=OFF -DBUILD_SHARED_LIBS=OFF -DDISABLE_EXTRA_LIBS=ON -DCMAKE_INSTALL_PREFIX=/install/libs ..
+RUN emcmake cmake \
+-DCMAKE_BUILD_TYPE=Release \
+-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+-DCMAKE_INSTALL_PREFIX=/install/libs \
+-DENABLE_THREADING=OFF -DBUILD_SHARED_LIBS=OFF -DDISABLE_EXTRA_LIBS=ON -DBUILD_APPS=OFF -DBUILD_TESTING=OFF ..
 RUN cmake --build . -j && cmake --build . --target install
 RUN ${LLVM_NM} /install/libs/lib/libjson-c.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libjson-c.exports
 
 WORKDIR /src
 RUN git clone --depth 1 --single-branch --branch=v1.24 https://github.com/ebiggers/libdeflate.git
 WORKDIR /src/libdeflate/build
-RUN emcmake cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/install/libs -DLIBDEFLATE_BUILD_SHARED_LIB=OFF -DLIBDEFLATE_BUILD_TESTS=OFF ..
+RUN emcmake cmake \
+-DCMAKE_BUILD_TYPE=Release \
+-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+-DCMAKE_INSTALL_PREFIX=/install/libs \
+-DLIBDEFLATE_BUILD_SHARED_LIB=OFF -DLIBDEFLATE_BUILD_TESTS=OFF ..
 RUN cmake --build . -j && cmake --build . --target install
 RUN ${LLVM_NM} /install/libs/lib/libdeflate.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libdeflate.exports
 
@@ -94,7 +105,13 @@ WORKDIR /src
 RUN tar -xvf libtiff-v4.7.1.tar.gz
 WORKDIR /src/libtiff-v4.7.1
 RUN ./autogen.sh
-RUN emconfigure ./configure --with-pic --disable-webp --disable-zstd --disable-lzma --disable-jbig --disable-old-jpeg --disable-jpeg --disable-pixarlog --disable-mdi --disable-opengl --disable-win32-io --with-zlib-include-dir=/install/libs/include --with-zlib-lib-dir=/install/libs/lib --with-libdeflate-include-dir=/install/libs/include --with-libdeflate-lib-dir=/install/libs/lib/ --prefix=/install/libs --enable-shared=no
+# we're disabling jpeg here but gdal uses jpeg (internal build if not specified - so it would make sense to enable it here as well)
+RUN emconfigure ./configure \
+--with-pic --disable-webp --disable-zstd --disable-lzma --disable-jbig --disable-old-jpeg \
+--disable-jpeg --disable-pixarlog --disable-mdi --disable-opengl --disable-win32-io \
+--with-zlib-include-dir=/install/libs/include --with-zlib-lib-dir=/install/libs/lib \
+--with-libdeflate-include-dir=/install/libs/include --with-libdeflate-lib-dir=/install/libs/lib/ \
+--prefix=/install/libs --enable-shared=no
 RUN emmake make -j && emmake make install
 RUN ${LLVM_NM} /install/libs/lib/libtiff.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libtiff.exports
 
@@ -112,7 +129,15 @@ WORKDIR /src
 # RUN curl -L https://download.osgeo.org/proj/proj-9.7.0.tar.gz | tar xz
 RUN tar -xvf proj-9.7.0.tar.gz
 WORKDIR /src/proj-9.7.0
-RUN emcmake cmake -DEMBED_RESOURCE_FILES=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX:PATH=/install/libs -DSQLite3_INCLUDE_DIR=/install/libs/include/ -DSQLite3_LIBRARY=/install/libs/lib/libsqlite3.a -DTIFF_LIBRARY=/install/libs/lib/libtiff.a -DTIFF_INCLUDE_DIR=/install/libs/include/ -DENABLE_CURL=OFF -DBUILD_APPS=OFF -DBUILD_TESTING=OFF -DEXE_SQLITE3=/tmp/sqlite3
+RUN emcmake cmake \
+-DCMAKE_BUILD_TYPE=Release \
+-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+-DCMAKE_INSTALL_PREFIX:PATH=/install/libs \
+-DEMBED_RESOURCE_FILES=OFF \
+-DBUILD_SHARED_LIBS=OFF \
+-DSQLite3_INCLUDE_DIR=/install/libs/include/ -DSQLite3_LIBRARY=/install/libs/lib/libsqlite3.a -DEXE_SQLITE3=/tmp/sqlite3 \
+-DTIFF_LIBRARY=/install/libs/lib/libtiff.a -DTIFF_INCLUDE_DIR=/install/libs/include/ \
+-DENABLE_CURL=OFF -DBUILD_APPS=OFF -DBUILD_TESTING=OFF
 RUN cmake --build . -j && cmake --build . --target install
 RUN ${LLVM_NM} /install/libs/lib/libproj.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libproj.exports
 
@@ -120,7 +145,11 @@ WORKDIR /src
 # RUN curl -L https://download.osgeo.org/geos/geos-3.14.0.tar.bz2 | tar xz
 RUN tar -xvf geos-3.14.0.tar.bz2
 WORKDIR /src/geos-3.14.0/build
-RUN emcmake cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/install/libs -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DBUILD_GEOSOP=OFF ..
+RUN emcmake cmake \
+-DCMAKE_BUILD_TYPE=Release \
+-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+-DCMAKE_INSTALL_PREFIX=/install/libs \
+-DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DBUILD_GEOSOP=OFF ..
 RUN emmake make -j && emmake make install
 RUN ${LLVM_NM} /install/libs/lib/libgeos.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgeos.exports
 
@@ -130,14 +159,21 @@ RUN tar -xvf gdal-3.11.4.tar.gz
 WORKDIR /src/gdal-3.11.4/build
 # Docs: https://gdal.org/en/stable/development/building_from_source.html
 RUN emcmake cmake \
+-DCMAKE_BUILD_TYPE=Release \
+-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+-DCMAKE_INSTALL_PREFIX=/install/libs \
 -DLIBXML2_INCLUDE_DIR=/install/libs/include/libxml2 -DLIBXML2_LIBRARY=/install/libs/lib/libxml2.a \
+-DGEOS_INCLUDE_DIR=/install/libs/include/geos -DGEOS_LIBRARY=/install/libs/lib/libgeos.a \
+-DTIFF_INCLUDE_DIR=/install/libs/include/ -DTIFF_LIBRARY=/install/libs/lib/libtiff.a \
+-DSQLite3_INCLUDE_DIR=/install/libs/include/ -DSQLite3_LIBRARY=/install/libs/lib/libsqlite3.a -DEXE_SQLITE3=/tmp/sqlite3 \
 -DZLIB_LIBRARY=/install/libs/lib/libz.a -DZLIB_INCLUDE_DIR=/install/libs/include \
 -DOPENSSL_ROOT_DIR=/install/libs \
 -DPROJ_LIBRARY=/install/libs/lib/libproj.a -DPROJ_INCLUDE_DIR=/install/libs/include/ \
 -DJSONC_LIBRARY=/install/libs/lib/libjson-c.a -DJSONC_INCLUDE_DIR=/install/libs/include/json-c -DGDAL_USE_JSONC=ON -DGDAL_USE_JSONC_INTERNAL=OFF \
--DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_APPS=OFF -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
+-DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
 -DGDAL_USE_HDFS=OFF \
--DCMAKE_INSTALL_PREFIX=/install/libs ..
+-DACCEPT_MISSING_SQLITE3_MUTEX_ALLOC:BOOL=ON \
+..
 
 RUN cmake --build . -j && cmake --build . --target install
 RUN ${LLVM_NM} /install/libs/lib/libgdal.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgdal.exports
