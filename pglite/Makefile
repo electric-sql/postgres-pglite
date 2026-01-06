@@ -8,7 +8,6 @@ SUBDIRS = \
 		vector \
 		pgtap \
 		pg_uuidv7 \
-		postgis	\
 		pg_hashids
 
 prefix ?= /install/pglite
@@ -17,6 +16,7 @@ ARCHIVE_DIR := /install/pglite/extensions
 POSTGIS_ARCHIVE_DIR := /install/pglite/extensions/postgis
 
 EXTENSIONS := $(SUBDIRS)
+EXTENSIONS += postgis
 
 # Default target: build tarballs for all contribs
 dist: $(addsuffix .tar.gz,$(EXTENSIONS))
