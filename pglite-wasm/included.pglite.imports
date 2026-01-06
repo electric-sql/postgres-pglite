@@ -191,6 +191,7 @@ atan
 atan2
 atan2l
 atanh
+atexit
 atof
 atoi
 BlessTupleDesc
@@ -219,6 +220,7 @@ CurrentMemoryContext
 datumCopy
 DecodeDateTime
 deconstruct_array
+deconstruct_array_builtin
 DecrTupleDescRefCount
 DirectFunctionCall1Coll
 DirectFunctionCall2Coll
@@ -230,6 +232,7 @@ dlclose
 dlerror
 dlopen
 dlsym
+downcase_truncate_identifier
 dup
 EncodeDateOnly
 EncodeDateTime
@@ -237,6 +240,7 @@ EncodeSpecialDate
 EncodeSpecialTimestamp
 EncodeTimeOnly
 end_MultiFuncCall
+enlargeStringInfo
 errcode
 errdetail
 errfinish
@@ -284,6 +288,8 @@ ftell
 ftello
 ftruncate
 fwrite
+gai_strerror
+gen_random_uuid
 get_attnum
 get_attstatsslot
 get_call_result_type
@@ -305,9 +311,11 @@ getBaseType
 getc
 getcwd
 GetDatabaseEncoding
+getegid
 getentropy
 getenv
 geteuid
+getgid
 GetMemoryChunkContext
 getmissingattr
 getpid
@@ -315,6 +323,7 @@ GetSysCacheOid
 getTempRet0
 gettimeofday
 getTypeOutputInfo
+getuid
 getwc
 gmtime
 hash_bytes
@@ -419,15 +428,20 @@ palloc0
 ParseDateTime
 pathconf
 per_MultiFuncCall
+perror
 pfree
+pg_any_to_server
 pg_detoast_datum
 pg_detoast_datum_copy
 pg_detoast_datum_packed
 pg_detoast_datum_slice
 pg_do_encoding_conversion
+pg_is_ascii
 pg_qsort
 pg_snprintf
 pg_sprintf
+pg_strcasecmp
+pg_strong_random
 pg_vsnprintf
 pgl_backend
 pgl_initdb
@@ -491,6 +505,9 @@ remove
 remquo
 rename
 repalloc
+ResourceOwnerEnlarge
+ResourceOwnerForget
+ResourceOwnerRemember
 rmdir
 round
 roundf
@@ -540,9 +557,12 @@ strcmp
 strcoll_l
 strcpy
 strcspn
+strdup
+strerror
 strerror_r
 strftime
 strftime_l
+strlcpy
 strlen
 strncasecmp
 strncat
@@ -577,6 +597,7 @@ tan
 tanh
 text_left
 text_to_cstring
+text_to_cstring_buffer
 time
 timestamp2tm
 tm2timestamp

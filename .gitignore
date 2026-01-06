@@ -58,3 +58,5 @@ pglite.html
 *.defs.txt
 *.undef.txt
 excluded.pglite.exports
+pglite-wasm/excluded.imports
+*.symbols

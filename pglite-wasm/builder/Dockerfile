@@ -22,7 +22,7 @@ WORKDIR /install/libs
 WORKDIR /src
 
 # ENV EMCC_COMMON_FLAGS="-fPIC -sWASM_BIGINT -sMIN_SAFARI_VERSION=150000 -O2 -m32 -D_FILE_OFFSET_BITS=64 -sSUPPORT_LONGJMP=emscripten -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn"
-ENV EMCC_COMMON_FLAGS="-O2 -fPIC"
+ENV EMCC_COMMON_FLAGS="-O2 -fPIC -sWASM_BIGINT"
 
 COPY ./prebuilts/ /src/
 
@@ -60,15 +60,16 @@ WORKDIR /src
 # RUN curl -L https://github.com/openssl/openssl/releases/download/openssl-3.0.17/openssl-3.0.17.tar.gz | tar xz
 RUN tar -xvf openssl-3.0.17.tar.gz
 WORKDIR /src/openssl-3.0.17
-RUN emconfigure ./Configure no-tests no-threads linux-generic64 --prefix=/install/libs
+RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./config no-sse2 no-hw no-asm no-tests no-threads no-shared linux-generic32 --prefix=/install/libs
 RUN sed -i 's|^CROSS_COMPILE.*$|CROSS_COMPILE=|g' Makefile # see https://github.com/emscripten-core/emscripten/issues/19597#issue-1754476454
 RUN emmake make -j && emmake make install_sw install_ssldirs
 # extract exported symbols - useful for passing them to emscripten as EXPORTED_FUNCTIONS 
 RUN ${LLVM_NM} /install/libs/lib/libssl.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libssl.exports
+RUN ${LLVM_NM} /install/libs/lib/libcrypto.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libcrypto.exports
 
 WORKDIR /src
-RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
-# COPY . .
+# RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
+# COPY ./prebuilts/uuid-1.6.2.tar.gz .
 RUN tar xvf uuid-1.6.2.tar.gz
 WORKDIR /src/uuid-1.6.2
 RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --build=aarch64-unknown-linux-gnu --enable-shared=no --enable-static=yes --with-perl=no --with-perl-compat=no --prefix=/install/libs --with-php=no --with-pic=yes
