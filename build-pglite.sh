@@ -78,8 +78,8 @@ emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make P
 # Step 4: make and dist other extensions
 SAVE_PATH=$PATH
 PATH=$PATH:$INSTALL_FOLDER/bin
-# postgis - special case
 emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite || { echo 'error: emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 41; }
+# postgis - special case
 cd ./pglite/ && ./build-postgis.sh && cd ../
 emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist ' ; exit 42; }
 emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist-postgis' ; exit 43; }
