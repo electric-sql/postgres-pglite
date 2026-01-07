@@ -16,6 +16,7 @@ ARCHIVE_DIR := /install/pglite/extensions
 POSTGIS_ARCHIVE_DIR := /install/pglite/extensions/postgis
 
 EXTENSIONS := $(SUBDIRS)
+EXTENSIONS += postgis
 
 # Default target: build tarballs for all contribs
 dist: $(addsuffix .tar.gz,$(EXTENSIONS))
@@ -33,15 +34,6 @@ dist: $(addsuffix .tar.gz,$(EXTENSIONS))
 	tar -czf $(ARCHIVE_DIR)/$*.tar.gz $$files
 
 dist-postgis:
-	@echo "=== Staging postgis ==="
-	# rm -rf $(EXTENSIONS_BUILD_ROOT)/postgis
-	bash -c 'mkdir -p $(EXTENSIONS_BUILD_ROOT)/postgis/$(prefix)/{bin,lib,share/extension,share/doc,share/postgresql/extension,share/postgresql/tsearch_data,include,share/postgresql/contrib/postgis-3.6}'
-	$(MAKE) -C postgis install DESTDIR=$(EXTENSIONS_BUILD_ROOT)/postgis
-	@echo "=== Packaging postgis ==="
-	mkdir -p $(ARCHIVE_DIR)
-	cd $(EXTENSIONS_BUILD_ROOT)/postgis/$(prefix) && \
-	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
-	tar -czf $(ARCHIVE_DIR)/postgis.tar.gz $$files
 	@echo "=== Moving postgis ==="
 	mkdir -p $(POSTGIS_ARCHIVE_DIR) && mv $(ARCHIVE_DIR)/postgis.tar.gz $(POSTGIS_ARCHIVE_DIR)
 
