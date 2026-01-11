@@ -8,6 +8,7 @@ SUBDIRS = \
 		pgtap \
 		pg_uuidv7 \
 		age
+		pg_hashids
 
 prefix ?= /install/pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build

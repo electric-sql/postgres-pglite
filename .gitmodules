@@ -14,3 +14,6 @@
 	path = pglite/age
 	url = https://github.com/jpabbuehl/age.git
 	branch = feat/32bit-wasm-support
+[submodule "pglite/pg_hashids"]
+	path = pglite/pg_hashids
+	url = https://github.com/iCyberon/pg_hashids
