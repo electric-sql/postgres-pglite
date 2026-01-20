@@ -5,6 +5,7 @@
 #include <time.h>
 #include <pwd.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -144,7 +145,7 @@ static unsigned int next_shmid = 1;
 
 // shmget replacement
 int EMSCRIPTEN_KEEPALIVE
-shmget(key_t key, size_t size, int shmflg) {
+pgl_shmget(key_t key, size_t size, int shmflg) {
     ShmSegment *seg = shm_list;
 
     // Search for existing segment
@@ -187,7 +188,7 @@ shmget(key_t key, size_t size, int shmflg) {
 
 // shmat replacement
 void EMSCRIPTEN_KEEPALIVE
-*shmat(int shmid, const void *shmaddr, int shmflg) {
+*pgl_shmat(int shmid, const void *shmaddr, int shmflg) {
     ShmSegment *seg = shm_list;
 
     while (seg) {
@@ -203,7 +204,7 @@ void EMSCRIPTEN_KEEPALIVE
 
 // shmdt replacement
 int EMSCRIPTEN_KEEPALIVE
-shmdt(const void *shmaddr) {
+pgl_shmdt(const void *shmaddr) {
     ShmSegment *seg = shm_list;
 
     while (seg) {
@@ -219,7 +220,7 @@ shmdt(const void *shmaddr) {
 
 // shmctl replacement
 int EMSCRIPTEN_KEEPALIVE
-shmctl(int shmid, int cmd, struct shmid_ds *buf) {
+pgl_shmctl(int shmid, int cmd, struct shmid_ds *buf) {
     ShmSegment *seg = shm_list;
     ShmSegment *prev = NULL;
 
@@ -264,8 +265,79 @@ shmctl(int shmid, int cmd, struct shmid_ds *buf) {
  * Memory will be reclaimed when the WASM instance terminates.
  */
 int EMSCRIPTEN_KEEPALIVE
-munmap(void *addr, size_t length) {
+pgl_munmap(void *addr, size_t length) {
     (void)addr;
     (void)length;
+    // dummy
     return 0;
+}
+
+// read FROM JS
+// (i guess return number of bytes written)
+// ssize_t pgl_read(/* ignored */ int socket, void *buffer, size_t length,/* ignored */ int flags,/* ignored */ void *address,/* ignored */ socklen_t *address_len);
+//typedef ssize_t (*pgl_read_t)(/* ignored */ int socket, void *buffer, size_t length,/* ignored */ int flags,/* ignored */ void *address,/* ignored */ unsigned int *address_len);
+typedef ssize_t (*pgl_read_t)(void *buffer, size_t max_length);
+pgl_read_t pgl_read;
+
+// write TO JS
+// (i guess return number of bytes read)
+// ssize_t pgl_write(/* ignored */ int sockfd, const void *buf, size_t len, /* ignored */ int flags);
+// typedef ssize_t (*pgl_write_t)(/* ignored */ int sockfd, const void *buf, size_t len, /* ignored */ int flags);
+typedef ssize_t (*pgl_write_t)(void *buffer, size_t length);
+pgl_write_t pgl_write;
+
+void EMSCRIPTEN_KEEPALIVE
+pgl_set_rw_cbs(pgl_read_t read_cb, pgl_write_t write_cb) {
+    pgl_read = read_cb;
+    pgl_write = write_cb;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_fcntl(int __fd, int __cmd, ...) {
+	// dummy 
+	return 0;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_setsockopt(int __fd, int __level, int __optname,
+	const void *__optval, socklen_t __optlen) {
+	// dummy 
+	return 0;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_getsockopt(int __fd, int __level, int __optname,
+	void *__restrict __optval,
+	socklen_t *__restrict __optlen) {
+	// dummy 
+	return 0;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_getsockname(int __fd, struct sockaddr * __addr,
+	socklen_t *__restrict __len) {
+	// dummy 
+	return 0;
+}
+
+ssize_t EMSCRIPTEN_KEEPALIVE pgl_recv(int __fd, void *__buf, size_t __n, int __flags) {
+	ssize_t got = pgl_read(__buf, __n);
+	return got;
+}
+
+ssize_t EMSCRIPTEN_KEEPALIVE pgl_send(int __fd, const void *__buf, size_t __n, int __flags) {
+	ssize_t wrote = pgl_write(__buf, __n);
+	return wrote;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_connect(int socket, const struct sockaddr *address, socklen_t address_len) {
+	// dummy
+	return 0;
+}
+
+struct pollfd {
+    int   fd;         /* file descriptor */
+    short events;     /* requested events */
+	short revents;    /* returned events */
+};
+
+int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout) {
+    // dummy
+	return nfds;
 }

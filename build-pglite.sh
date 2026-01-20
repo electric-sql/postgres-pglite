@@ -34,7 +34,13 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -D__PGLITE__ \
 -Dsystem=pgl_system -Dpopen=pgl_popen -Dpclose=pgl_pclose \
 -Dgeteuid=pgl_geteuid -Dgetuid=pgl_getuid -Dgetpwuid=pgl_getpwuid \
--Dexit=pgl_exit"
+-Dexit=pgl_exit \
+-Dmunmap=pgl_munmap \
+-Dfcntl=pgl_fcntl \
+-Dsetsockopt=pgl_setsockopt -Dgetsockopt=pgl_getsockopt -Dgetsockname=pgl_getsockname \
+-Drecv=pgl_recv -Dsend=pgl_send -Dconnect=pgl_connect \
+-Dpoll=pgl_poll \
+-Dshmget=pgl_shmget -Dshmat=pgl_shmat -Dshmdt=pgl_shmdt -Dshmctl=pgl_shmctl"
 
 echo "pglite: PGLITE_CFLAGS=$PGLITE_CFLAGS"
 
