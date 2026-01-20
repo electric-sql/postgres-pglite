@@ -94,8 +94,20 @@ pgl_getpwuid(uid_t uid) {
     return &pw;
 }
 
+
+FILE* pgl_stdin = NULL;
+FILE* pgl_stdout = NULL;
+
 void EMSCRIPTEN_KEEPALIVE
 pgl_exit(int status) {
+    if (pgl_stdin != NULL) {
+        fclose(pgl_stdin);
+        pgl_stdin = NULL;
+    }
+    if (pgl_stdout != NULL) {
+        fclose(pgl_stdout);
+        pgl_stdout = NULL;
+    }
     optind = 1;
     exit(status);
 }
@@ -103,10 +115,12 @@ pgl_exit(int status) {
 FILE * EMSCRIPTEN_KEEPALIVE
 pgl_freopen(const char *pathname, const char *mode, int streamid) {
     if (streamid == 0) {
-        return freopen(pathname, mode, stdin);
+        pgl_stdin = freopen(pathname, mode, stdin);
+        return pgl_stdin;
     }
     if (streamid == 1) {
-        return freopen(pathname, mode, stdout);
+        pgl_stdout = freopen(pathname, mode, stdout);
+        return pgl_stdout;
     }
     if (streamid == 2) {
         return freopen(pathname, mode, stderr);
@@ -241,93 +255,17 @@ shmctl(int shmid, int cmd, struct shmid_ds *buf) {
     return -1;
 }
 
+// ========== MMAP/MUNMAP ==========
 
-// ========== DUP ============
-
-// int
-// dup(int fd) {
-//     fprintf(stderr, "dup %d\n", fd);
-//     return fd;
-// }
-// int
-// dup2(int old, int new) {
-//     fprintf(stderr, "dup2 %d %d\n", old, new);
-//     return -1;
-// }
-
-// typedef int (*pglite_pipe_t)(int fd[2]);
-// pglite_pipe_t pglite_pipe_fn = NULL;
-
-// void EMSCRIPTEN_KEEPALIVE
-// pgl_set_pipe_fn(pglite_pipe_t pipe_fn) {
-//     pglite_pipe_fn = pipe_fn;
-// }
-
-// int EMSCRIPTEN_KEEPALIVE
-// pgl_pipe(int fd[2]) {
-//     if (pglite_pipe_fn) {
-//         return pglite_pipe_fn(fd);
-//     }
-//     return pipe(fd);
-// }
-
-// typedef ssize_t (*pglite_write_t)(int fd, const void *buf, size_t count);
-// pglite_write_t pglite_write_fn = NULL;
-
-// ssize_t EMSCRIPTEN_KEEPALIVE
-// pgl_write(int fd, const void *buf, size_t count) {
-//     if (pglite_write_fn) {
-//         return pglite_write_fn(fd, buf, count);
-//     }
-//     return write(fd, buf, count);
-// }
-
-// pglite_write_t EMSCRIPTEN_KEEPALIVE
-// pgl_set_write_fn(pglite_write_t fn) {
-//     pglite_write_t prev = pglite_write_fn;
-//     pglite_write_fn = fn;
-//     return prev;
-// }
-
-// typedef ssize_t (*pglite_read_t)(int fd, const void *buf, size_t count);
-// pglite_read_t pglite_read_fn = NULL;
-
-// ssize_t EMSCRIPTEN_KEEPALIVE
-// pgl_read(int fd, void *buf, size_t count) {
-//     if (pglite_read_fn) {
-//         return pglite_read_fn(fd, buf, count);
-//     }
-//     return read(fd, buf, count);
-// }
-
-// pglite_read_t EMSCRIPTEN_KEEPALIVE
-// pgl_set_read_fn(pglite_read_t fn) {
-//     pglite_read_t prev = pglite_read_fn;
-//     pglite_read_fn = fn;
-//     return prev;
-// }
-
-// #define PGL_ERR_NO_ERROR    0
-// #define PGL_ERR_NOT_HANDLED 1
-
-// static int pgl_errno = PGL_ERR_NO_ERROR;
-
-// int EMSCRIPTEN_KEEPALIVE
-// pgl_set_errno(int x) {
-//     int curr = pgl_errno;
-//     pgl_errno = x;
-//     return curr;
-// }
-
-// char cwd[256];
-
-// const char* EMSCRIPTEN_KEEPALIVE
-// pgl_getcwd() {
-//     char *ptr = getcwd(cwd, 256);
-//     return ptr;
-// }
-
-// int EMSCRIPTEN_KEEPALIVE
-// pgl_chdir(const char *path) {
-//     return chdir(path);
-// }
+/*
+ * Dummy munmap implementation for emscripten.
+ * Emscripten's munmap can corrupt unrelated files in MEMFS,
+ * so we just return success without doing anything.
+ * Memory will be reclaimed when the WASM instance terminates.
+ */
+int EMSCRIPTEN_KEEPALIVE
+munmap(void *addr, size_t length) {
+    (void)addr;
+    (void)length;
+    return 0;
+}

@@ -50,3 +50,4 @@ lib*.pc
 *.cjs
 *.wasm
 *.map
+dist
