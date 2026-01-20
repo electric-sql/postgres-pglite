@@ -12,8 +12,8 @@
 	url = https://github.com/fboulnois/pg_uuidv7/
 [submodule "pglite/age"]
 	path = pglite/age
-	url = https://github.com/jpabbuehl/age.git
-	branch = feat/32bit-wasm-support
+	url = https://github.com/apache/age.git
+	branch = master
 [submodule "pglite/pg_hashids"]
 	path = pglite/pg_hashids
 	url = https://github.com/iCyberon/pg_hashids
