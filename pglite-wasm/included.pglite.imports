@@ -135,6 +135,19 @@ pfree
 pg_any_to_server
 pg_do_encoding_conversion
 pg_is_ascii
+pg_lsn_cmp
+pg_lsn_eq
+pg_lsn_ge
+pg_lsn_gt
+pg_lsn_hash
+pg_lsn_in
+pg_lsn_le
+pg_lsn_lt
+pg_lsn_mi
+pg_lsn_ne
+pg_lsn_out
+pg_lsn_recv
+pg_lsn_send
 pg_strcasecmp
 pg_strong_random
 pgl_backend
@@ -191,3 +204,4 @@ tolower
 TTSOpsHeapTuple
 TTSOpsVirtual
 TupleDescGetAttInMetadata
+WalReceiverFunctions
