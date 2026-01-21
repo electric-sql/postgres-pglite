@@ -64,7 +64,8 @@
         "-c", "synchronous_commit=on",\
         "-c", "wal_buffers=4MB",\
         "-c", "min_wal_size=80MB",\
-        "-c", "shared_buffers=128MB"
+        "-c", "shared_buffers=128MB",\
+        "-c", "wal_level=logical"
 
 // we want client and server in the same lib for now.
 #if defined(PG_INITDB) && defined(PG_MAIN)
