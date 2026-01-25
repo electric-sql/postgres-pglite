@@ -7,7 +7,7 @@ SUBDIRS = \
 		vector \
 		pgtap \
 		pg_uuidv7 \
-		age
+		age \
 		pg_hashids
 
 prefix ?= /install/pglite
