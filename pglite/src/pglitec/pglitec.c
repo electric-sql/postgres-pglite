@@ -99,6 +99,30 @@ pgl_getpwuid(uid_t uid) {
 FILE* pgl_stdin = NULL;
 FILE* pgl_stdout = NULL;
 
+#define MAX_ATEXIT_FUNCS 32
+
+static void (*atexit_funcs[MAX_ATEXIT_FUNCS])(void);
+static int atexit_func_count = 0;
+
+int EMSCRIPTEN_KEEPALIVE pgl_atexit(void (*function)(void)) {
+    if (atexit_func_count >= MAX_ATEXIT_FUNCS) {
+        // According to the C standard, atexit returns nonzero on failure.
+        return -1;
+    }
+    atexit_funcs[atexit_func_count++] = function;
+    return 0;
+}
+
+static void pgl_run_atexit_funcs(void) {
+    // Call in reverse registration order
+    for (int i = atexit_func_count - 1; i >= 0; --i) {
+        if (atexit_funcs[i]) {
+            atexit_funcs[i]();
+        }
+    }
+    atexit_func_count = 0;
+}
+
 void EMSCRIPTEN_KEEPALIVE
 pgl_exit(int status) {
     if (pgl_stdin != NULL) {
@@ -110,6 +134,10 @@ pgl_exit(int status) {
         pgl_stdout = NULL;
     }
     optind = 1;
+    // status 99 is when we don't want to actually exit, so we DON'T run atexits
+    if (status != 99) {
+        pgl_run_atexit_funcs();
+    }
     exit(status);
 }
 

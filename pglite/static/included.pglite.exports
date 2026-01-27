@@ -1,4 +1,3 @@
-__funcs_on_exit
 close
 fclose
 fcntl
@@ -19,11 +18,14 @@ memcpy
 memset
 nanosleep
 open
+PostgresMainLoopOnce
 rand
 read
 readstoplist
 realloc
 searchstoplist
+pgl_setDoPGliteExit
+pgl_initPGlite
 socket
 srand
 strcmp

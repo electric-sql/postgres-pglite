@@ -35,6 +35,7 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Dsystem=pgl_system -Dpopen=pgl_popen -Dpclose=pgl_pclose \
 -Dgeteuid=pgl_geteuid -Dgetuid=pgl_getuid -Dgetpwuid=pgl_getpwuid \
 -Dexit=pgl_exit \
+-Datexit=pgl_atexit \
 -Dmunmap=pgl_munmap \
 -Dfcntl=pgl_fcntl \
 -Dsetsockopt=pgl_setsockopt -Dgetsockopt=pgl_getsockopt -Dgetsockname=pgl_getsockname \
