@@ -41,7 +41,11 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Dsetsockopt=pgl_setsockopt -Dgetsockopt=pgl_getsockopt -Dgetsockname=pgl_getsockname \
 -Drecv=pgl_recv -Dsend=pgl_send -Dconnect=pgl_connect \
 -Dpoll=pgl_poll \
--Dshmget=pgl_shmget -Dshmat=pgl_shmat -Dshmdt=pgl_shmdt -Dshmctl=pgl_shmctl"
+-Dshmget=pgl_shmget -Dshmat=pgl_shmat -Dshmdt=pgl_shmdt -Dshmctl=pgl_shmctl \
+-Dlongjmp=pgl_longjmp -Dsiglongjmp=pgl_siglongjmp"
+# we don't want to override sigsetjmp and setjmp!
+# -Dsigsetjmp=pgl_sigsetjmp -Dsiglongjmp=pgl_siglongjmp \
+# -Dsetjmp=pgl_setjmp -Dlongjmp=pgl_longjmp"
 
 echo "pglite: PGLITE_CFLAGS=$PGLITE_CFLAGS"
 

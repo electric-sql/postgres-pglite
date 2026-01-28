@@ -6,6 +6,8 @@
 #include <pwd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <setjmp.h>
+#include <string.h>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -368,4 +370,27 @@ struct pollfd {
 int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout) {
     // dummy
 	return nfds;
+}
+
+#define POSTGRES_MAIN_LONGJMP 100
+
+volatile sigjmp_buf	postgresmain_sigjmp_buf;
+volatile int is_pglite_active = 0;
+
+int pgl_setPGliteActive(int newValue) {
+	int current = is_pglite_active;
+	is_pglite_active = newValue;
+	return current;
+}
+
+void EMSCRIPTEN_KEEPALIVE pgl_longjmp(jmp_buf env, int val) {
+    if (is_pglite_active && memcmp(env, (void*)postgresmain_sigjmp_buf, sizeof(jmp_buf)) == 0) {
+        exit(POSTGRES_MAIN_LONGJMP);
+    }
+    longjmp(env, val);
+}
+
+// emscripten defines siglongjmp as longjmp
+void EMSCRIPTEN_KEEPALIVE pgl_siglongjmp(sigjmp_buf env, int val) {
+    pgl_longjmp(env, val);
 }

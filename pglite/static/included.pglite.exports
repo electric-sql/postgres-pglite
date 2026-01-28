@@ -18,14 +18,15 @@ memcpy
 memset
 nanosleep
 open
+pgl_initPGlite
+pgl_setPGliteActive
+PostgresMainLongJmp
 PostgresMainLoopOnce
 rand
 read
 readstoplist
 realloc
 searchstoplist
-pgl_setDoPGliteExit
-pgl_initPGlite
 socket
 srand
 strcmp
