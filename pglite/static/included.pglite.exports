@@ -18,7 +18,7 @@ memcpy
 memset
 nanosleep
 open
-pgl_initPGlite
+pgl_startPGlite
 pgl_setPGliteActive
 PostgresMainLongJmp
 PostgresMainLoopOnce

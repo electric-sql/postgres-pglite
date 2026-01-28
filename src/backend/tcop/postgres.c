@@ -234,7 +234,7 @@ void initDummyPort() {
 	MemoryContextSwitchTo(oldcontext);
 }
 
-void pgl_initPGlite() {
+void pgl_startPGlite() {
 	initDummyPort();
 	whereToSendOutput = DestRemote;
 }
