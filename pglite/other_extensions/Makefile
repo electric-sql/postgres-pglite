@@ -7,7 +7,8 @@ SUBDIRS = \
 		pg_ivm \
 		pgvector \
 		pgtap \
-		pg_uuidv7
+		pg_uuidv7 \
+		pg_hashids
 
 prefix ?= /pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build

@@ -13,3 +13,6 @@
 [submodule "pglite/other_extensions/pg_hashids"]
 	path = pglite/other_extensions/pg_hashids
 	url = https://github.com/iCyberon/pg_hashids
+[submodule "pglite/other_extensions/pgvector"]
+	path = pglite/other_extensions/pgvector
+	url = https://github.com/pgvector/pgvector.git
