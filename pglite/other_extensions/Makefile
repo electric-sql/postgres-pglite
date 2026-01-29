@@ -5,7 +5,7 @@ include $(top_builddir)/src/Makefile.global
 
 SUBDIRS = \
 		pg_ivm \
-		pgvector \
+		vector \
 		pgtap \
 		pg_uuidv7 \
 		pg_hashids
