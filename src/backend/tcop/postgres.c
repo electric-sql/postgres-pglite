@@ -237,6 +237,11 @@ void initDummyPort() {
 void pgl_startPGlite() {
 	initDummyPort();
 	whereToSendOutput = DestRemote;
+	// initdb execs postgres in single mode, which sets this to true
+    // and this doesn't play well with out our longjmp trick
+    // so set it to false
+    ExitOnAnyError = false;
+    MyBackendType = B_BACKEND;
 }
 
 #endif // ifdef __PGLITE__
@@ -4713,11 +4718,10 @@ void PostgresMainLoopOnce() {
 				 * scenarios.
 				 */
 				#ifdef __PGLITE__
-				if (is_pglite_active != 0) {
-					exit(PGLITE_EXIT_ALIVE);
-				}
-				#endif
+				exit(PGLITE_EXIT_ALIVE);
+				#else
 				proc_exit(0);
+				#endif
 
 			case PqMsg_CopyData:
 			case PqMsg_CopyDone:

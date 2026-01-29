@@ -132,12 +132,17 @@ pgl_exit(int status) {
         pgl_stdin = NULL;
     }
     if (pgl_stdout != NULL) {
+        fflush(pgl_stdout);
         fclose(pgl_stdout);
         pgl_stdout = NULL;
     }
     optind = 1;
-    // status 99 is when we don't want to actually exit, so we DON'T run atexits
-    if (status != 99) {
+    if (status == 99) {
+        // status 99 is when we don't want to actually exit, so we DON'T run atexits
+        // exit 0 to make the calling process happy
+        exit(0);
+    } else {
+        // this is not a pglite exit, so run atexits
         pgl_run_atexit_funcs();
     }
     exit(status);
@@ -376,6 +381,8 @@ int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout
 
 volatile sigjmp_buf	postgresmain_sigjmp_buf;
 volatile int is_pglite_active = 0;
+// extern bool ExitOnAnyError;
+// extern BackendType MyBackendType;
 
 int pgl_setPGliteActive(int newValue) {
 	int current = is_pglite_active;

@@ -10,9 +10,12 @@ cstring_to_text
 cstring_to_text_with_len
 deconstruct_array_builtin
 downcase_truncate_identifier
+emscripten_force_exit
 enlargeStringInfo
 errcode
+fclose
 fcntl
+fflush
 fopen
 free
 gai_strerror
@@ -28,7 +31,6 @@ gettimeofday
 getuid
 gmtime
 initStringInfo
-interactive_one
 ioctl
 isalnum
 isxdigit
@@ -53,9 +55,10 @@ pg_do_encoding_conversion
 pg_is_ascii
 pg_strcasecmp
 pg_strong_random
-pgl_backend
-pgl_initdb
-pgl_shutdown
+pgl_setPGliteActive
+pgl_startPGlite
+PostgresMainLongJmp
+PostgresMainLoopOnce
 pstrdup
 puts
 qsort
@@ -69,7 +72,6 @@ ResourceOwnerEnlarge
 ResourceOwnerForget
 ResourceOwnerRemember
 searchstoplist
-set_read_write_cbs
 socket
 srand
 sscanf
