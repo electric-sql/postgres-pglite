@@ -64,7 +64,15 @@ RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
 # COPY . .
 # RUN tar xvf uuid-1.6.2.tar.gz
 WORKDIR /src/uuid-1.6.2
-RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --build=aarch64-unknown-linux-gnu --enable-shared=no --enable-static=yes --with-perl=no --with-perl-compat=no --prefix=/install/libs --with-php=no --with-pic=yes
+RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" \
+emconfigure ./configure \
+  ac_cv_header_ifaddrs_h=no \
+  ac_cv_header_net_if_h=no \
+  ac_cv_header_net_if_dl_h=no \
+  ac_cv_header_net_if_arp_h=no \
+  ac_cv_header_sys_ioctl_h=no \
+  ac_cv_func_getifaddrs=no \
+  --build=wasm32-unknown-linux-gnu --enable-shared=no --enable-static=yes --with-perl=no --with-perl-compat=no --prefix=/install/libs --with-php=no --with-pic=yes
 RUN emmake make -j && emmake make install || true # install tries to strip the wasm, but it doesnt recognize the format, so ignore atm
 WORKDIR /install/libs/lib
 RUN ln -s libuuid.a libossp-uuid.a # contrib extensions use -lossp-uuid
