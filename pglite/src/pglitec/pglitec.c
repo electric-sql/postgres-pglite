@@ -16,6 +16,31 @@
 // TODO: an include for libpglite
 #endif
 
+#define POSTGRES_MAIN_LONGJMP 100
+
+volatile sigjmp_buf	postgresmain_sigjmp_buf;
+volatile int is_pglite_active = 0;
+// extern bool ExitOnAnyError;
+// extern BackendType MyBackendType;
+
+int pgl_setPGliteActive(int newValue) {
+	int current = is_pglite_active;
+	is_pglite_active = newValue;
+	return current;
+}
+
+void EMSCRIPTEN_KEEPALIVE pgl_longjmp(jmp_buf env, int val) {
+    if (is_pglite_active && memcmp(env, (void*)postgresmain_sigjmp_buf, sizeof(jmp_buf)) == 0) {
+        exit(POSTGRES_MAIN_LONGJMP);
+    }
+    longjmp(env, val);
+}
+
+// emscripten defines siglongjmp as longjmp
+void EMSCRIPTEN_KEEPALIVE pgl_siglongjmp(sigjmp_buf env, int val) {
+    pgl_longjmp(env, val);
+}
+
 typedef ssize_t (*pglite_system_t)(const char *command);
 pglite_system_t pglite_system = NULL;
 
@@ -101,29 +126,6 @@ pgl_getpwuid(uid_t uid) {
 FILE* pgl_stdin = NULL;
 FILE* pgl_stdout = NULL;
 
-#define MAX_ATEXIT_FUNCS 32
-
-static void (*atexit_funcs[MAX_ATEXIT_FUNCS])(void);
-static int atexit_func_count = 0;
-
-int EMSCRIPTEN_KEEPALIVE pgl_atexit(void (*function)(void)) {
-    if (atexit_func_count >= MAX_ATEXIT_FUNCS) {
-        // According to the C standard, atexit returns nonzero on failure.
-        return -1;
-    }
-    atexit_funcs[atexit_func_count++] = function;
-    return 0;
-}
-
-static void pgl_run_atexit_funcs(void) {
-    // Call in reverse registration order
-    for (int i = atexit_func_count - 1; i >= 0; --i) {
-        if (atexit_funcs[i]) {
-            atexit_funcs[i]();
-        }
-    }
-    atexit_func_count = 0;
-}
 
 void EMSCRIPTEN_KEEPALIVE
 pgl_exit(int status) {
@@ -137,14 +139,6 @@ pgl_exit(int status) {
         pgl_stdout = NULL;
     }
     optind = 1;
-    if (status == 99) {
-        // status 99 is when we don't want to actually exit, so we DON'T run atexits
-        // exit 0 to make the calling process happy
-        exit(0);
-    } else {
-        // this is not a pglite exit, so run atexits
-        pgl_run_atexit_funcs();
-    }
     exit(status);
 }
 
@@ -375,29 +369,4 @@ struct pollfd {
 int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout) {
     // dummy
 	return nfds;
-}
-
-#define POSTGRES_MAIN_LONGJMP 100
-
-volatile sigjmp_buf	postgresmain_sigjmp_buf;
-volatile int is_pglite_active = 0;
-// extern bool ExitOnAnyError;
-// extern BackendType MyBackendType;
-
-int pgl_setPGliteActive(int newValue) {
-	int current = is_pglite_active;
-	is_pglite_active = newValue;
-	return current;
-}
-
-void EMSCRIPTEN_KEEPALIVE pgl_longjmp(jmp_buf env, int val) {
-    if (is_pglite_active && memcmp(env, (void*)postgresmain_sigjmp_buf, sizeof(jmp_buf)) == 0) {
-        exit(POSTGRES_MAIN_LONGJMP);
-    }
-    longjmp(env, val);
-}
-
-// emscripten defines siglongjmp as longjmp
-void EMSCRIPTEN_KEEPALIVE pgl_siglongjmp(sigjmp_buf env, int val) {
-    pgl_longjmp(env, val);
 }

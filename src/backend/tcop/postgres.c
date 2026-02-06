@@ -4718,7 +4718,10 @@ void PostgresMainLoopOnce() {
 				 * scenarios.
 				 */
 				#ifdef __PGLITE__
-				exit(PGLITE_EXIT_ALIVE);
+				if (is_pglite_active != 0)
+					exit(PGLITE_EXIT_ALIVE);
+				else 
+					proc_exit(0);
 				#else
 				proc_exit(0);
 				#endif
