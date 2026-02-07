@@ -122,10 +122,32 @@ pgl_getpwuid(uid_t uid) {
     return &pw;
 }
 
+#define MAX_ATEXIT_FUNCS 32
+
+static void (*atexit_funcs[MAX_ATEXIT_FUNCS])(void);
+static int atexit_func_count = 0;
+
+int EMSCRIPTEN_KEEPALIVE pgl_atexit(void (*function)(void)) {
+    if (atexit_func_count >= MAX_ATEXIT_FUNCS) {
+        // According to the C standard, atexit returns nonzero on failure.
+        return -1;
+    }
+    atexit_funcs[atexit_func_count++] = function;
+    return 0;
+}
+
+void EMSCRIPTEN_KEEPALIVE pgl_run_atexit_funcs(void) {
+    // Call in reverse registration order
+    for (int i = atexit_func_count - 1; i >= 0; --i) {
+        if (atexit_funcs[i]) {
+            atexit_funcs[i]();
+        }
+    }
+    atexit_func_count = 0;
+}
 
 FILE* pgl_stdin = NULL;
 FILE* pgl_stdout = NULL;
-
 
 void EMSCRIPTEN_KEEPALIVE
 pgl_exit(int status) {

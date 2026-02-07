@@ -30,7 +30,6 @@ fi
 pushd pglite/src/pglitec && emcc $PGLITE_CFLAGS -static -fpic -o pglitec.o -c pglitec.c && popd
 
 # -Dread=pgl_read -Dwrite=pgl_write
-# -Datexit=pgl_atexit \
 PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -D__PGLITE__ \
 -Dsystem=pgl_system -Dpopen=pgl_popen -Dpclose=pgl_pclose \
@@ -38,6 +37,7 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Dexit=pgl_exit \
 -Dmunmap=pgl_munmap \
 -Dfcntl=pgl_fcntl \
+-Datexit=pgl_atexit \
 -Dsetsockopt=pgl_setsockopt -Dgetsockopt=pgl_getsockopt -Dgetsockname=pgl_getsockname \
 -Drecv=pgl_recv -Dsend=pgl_send -Dconnect=pgl_connect \
 -Dpoll=pgl_poll \
@@ -75,7 +75,7 @@ PGLITE_LDFLAGS_EX="\
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
 -sUSE_PTHREADS=0 \
--sEXIT_RUNTIME=0 -sENVIRONMENT=node,web,worker \
+-sEXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
 -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
