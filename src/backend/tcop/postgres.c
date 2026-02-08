@@ -244,6 +244,10 @@ void pgl_startPGlite() {
     MyBackendType = B_BACKEND;
 }
 
+void pgl_pq_flush() {
+	pq_flush();
+}
+
 #endif // ifdef __PGLITE__
 
 /* ----------------------------------------------------------------

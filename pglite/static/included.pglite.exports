@@ -55,6 +55,7 @@ pg_do_encoding_conversion
 pg_is_ascii
 pg_strcasecmp
 pg_strong_random
+pgl_pq_flush
 pgl_setPGliteActive
 pgl_startPGlite
 PostgresMainLongJmp
