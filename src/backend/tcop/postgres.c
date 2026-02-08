@@ -242,6 +242,7 @@ void pgl_startPGlite() {
     // so set it to false
     ExitOnAnyError = false;
     MyBackendType = B_BACKEND;
+	IsPostmasterEnvironment = true;
 }
 
 void pgl_pq_flush() {
