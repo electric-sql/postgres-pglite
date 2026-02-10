@@ -152,7 +152,11 @@ static bool DoingCommandRead = false;
  * the extended query protocol.
  */
 static bool doing_extended_query_message = false;
+#ifdef __PGLITE__
+extern bool ignore_till_sync;
+#else
 static bool ignore_till_sync = false;
+#endif
 
 /*
  * If an unnamed prepared statement exists, it's stored here.
@@ -200,7 +204,12 @@ static void disable_statement_timeout(void);
 
 
 /* these must be volatile to ensure state is preserved across longjmp: */
-static volatile bool send_ready_for_query = true;
+#ifdef __PGLITE__
+extern bool send_ready_for_query;
+#else
+bool send_ready_for_query = false;
+#endif
+
 static volatile bool idle_in_transaction_timeout_enabled = false;
 static volatile bool idle_session_timeout_enabled = false;
 
@@ -243,6 +252,7 @@ void pgl_startPGlite() {
     ExitOnAnyError = false;
     MyBackendType = B_BACKEND;
 	IsPostmasterEnvironment = true;
+	IsUnderPostmaster = true;
 }
 
 void pgl_pq_flush() {
@@ -4275,40 +4285,8 @@ PostgresSingleUserMain(int argc, char *argv[],
 	PostgresMain(dbname, username);
 }
 
-void PostgresMainLoopOnce() {
-
-		int			firstchar;
-		StringInfoData input_message;
-
-		/*
-		 * At top of loop, reset extended-query-message flag, so that any
-		 * errors encountered in "idle" state don't provoke skip.
-		 */
-		doing_extended_query_message = false;
-
-		/*
-		 * For valgrind reporting purposes, the "current query" begins here.
-		 */
-#ifdef USE_VALGRIND
-		old_valgrind_error_count = VALGRIND_COUNT_ERRORS;
-#endif
-
-		/*
-		 * Release storage left over from prior query cycle, and create a new
-		 * query input buffer in the cleared MessageContext.
-		 */
-		MemoryContextSwitchTo(MessageContext);
-		MemoryContextReset(MessageContext);
-
-		initStringInfo(&input_message);
-
-		/*
-		 * Also consider releasing our catalog snapshot if any, so that it's
-		 * not preventing advance of global xmin while we wait for the client.
-		 */
-		InvalidateCatalogSnapshotConditionally();
-
-		/*
+void PostgresSendReadyForQueryIfNecessary() {
+	/*
 		 * (1) If we've reached idle state, tell the frontend we're ready for
 		 * a new query.
 		 *
@@ -4413,6 +4391,42 @@ void PostgresMainLoopOnce() {
 			ReadyForQuery(whereToSendOutput);
 			send_ready_for_query = false;
 		}
+}
+
+void PostgresMainLoopOnce() {
+
+		int			firstchar;
+		StringInfoData input_message;
+
+		/*
+		 * At top of loop, reset extended-query-message flag, so that any
+		 * errors encountered in "idle" state don't provoke skip.
+		 */
+		doing_extended_query_message = false;
+
+		/*
+		 * For valgrind reporting purposes, the "current query" begins here.
+		 */
+#ifdef USE_VALGRIND
+		old_valgrind_error_count = VALGRIND_COUNT_ERRORS;
+#endif
+
+		/*
+		 * Release storage left over from prior query cycle, and create a new
+		 * query input buffer in the cleared MessageContext.
+		 */
+		MemoryContextSwitchTo(MessageContext);
+		MemoryContextReset(MessageContext);
+
+		initStringInfo(&input_message);
+
+		/*
+		 * Also consider releasing our catalog snapshot if any, so that it's
+		 * not preventing advance of global xmin while we wait for the client.
+		 */
+		InvalidateCatalogSnapshotConditionally();
+
+		PostgresSendReadyForQueryIfNecessary();
 
 		/*
 		 * (2) Allow asynchronous signals to be executed immediately if they

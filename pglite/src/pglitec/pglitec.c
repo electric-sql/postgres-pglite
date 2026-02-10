@@ -29,8 +29,14 @@ int pgl_setPGliteActive(int newValue) {
 	return current;
 }
 
+volatile bool ignore_till_sync = false;
+volatile bool send_ready_for_query = false;
+
 void EMSCRIPTEN_KEEPALIVE pgl_longjmp(jmp_buf env, int val) {
     if (is_pglite_active && memcmp(env, (void*)postgresmain_sigjmp_buf, sizeof(jmp_buf)) == 0) {
+        // reset this as it is expected
+        if (!ignore_till_sync)
+		    send_ready_for_query = true;	/* initially, or after error */
         exit(POSTGRES_MAIN_LONGJMP);
     }
     longjmp(env, val);

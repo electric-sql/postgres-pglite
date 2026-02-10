@@ -60,6 +60,7 @@ pgl_setPGliteActive
 pgl_startPGlite
 PostgresMainLongJmp
 PostgresMainLoopOnce
+PostgresSendReadyForQueryIfNecessary
 pstrdup
 puts
 qsort
