@@ -13,7 +13,7 @@
 [submodule "pglite/age"]
 	path = pglite/age
 	url = https://github.com/apache/age.git
-	branch = master
+	branch = PG17
 [submodule "pglite/pg_hashids"]
 	path = pglite/pg_hashids
 	url = https://github.com/iCyberon/pg_hashids
