@@ -253,10 +253,48 @@ void pgl_startPGlite() {
     MyBackendType = B_BACKEND;
 	IsPostmasterEnvironment = true;
 	IsUnderPostmaster = true;
+
+	if (!load_hba())
+	{
+		/*
+		 * It makes no sense to continue if we fail to load the HBA file,
+		 * since there is no way to connect to the database in this case.
+		 */
+		ereport(FATAL,
+		/* translator: %s is a configuration file */
+				(errmsg("could not load %s", HbaFileName)));
+	}
+
 }
 
 void pgl_pq_flush() {
 	pq_flush();
+}
+
+struct Port* pgl_getMyProcPort() {
+	return MyProcPort;
+}
+
+void pgl_sendConnData() {
+	ClientAuthInProgress = false;
+
+    {
+        StringInfoData buf;
+        pq_beginmessage(&buf, 'R');
+        pq_sendint32(&buf, (int32) AUTH_REQ_OK);
+        pq_endmessage(&buf);
+    }
+
+    BeginReportingGUCOptions();
+    pgstat_report_connect(MyDatabaseId);
+    {
+        StringInfoData buf;
+        pq_beginmessage(&buf, 'K');
+        pq_sendint32(&buf, (int32) MyProcPid);
+        pq_sendint32(&buf, (int32) MyCancelKey);
+        pq_endmessage(&buf);
+    }
+	ReadyForQuery(DestRemote);
 }
 
 #endif // ifdef __PGLITE__
