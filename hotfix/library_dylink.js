@@ -1047,7 +1047,10 @@ var LibraryDylink = {
     function getExports() {
 #if FILESYSTEM
       // lookup preloaded cache first
-      var preloaded = preloadedWasm[libName];
+      // Also try with .so suffix: pglite's extensionUtils.ts registers the module under the
+      // name with .so (so the wasm preload plugin's canHandle() fires), but PostgreSQL's
+      // dlopen() calls us with the name stripped of .so.
+      var preloaded = preloadedWasm[libName] || preloadedWasm[libName + '.so'];
 #if DYLINK_DEBUG
       dbg(`checking preloadedWasm: ${libName}: ${preloaded ? 'found' : 'not found'}`);
 #endif
