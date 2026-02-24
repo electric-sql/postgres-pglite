@@ -1,10 +1,48 @@
 #include <setjmp.h>
+#include <stdlib.h>
+#include <string.h>
 
 volatile int sf_connected = 0;
 FILE * single_mode_feed = NULL;
 volatile bool inloop = false;
 volatile sigjmp_buf local_sigjmp_buf;
 bool repl = false;
+
+#define PGLITE_POSTGRES_CONFIG_ENV "PGLITE_POSTGRES_CONFIG"
+
+static void
+ApplyPostgresConfigFromEnv(void)
+{
+	const char *raw = getenv(PGLITE_POSTGRES_CONFIG_ENV);
+	char	   *config_copy = NULL;
+	char	   *cursor = NULL;
+	char	   *entry = NULL;
+
+	if (raw == NULL || raw[0] == '\0')
+		return;
+
+	config_copy = strdup(raw);
+	if (config_copy == NULL)
+		return;
+
+	cursor = config_copy;
+	while ((entry = strsep(&cursor, ";")) != NULL)
+	{
+		char	   *eq = NULL;
+
+		if (entry[0] == '\0')
+			continue;
+
+		eq = strchr(entry, '=');
+		if (eq == NULL || eq == entry || eq[1] == '\0')
+			continue;
+
+		*eq = '\0';
+		SetConfigOption(entry, eq + 1, PGC_POSTMASTER, PGC_S_ARGV);
+	}
+
+	free(config_copy);
+}
 
 __attribute__((export_name("pgl_shutdown")))
 void
@@ -141,8 +179,9 @@ printf("# 123: RePostgresSingleUserMain progname=%s for %s feed=%s\n", progname,
     const char *dbname = NULL;
 
 
-    /* Parse command-line options. */
-    process_postgres_switches(single_argc, single_argv, PGC_POSTMASTER, &dbname);
+	/* Parse command-line options. */
+	process_postgres_switches(single_argc, single_argv, PGC_POSTMASTER, &dbname);
+	ApplyPostgresConfigFromEnv();
 #if PGDEBUG
 printf("# 134: dbname=%s\n", dbname);
 #endif
@@ -269,7 +308,8 @@ PDEBUG("# 254:"__FILE__);
 	InitializeGUCOptions();
 PDEBUG("# 257:"__FILE__);
 // if (!async_restart)	/* Parse command-line options. */
-	process_postgres_switches(argc, argv, PGC_POSTMASTER, &dbname);
+		process_postgres_switches(argc, argv, PGC_POSTMASTER, &dbname);
+		ApplyPostgresConfigFromEnv();
 
 
 PDEBUG("# 260:"__FILE__);
@@ -434,5 +474,4 @@ PDEBUG("# 167");
 	initStringInfo(&row_description_buf);
 	MemoryContextSwitchTo(TopMemoryContext);
 } // AsyncPostgresSingleUserMain
-
 
