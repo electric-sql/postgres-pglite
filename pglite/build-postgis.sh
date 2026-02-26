@@ -14,7 +14,7 @@ emmake make raster-sql || true
 # these flags are used in pgxs.mk (postgresql extension makefile) and passed to the build process of that extension
 emmake make LDFLAGS_SL="-sWASM_BIGINT -sSIDE_MODULE=1 -fexceptions -Wl,--whole-archive -lstdc++ -lsqlite3 -lgeos -Wl,--no-whole-archive" \
 CFLAGS_SL="-fexceptions -sWASM_BIGINT" \
-CXXFLAGS_SL="-fexceptions -sWASM_BIGINT" -j || { echo 'emmake make postgis failed' ; exit 442; }
+CXXFLAGS_SL="-fexceptions -sWASM_BIGINT" -j1 || { echo 'emmake make postgis failed' ; exit 442; }
 # emmake make PG_LDFLAGS="-L/install/libs/lib -lpgport -lpgcommon -sSIDE_MODULE=1" -j
 
 cd ..
