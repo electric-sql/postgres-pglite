@@ -46,7 +46,7 @@
 #define TEXT_DUMP_HEADER "--\n-- PostgreSQL database dump\n--\n\n"
 #define TEXT_DUMPALL_HEADER "--\n-- PostgreSQL database cluster dump\n--\n\n"
 
-#if defined(__PGLITE__)
+#ifdef __PGLITE__
 extern int	pg_char_to_encoding_private(const char *name);
 extern const char *pg_encoding_to_char_private(int encoding);
 extern int	pg_valid_server_encoding_id_private(int encoding);

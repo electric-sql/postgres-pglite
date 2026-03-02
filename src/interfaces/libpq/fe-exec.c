@@ -28,7 +28,7 @@
 #include "libpq-int.h"
 #include "mb/pg_wchar.h"
 
-#if defined(__PGLITE__)
+#ifdef __PGLITE__
 extern int	pg_char_to_encoding_private(const char *name);
 extern const char *pg_encoding_to_char_private(int encoding);
 extern int	pg_valid_server_encoding_id_private(int encoding);
