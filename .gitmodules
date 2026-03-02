@@ -10,6 +10,10 @@
 [submodule "pglite/pg_uuidv7"]
 	path = pglite/pg_uuidv7
 	url = https://github.com/fboulnois/pg_uuidv7/
+[submodule "pglite/age"]
+	path = pglite/age
+	url = https://github.com/apache/age.git
+	branch = PG17
 [submodule "pglite/pg_hashids"]
 	path = pglite/pg_hashids
 	url = https://github.com/iCyberon/pg_hashids
