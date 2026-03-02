@@ -45,6 +45,7 @@ MemoryContextAlloc
 MemoryContextAllocZero
 memset
 nanosleep
+object_access_hook
 open
 palloc
 palloc0
@@ -60,11 +61,13 @@ pgl_pq_flush
 pgl_sendConnData
 pgl_setPGliteActive
 pgl_startPGlite
+post_parse_analyze_hook
 PostgresMainLongJmp
 PostgresMainLoopOnce
 PostgresSendReadyForQueryIfNecessary
 pq_buffer_remaining_data
 ProcessStartupPacket
+ProcessUtility_hook
 pstrdup
 puts
 qsort
@@ -73,11 +76,13 @@ read
 readdir
 readstoplist
 realloc
+RegisterExtensibleNodeMethods
 repalloc
 ResourceOwnerEnlarge
 ResourceOwnerForget
 ResourceOwnerRemember
 searchstoplist
+set_rel_pathlist_hook
 socket
 srand
 sscanf

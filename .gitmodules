@@ -16,3 +16,7 @@
 [submodule "pglite/other_extensions/pgvector"]
 	path = pglite/other_extensions/pgvector
 	url = https://github.com/pgvector/pgvector.git
+[submodule "pglite/other_extensions/age"]
+	path = pglite/other_extensions/age
+	url = https://github.com/apache/age.git
+	branch = PG17
