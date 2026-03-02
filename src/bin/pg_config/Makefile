@@ -39,7 +39,7 @@ install: all installdirs
 ifeq ($(PORTNAME), emscripten)
 	$(INSTALL_PROGRAM) pg_config.wasm '$(DESTDIR)$(bindir)/pg_config.wasm'
 	$(INSTALL_PROGRAM) pg_config$(X) '$(DESTDIR)$(bindir)/pg_config.mjs'
-	$(INSTALL_PROGRAM) run_pg_cmd.mjs '$(DESTDIR)$(bindir)/run_pg_cmd.mjs'
+	$(INSTALL_PROGRAM) $(top_srcdir)/pglite/scripts/run_pg_cmd.mjs '$(DESTDIR)$(bindir)/run_pg_cmd.mjs'
 	ln -sf 'run_pg_cmd.mjs' '$(DESTDIR)$(bindir)/pg_config'
 endif
 
