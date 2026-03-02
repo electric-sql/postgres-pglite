@@ -31,7 +31,7 @@ pg_config: $(OBJS) | submake-libpgport
 
 # the emscripten build generates multiple "runnable" files (.cjs/.mjs + .wasm)
 # but other postgres tools expect exacly 'pg_config' as an executable 
-# we create a pg_config link to run_pg_config.mjs, which in turn calls pg_config.cjs/.mjs
+# we create a pg_config link to run_pg_cmd.mjs, which in turn calls pg_config.cjs/.mjs
 # pg_config.wasm is implicitly expected to be in the same folder
 
 install: all installdirs
@@ -39,8 +39,8 @@ install: all installdirs
 ifeq ($(PORTNAME), emscripten)
 	$(INSTALL_PROGRAM) pg_config.wasm '$(DESTDIR)$(bindir)/pg_config.wasm'
 	$(INSTALL_PROGRAM) pg_config$(X) '$(DESTDIR)$(bindir)/pg_config.mjs'
-	$(INSTALL_PROGRAM) run_pg_config.mjs '$(DESTDIR)$(bindir)/run_pg_config.mjs'
-	ln -sf '$(DESTDIR)$(bindir)/run_pg_config.mjs' '$(DESTDIR)$(bindir)/pg_config'
+	$(INSTALL_PROGRAM) run_pg_cmd.mjs '$(DESTDIR)$(bindir)/run_pg_cmd.mjs'
+	ln -sf 'run_pg_cmd.mjs' '$(DESTDIR)$(bindir)/pg_config'
 endif
 
 installdirs:
@@ -50,6 +50,8 @@ uninstall:
 	rm -f '$(DESTDIR)$(bindir)/pg_config$(X)'
 ifeq ($(PORTNAME), emscripten)
 	rm -f '$(DESTDIR)$(bindir)/pg_config.wasm'
+	rm -f '$(DESTDIR)$(bindir)/pg_config.mjs'
+	rm -f '$(DESTDIR)$(bindir)/run_pg_cmd.mjs'
 	rm -f '$(DESTDIR)$(bindir)/pg_config'
 endif
 

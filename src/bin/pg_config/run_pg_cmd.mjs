@@ -1,5 +1,12 @@
 #!/usr/bin/env node
-import Module from "./pg_config.mjs";
+import { basename, dirname, join } from "path";
+
+const invokedPath = process.argv[1];
+console.log('invokedPath', invokedPath)
+const invokedName = basename(invokedPath);
+const moduleName = invokedName + ".mjs";
+const modulePath = join(dirname(invokedPath), moduleName);
+const { default: Module } = await import(modulePath);
 
 // If the module has a `main()` (or similar) method, call it:
 if (typeof Module.main === "function") {
