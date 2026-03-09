@@ -1,20 +1,9 @@
 #pragma once
 
-
-// wasi only stubs
-#if defined(__wasi__)
-#   undef PQEXPBUFFER_H
-#   include "../src/interfaces/libpq/pqexpbuffer.h"
-
-#else
-#   include "../src/interfaces/libpq/pqexpbuffer.h"
-#endif
-
+#include "../src/interfaces/libpq/pqexpbuffer.h"
 
 // option_parse_int parse_sync_method
 #include "../src/fe_utils/option_utils.c"
-
-
 
 static void
 init_locale(const char *categoryname, int category, const char *locale) {
@@ -30,16 +19,7 @@ PostgresMain(const char *dbname, const char *username) {
 }
 
 
-void
-startup_hacks(const char *progname) {
-#ifdef PG16
-    SpinLockInit(&dummy_spinlock);
-#endif
-}
-
-
 // embedded initdb requirements
-
 void
 get_restricted_token(void) {
     // stub
@@ -75,7 +55,6 @@ pg_strdup(const char *in) {
 	}
 	return tmp;
 }
-
 
 char *
 simple_prompt(const char *prompt, bool echo) {

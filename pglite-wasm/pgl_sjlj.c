@@ -1,6 +1,3 @@
-#if defined(__wasi__)
-    PDEBUG("# 2:" __FILE__ ": sjlj exception handler off");
-#else
 	if (sigsetjmp(local_sigjmp_buf, 1) != 0)
 	{
 #if !defined(INITDB_SINGLE)
@@ -57,11 +54,6 @@
 #endif
 
 #if !defined(INITDB_SINGLE)
-#if PGDEBUG
-        if (is_repl)
-            pg_prompt();
-#endif
-
        if (pq_buffer_remaining_data()>0) {
             if (canary_ex++ > 8)
                 abort();
@@ -72,5 +64,4 @@
     }
 
 	PG_exception_stack = &local_sigjmp_buf;
-#endif
 
