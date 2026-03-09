@@ -16,12 +16,7 @@
 // TODO: an include for libpglite
 #endif
 
-#define POSTGRES_MAIN_LONGJMP 100
-
-volatile sigjmp_buf	postgresmain_sigjmp_buf;
 volatile int is_pglite_active = 0;
-// extern bool ExitOnAnyError;
-// extern BackendType MyBackendType;
 
 int pgl_setPGliteActive(int newValue) {
 	int current = is_pglite_active;
@@ -29,9 +24,26 @@ int pgl_setPGliteActive(int newValue) {
 	return current;
 }
 
+// ========== Top level exception handling ==========
+
+/*
+* In Postgres, the top level sigsetjmp handles exceptions encountered during executions
+* In PGlite, we handle the top level sigsetjmp manually by exiting on the corresponding longjmp 
+* with a predefined exit code (POSTGRES_MAIN_LONGJMP). We only need to override the longjmp 
+* because setjmp already behaves as expected.
+* This keeps the code changes cleaner.
+*/
+
+#define POSTGRES_MAIN_LONGJMP 100
+
+volatile sigjmp_buf	postgresmain_sigjmp_buf;
+
 volatile bool ignore_till_sync = false;
 volatile bool send_ready_for_query = false;
 
+/*
+* This wraps the libc longjmp to enable us to intercept and handle the main longjmp manually
+*/
 void EMSCRIPTEN_KEEPALIVE pgl_longjmp(jmp_buf env, int val) {
     if (is_pglite_active && memcmp(env, (void*)postgresmain_sigjmp_buf, sizeof(jmp_buf)) == 0) {
         // reset this as it is expected
@@ -47,6 +59,13 @@ void EMSCRIPTEN_KEEPALIVE pgl_siglongjmp(sigjmp_buf env, int val) {
     pgl_longjmp(env, val);
 }
 
+// ========== Process handling functions ==========
+/*
+* We wrap some process handling functions to emulate 
+* the behavior of an OS when instantiating a new process.
+* This is not available in emscripten atm, so we handle it manually
+* See pglite.ts in the frontend on how we emulate this instantiation.
+*/
 typedef ssize_t (*pglite_system_t)(const char *command);
 pglite_system_t pglite_system = NULL;
 
@@ -95,6 +114,11 @@ pgl_pclose(FILE* stream) {
     return pclose(stream);
 }
 
+// ========== User related functions ==========
+/*
+* PostgreSQL code expects the current user to fulfill certain criteria to be allowed to run the process, otherwise it exits. 
+* This is irrelevant in WASM/emscripten, so we fake the expected data to match what Postgres wants.
+*/
 
 #define PGLITE_UID 123
 
@@ -128,6 +152,11 @@ pgl_getpwuid(uid_t uid) {
     return &pw;
 }
 
+// ========== atexit functions ==========
+/*
+* atexit registered functions provide important functionality in Postgres
+* we need to be able to run them when closing PGlite.
+*/
 #define MAX_ATEXIT_FUNCS 32
 
 static void (*atexit_funcs[MAX_ATEXIT_FUNCS])(void);
@@ -152,9 +181,18 @@ void EMSCRIPTEN_KEEPALIVE pgl_run_atexit_funcs(void) {
     atexit_func_count = 0;
 }
 
+// ========== streams functions ==========
+/*
+* initdb communicates with postgres via stdin<->stdout redirection
+* we need to handle this manually mainly because we're also handling processes manually
+*/
+
 FILE* pgl_stdin = NULL;
 FILE* pgl_stdout = NULL;
 
+/*
+* we override exit() to make sure we cleanup the stdin/stdout file descriptors
+*/
 void EMSCRIPTEN_KEEPALIVE
 pgl_exit(int status) {
     if (pgl_stdin != NULL) {
@@ -170,6 +208,9 @@ pgl_exit(int status) {
     exit(status);
 }
 
+/*
+* Overrides freopen libc function to allow initdb<->PGlite comm via standard streams (see initdb.ts in frontend)
+*/
 FILE * EMSCRIPTEN_KEEPALIVE
 pgl_freopen(const char *pathname, const char *mode, int streamid) {
     if (streamid == 0) {
