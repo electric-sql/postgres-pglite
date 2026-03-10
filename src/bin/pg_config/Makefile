@@ -40,7 +40,7 @@ ifeq ($(PORTNAME), emscripten)
 	$(INSTALL_PROGRAM) pg_config.wasm '$(DESTDIR)$(bindir)/pg_config.wasm'
 	$(INSTALL_PROGRAM) pg_config$(X) '$(DESTDIR)$(bindir)/pg_config.mjs'
 	$(INSTALL_PROGRAM) run_pg_config.mjs '$(DESTDIR)$(bindir)/run_pg_config.mjs'
-	ln -sf '$(DESTDIR)$(bindir)/run_pg_config.mjs' '$(DESTDIR)$(bindir)/pg_config'
+	ln -sf 'run_pg_config.mjs' '$(DESTDIR)$(bindir)/pg_config'
 endif
 
 installdirs:

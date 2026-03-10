@@ -37,6 +37,8 @@ install: all installdirs
 	$(INSTALL_PROGRAM) pg_ctl$(X) '$(DESTDIR)$(bindir)/pg_ctl$(X)'
 ifeq ($(PORTNAME), emscripten)
 	$(INSTALL_PROGRAM) pg_ctl.wasm '$(DESTDIR)$(bindir)/pg_ctl.wasm'
+	$(INSTALL_PROGRAM) pg_ctl$(X) '$(DESTDIR)$(bindir)/pg_ctl.mjs'
+	ln -sf '$(DESTDIR)$(bindir)/run_pg_config.mjs' '$(DESTDIR)$(bindir)/pg_ctl'
 endif
 
 installdirs:
@@ -46,6 +48,7 @@ uninstall:
 	rm -f '$(DESTDIR)$(bindir)/pg_ctl$(X)'
 ifeq ($(PORTNAME), emscripten)
 	rm -f '$(DESTDIR)$(bindir)/pg_ctl.wasm'
+	rm -f '$(DESTDIR)$(bindir)/pg_ctl'
 endif
 
 clean distclean:
