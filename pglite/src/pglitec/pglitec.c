@@ -1,3 +1,19 @@
+/*-------------------------------------------------------------------------
+ *
+ * pglitec.c
+ *	  PGlite libc overrides
+ *
+ *
+ *
+ * NOTES
+ *    this file contains "libc" function wrappers for PGlite, as well as 
+ *    other flags used by PostgreSQL and needed by PGlite. These are 
+ *    needed in order to emulate some system calls related to sockets, 
+ *    user management etc.
+ *
+ *-------------------------------------------------------------------------
+ */
+
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/shm.h>
@@ -24,9 +40,8 @@ int pgl_setPGliteActive(int newValue) {
 	return current;
 }
 
-// ========== Top level exception handling ==========
-
-/*
+/* ========== Top level exception handling ==========
+*
 * In Postgres, the top level sigsetjmp handles exceptions encountered during executions
 * In PGlite, we handle the top level sigsetjmp manually by exiting on the corresponding longjmp 
 * with a predefined exit code (POSTGRES_MAIN_LONGJMP). We only need to override the longjmp 
@@ -42,7 +57,7 @@ volatile bool ignore_till_sync = false;
 volatile bool send_ready_for_query = false;
 
 /*
-* This wraps the libc longjmp to enable us to intercept and handle the main longjmp manually
+* This wraps the libc longjmp() to enable us to intercept and handle the main longjmp manually
 */
 void EMSCRIPTEN_KEEPALIVE pgl_longjmp(jmp_buf env, int val) {
     if (is_pglite_active && memcmp(env, (void*)postgresmain_sigjmp_buf, sizeof(jmp_buf)) == 0) {
@@ -59,8 +74,8 @@ void EMSCRIPTEN_KEEPALIVE pgl_siglongjmp(sigjmp_buf env, int val) {
     pgl_longjmp(env, val);
 }
 
-// ========== Process handling functions ==========
-/*
+/* ========== Process handling functions ==========
+*
 * We wrap some process handling functions to emulate 
 * the behavior of an OS when instantiating a new process.
 * This is not available in emscripten atm, so we handle it manually
@@ -79,7 +94,9 @@ pgl_system(const char *command) {
     if (pglite_system) {
         return pglite_system(command);
     }
-    return 123; // should we call system???
+    // if pglite_system is not set, we assume we cannot exec that command and return != 0
+    // we could also just call system() and let it crash, but this leads to some stderr messages on Windows
+    return 123;
 }
 
 typedef FILE* (*pglite_popen_t)(const char *command, const char *mode);
@@ -114,8 +131,8 @@ pgl_pclose(FILE* stream) {
     return pclose(stream);
 }
 
-// ========== User related functions ==========
-/*
+/* ========== User related functions ==========
+*
 * PostgreSQL code expects the current user to fulfill certain criteria to be allowed to run the process, otherwise it exits. 
 * This is irrelevant in WASM/emscripten, so we fake the expected data to match what Postgres wants.
 */
@@ -152,8 +169,8 @@ pgl_getpwuid(uid_t uid) {
     return &pw;
 }
 
-// ========== atexit functions ==========
-/*
+/* ========== atexit functions ==========
+*
 * atexit registered functions provide important functionality in Postgres
 * we need to be able to run them when closing PGlite.
 */
@@ -181,8 +198,8 @@ void EMSCRIPTEN_KEEPALIVE pgl_run_atexit_funcs(void) {
     atexit_func_count = 0;
 }
 
-// ========== streams functions ==========
-/*
+/* ========== streams functions ==========
+*
 * initdb communicates with postgres via stdin<->stdout redirection
 * we need to handle this manually mainly because we're also handling processes manually
 */
@@ -209,7 +226,7 @@ pgl_exit(int status) {
 }
 
 /*
-* Overrides freopen libc function to allow initdb<->PGlite comm via standard streams (see initdb.ts in frontend)
+* Overrides freopen() libc function to allow initdb<->PGlite comm via standard streams (see initdb.ts in frontend)
 */
 FILE * EMSCRIPTEN_KEEPALIVE
 pgl_freopen(const char *pathname, const char *mode, int streamid) {
@@ -354,9 +371,7 @@ pgl_shmctl(int shmid, int cmd, struct shmid_ds *buf) {
     return -1;
 }
 
-// ========== MMAP/MUNMAP ==========
-
-/*
+/* ========== MMAP/MUNMAP ==========
  * Dummy munmap implementation for emscripten.
  * Emscripten's munmap can corrupt unrelated files in MEMFS,
  * so we just return success without doing anything.
@@ -370,20 +385,28 @@ pgl_munmap(void *addr, size_t length) {
     return 0;
 }
 
-// read FROM JS
-// (i guess return number of bytes written)
-// ssize_t pgl_read(/* ignored */ int socket, void *buffer, size_t length,/* ignored */ int flags,/* ignored */ void *address,/* ignored */ socklen_t *address_len);
-//typedef ssize_t (*pgl_read_t)(/* ignored */ int socket, void *buffer, size_t length,/* ignored */ int flags,/* ignored */ void *address,/* ignored */ unsigned int *address_len);
+/* ============ SOCKET EMULATION =============
+*
+* To exchange data between the backend (Postgres) and frontend (JS part of PGlite),
+* we emulate a socket by overriding the following libc functions.
+*/
+
+/* 
+* read FROM JS
+* Callback used for reading data from the frontend
+*/
 typedef ssize_t (*pgl_read_t)(void *buffer, size_t max_length);
 pgl_read_t pgl_read;
 
-// write TO JS
-// (i guess return number of bytes read)
-// ssize_t pgl_write(/* ignored */ int sockfd, const void *buf, size_t len, /* ignored */ int flags);
-// typedef ssize_t (*pgl_write_t)(/* ignored */ int sockfd, const void *buf, size_t len, /* ignored */ int flags);
+/* write TO JS
+* Callback used for writing data to the frontend
+*/
 typedef ssize_t (*pgl_write_t)(void *buffer, size_t length);
 pgl_write_t pgl_write;
 
+/*
+* Set the above callbacks
+*/
 void EMSCRIPTEN_KEEPALIVE
 pgl_set_rw_cbs(pgl_read_t read_cb, pgl_write_t write_cb) {
     pgl_read = read_cb;
@@ -414,10 +437,18 @@ int EMSCRIPTEN_KEEPALIVE pgl_getsockname(int __fd, struct sockaddr * __addr,
 	return 0;
 }
 
+/*
+* Overrides the recv() libc function
+*/
+
 ssize_t EMSCRIPTEN_KEEPALIVE pgl_recv(int __fd, void *__buf, size_t __n, int __flags) {
 	ssize_t got = pgl_read(__buf, __n);
 	return got;
 }
+
+/*
+* Overrides the send() libc function
+*/
 
 ssize_t EMSCRIPTEN_KEEPALIVE pgl_send(int __fd, const void *__buf, size_t __n, int __flags) {
 	ssize_t wrote = pgl_write(__buf, __n);
