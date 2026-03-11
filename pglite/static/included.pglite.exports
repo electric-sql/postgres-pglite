@@ -33,6 +33,7 @@ gmtime
 initStringInfo
 ioctl
 isalnum
+IsTransactionBlock
 isxdigit
 lowerstr
 main
