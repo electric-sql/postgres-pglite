@@ -20,3 +20,6 @@
 	path = pglite/other_extensions/age
 	url = https://github.com/apache/age.git
 	branch = PG17
+[submodule "pglite/other_extensions/pg_textsearch"]
+	path = pglite/other_extensions/pg_textsearch
+	url = https://github.com/timescale/pg_textsearch.git
