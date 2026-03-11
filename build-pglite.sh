@@ -133,7 +133,10 @@ emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make P
 SAVE_PATH=$PATH
 PATH=$PATH:$INSTALL_FOLDER/bin
 emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions -j || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite/other_extensions' ; exit 41; }
+# Step 4.1: special case: make PostGIS
+cd ./pglite/ && ./build-postgis.sh && cd ../
 emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist' ; exit 42; }
+emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist-postgis' ; exit 43; }
 PATH=$SAVE_PATH
 
 # Step 5: get exported functions
@@ -142,6 +145,7 @@ emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions || {
 # Step 6: make and install pglite
 PGROOT=/pglite
 # PG_IMPORTS_DIR=$PGROOT/imports
+# --preload-file $PGROOT/share/proj@/pglite/share/proj \
 PGPRELOAD="\
 --preload-file $(pwd)/pglite/static/PGPASSFILE@/home/web_user/.pgpass \
 --preload-file $(pwd)/pglite/static/empty@/pglite/bin/initdb \

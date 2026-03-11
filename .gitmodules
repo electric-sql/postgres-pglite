@@ -20,3 +20,6 @@
 	path = pglite/other_extensions/age
 	url = https://github.com/apache/age.git
 	branch = PG17
+[submodule "pglite/other_extensions/postgis"]
+	path = pglite/other_extensions/postgis
+	url = https://github.com/postgis/postgis.git

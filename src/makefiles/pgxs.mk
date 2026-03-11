@@ -250,10 +250,9 @@ ifeq ($(with_llvm), yes)
 	$(foreach mod, $(MODULES), $(call install_llvm_module,$(mod),$(mod).bc))
 endif # with_llvm
 ifeq ($(PORTNAME), emscripten)
-	$(LLVM_NM) -u *.o    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
-	$(LLVM_NM)    *.o    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
-	comm -23 undef.txt defs.txt > '$(emscripten_extension_imports_dir)/$(MODULES).imports'
-	rm -f undef.txt defs.txt
+	find . -name "*.o" -exec $(LLVM_NM) --undefined-only {} \; | awk '{print $$2}' | sed '/^$$/d' | sort -u > '$(MODULES).undef.txt'
+	find . -type f \( -name "*.o" -o -name "*.so" \) -exec $(LLVM_NM) --defined-only {} \;   | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > '$(MODULES).defs.txt'
+	comm -23 '$(MODULES).undef.txt' '$(MODULES).defs.txt' > '$(emscripten_extension_imports_dir)/$(MODULES).imports'
 endif # PORTNAME=emscripten
 endif # MODULES
 ifdef DOCS
@@ -278,10 +277,9 @@ ifeq ($(with_llvm), yes)
 	$(call install_llvm_module,$(MODULE_big),$(OBJS))
 endif # with_llvm
 ifeq ($(PORTNAME), emscripten)
-	$(LLVM_NM) -u $(OBJS)    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
-	$(LLVM_NM)    $(OBJS)    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
-	comm -23 undef.txt defs.txt > '$(emscripten_extension_imports_dir)/$(MODULE_big).imports'
-	rm -f undef.txt defs.txt
+	find . -name "*.o" -exec $(LLVM_NM) --undefined-only {} \; | awk '{print $$2}' | sed '/^$$/d' | sort -u > '$(MODULE_big).undef.txt'
+	find . -type f \( -name "*.o" -o -name "*.so" \) -exec $(LLVM_NM) --defined-only   {} \; | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > '$(MODULE_big).defs.txt'
+	comm -23 '$(MODULE_big).undef.txt' '$(MODULE_big).defs.txt' > '$(emscripten_extension_imports_dir)/$(MODULE_big).imports'
 endif # PORTNAME=emscripten
 
 install: install-lib
