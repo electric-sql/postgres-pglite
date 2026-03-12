@@ -48,6 +48,10 @@ age.tar.gz:
 # 	tar -C $(EXTENSIONS_BUILD_ROOT)/$*/$(prefix) -czf $(ARCHIVE_DIR)/$*.tar.gz .
 
 dist-postgis:
+	@echo "=== Adding proj data to postgis archive ==="
+	gunzip $(ARCHIVE_DIR)/postgis.tar.gz
+	tar -rf $(ARCHIVE_DIR)/postgis.tar -C /install/libs share/proj
+	gzip $(ARCHIVE_DIR)/postgis.tar
 	@echo "=== Moving postgis ==="
 	mkdir -p $(POSTGIS_ARCHIVE_DIR) && mv $(ARCHIVE_DIR)/postgis.tar.gz $(POSTGIS_ARCHIVE_DIR)
 

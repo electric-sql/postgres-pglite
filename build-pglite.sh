@@ -145,7 +145,6 @@ emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions || {
 # Step 6: make and install pglite
 PGROOT=/pglite
 # PG_IMPORTS_DIR=$PGROOT/imports
-# --preload-file $PGROOT/share/proj@/pglite/share/proj \
 PGPRELOAD="\
 --preload-file $(pwd)/pglite/static/PGPASSFILE@/home/web_user/.pgpass \
 --preload-file $(pwd)/pglite/static/empty@/pglite/bin/initdb \

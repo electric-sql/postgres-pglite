@@ -94,7 +94,18 @@ postgres: $(OBJS)
 
 pglite-exported-functions:
 	$(MKDIR_P) /install/pglite
-	cat $(DESTDIR)$(emscripten_extension_imports_dir)/pgcrypto.imports $(top_builddir)/pglite/static/excluded.pglite.exports $(top_builddir)/src/interfaces/libpq/exports.list $(LIB_EXPORTS_DIR)/libossp-uuid.exports /install/exports/*.exports | sort -u > '/install/pglite/excluded.imports.gen'
+	cat \
+	$(top_builddir)/pglite/static/excluded.pglite.exports \
+	$(top_builddir)/src/interfaces/libpq/exports.list \
+	$(LIB_EXPORTS_DIR)/pgcrypto.imports \
+	$(LIB_EXPORTS_DIR)/libossp-uuid.exports \
+	$(LIB_EXPORTS_DIR)/libjson-c.exports \
+	$(LIB_EXPORTS_DIR)/libdeflate.exports \
+	$(LIB_EXPORTS_DIR)/libtiff.exports \
+	$(LIB_EXPORTS_DIR)/libsqlite3.exports \
+	$(LIB_EXPORTS_DIR)/libproj.exports \
+	$(LIB_EXPORTS_DIR)/libgeos.exports \
+	| sort -u > '/install/pglite/excluded.imports.gen'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite/static/included.pglite.exports' | \
 	sort -u | \
 	grep -Fvx -f '/install/pglite/excluded.imports.gen' | \

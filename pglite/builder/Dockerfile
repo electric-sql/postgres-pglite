@@ -176,9 +176,8 @@ RUN ${LLVM_NM} /install/libs/lib/libgeos.a | awk '$2 ~ /^[TDB]$/ {print $3}' | s
 # -DGDAL_USE_HDFS=OFF \
 # -DACCEPT_MISSING_SQLITE3_MUTEX_ALLOC:BOOL=ON \
 # ..
-
-RUN cmake --build . -j && cmake --build . --target install
-RUN ${LLVM_NM} /install/libs/lib/libgdal.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgdal.exports
+# RUN cmake --build . -j && cmake --build . --target install
+# RUN ${LLVM_NM} /install/libs/lib/libgdal.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgdal.exports
 
 ARG TARGETARCH
 FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
