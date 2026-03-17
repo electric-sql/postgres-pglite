@@ -79,26 +79,13 @@ postgres: $(OBJS)
 # Extensions use functions from the core PG. These need to be exported by the emscripten compiler.
 # The following target gathers all extension imports + the default ones (included.pglite.imports),
 # excludes the one in excluded.pglite.imports and adds a leading _ to each.
-# pglite-exported-functions:
-# 	$(MKDIR_P) /install/pglite
-# 	cat $(top_builddir)/pglite/static/excluded.*.exports \
-# 	$(top_builddir)/src/interfaces/libpq/exports.list \
-# 	$(DESTDIR)$(emscripten_extension_imports_dir)/postgres_fdw.imports \
-# 	$(DESTDIR)$(emscripten_extension_imports_dir)/dblink.imports \
-# 	$(LIB_EXPORTS_DIR)/libossp-uuid.exports | sort -u > '$(top_builddir)/pglite/out/excluded.exports'
-# 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite/static/included.pglite.exports' | \
-# 	sort -u | \
-# 	grep -Fvx -f '$(top_builddir)/pglite/static/excluded.pglite.exports' | \
-# 	sed 's/^/_/' \
-# 	> '/install/pglite/exported_functions.txt'
-
 pglite-exported-functions:
 	$(MKDIR_P) /install/pglite
-	cat \
-	$(top_builddir)/pglite/static/excluded.pglite.exports \
+	cat $(top_builddir)/pglite/static/excluded.pglite.exports \
 	$(top_builddir)/src/interfaces/libpq/exports.list \
-	$(LIB_EXPORTS_DIR)/pgcrypto.imports \
 	$(LIB_EXPORTS_DIR)/libossp-uuid.exports \
+	$(LIB_EXPORTS_DIR)/libssl.exports \
+	$(LIB_EXPORTS_DIR)/libcrypto.exports \
 	$(LIB_EXPORTS_DIR)/libjson-c.exports \
 	$(LIB_EXPORTS_DIR)/libdeflate.exports \
 	$(LIB_EXPORTS_DIR)/libtiff.exports \

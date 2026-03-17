@@ -71,6 +71,7 @@ PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
 EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 PGLITE_LDFLAGS_EX="\
+-sINITIAL_MEMORY=32MB \
 -sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
@@ -80,7 +81,6 @@ PGLITE_LDFLAGS_EX="\
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
 -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
--sTOTAL_MEMORY=512MB \
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
 $(pwd)/pglite/src/pglitec/pglitec.o \
@@ -125,8 +125,12 @@ emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=e
 
 # Step 3.1: make ported contrib extensions - do not install
 emmake make PORTNAME=emscripten -C contrib/ -j || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
-# Step 3.2: make dist contrib extensions - this will create an archive for each extension
-emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }
+
+# Step 3.2 pgcrypto - special case
+cd ./pglite && ./build-pgcrypto.sh && cd ../
+
+# Step 3.3: make dist contrib extensions - this will create an archive for each extension
+PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }
 # the above will also create a file with the imports that each extension needs - we pass these as input in the next step for emscripten to keep alive
 
 # Step 4: make and dist other extensions
@@ -160,22 +164,9 @@ PGPRELOAD="\
 PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
-#WASM_COMPILE_FLAGS="-m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling"
-# PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
-# -sINVOKE_RUN=0 \
-# -sSUPPORT_LONGJMP=emscripten \
-# -sFORCE_FILESYSTEM=1 \
-# -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
-# -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
-# -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
-# -sERROR_ON_UNDEFINED_SYMBOLS=0 \
-# -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
-# -sEXPORTED_FUNCTIONS=@$PG_IMPORTS_DIR/exported_functions.txt \
-# $PGPRELOAD \
-# -lnodefs.js -lidbfs.js \
-# -o pglite.html"
-
 POSTGRES_PGLITE_FLAGS="\
+-sSTACK_SIZE=8MB \
+-sINITIAL_MEMORY=128MB \
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
 $PGPRELOAD \
@@ -184,7 +175,3 @@ $PGPRELOAD \
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" emmake make PORTNAME=emscripten -C src/backend/ -j pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
 emmake make PORTNAME=emscripten -C src/backend/ install-pglite || { echo 'emmake make PORTNAME=emscripten -C src/backend/ install-pglite' ; exit 62; }
-
-# Step 7.1 pgcrypto - special case
-cd ./pglite && ./build-pgcrypto.sh && cd ../
-PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist
