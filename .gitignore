@@ -51,3 +51,5 @@ lib*.pc
 *.wasm
 *.map
 dist
+*.defs.txt
+*.undef.txt

@@ -14,8 +14,10 @@ SUBDIRS = \
 prefix ?= /pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build
 ARCHIVE_DIR := /pglite/extensions
+POSTGIS_ARCHIVE_DIR := /pglite/extensions/postgis
 
 EXTENSIONS := $(SUBDIRS)
+EXTENSIONS += postgis
 
 # Default target: build tarballs for all contribs
 dist: $(addsuffix .tar.gz,$(EXTENSIONS))
@@ -24,7 +26,7 @@ dist: $(addsuffix .tar.gz,$(EXTENSIONS))
 %.tar.gz:
 	@echo "=== Staging $* ==="
 	rm -rf $(EXTENSIONS_BUILD_ROOT)/$*
-	bash -c 'mkdir -p $(EXTENSIONS_BUILD_ROOT)/$*/$(prefix)/{bin,lib,share/extension,share/doc,share/postgresql/extension,share/postgresql/tsearch_data,include}'
+	bash -c 'mkdir -p $(EXTENSIONS_BUILD_ROOT)/$*/$(prefix)/{bin,lib,share/extension,share/doc,share/postgresql/extension,share/postgresql/tsearch_data,include,share/postgresql/contrib/postgis-3.6}'
 	$(MAKE) -C $* install DESTDIR=$(EXTENSIONS_BUILD_ROOT)/$*
 	@echo "=== Packaging $* ==="
 	mkdir -p $(ARCHIVE_DIR)
@@ -45,6 +47,14 @@ age.tar.gz:
 	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
 	tar -czf $(ARCHIVE_DIR)/age.tar.gz $$files
 # 	tar -C $(EXTENSIONS_BUILD_ROOT)/$*/$(prefix) -czf $(ARCHIVE_DIR)/$*.tar.gz .
+
+dist-postgis:
+	@echo "=== Adding proj data to postgis archive ==="
+	gunzip $(ARCHIVE_DIR)/postgis.tar.gz
+	tar -rf $(ARCHIVE_DIR)/postgis.tar -C /install/libs share/proj
+	gzip $(ARCHIVE_DIR)/postgis.tar
+	@echo "=== Moving postgis ==="
+	mkdir -p $(POSTGIS_ARCHIVE_DIR) && mv $(ARCHIVE_DIR)/postgis.tar.gz $(POSTGIS_ARCHIVE_DIR)
 
 .PHONY: dist
 

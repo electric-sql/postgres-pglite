@@ -78,10 +78,113 @@ WORKDIR /install/libs/lib
 RUN ln -s libuuid.a libossp-uuid.a # contrib extensions use -lossp-uuid
 RUN ${LLVM_NM} /install/libs/lib/libossp-uuid.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libossp-uuid.exports
 
+# for postgis
+WORKDIR /src
+RUN git clone --depth 1 --single-branch --branch=json-c-0.18-20240915 https://github.com/json-c/json-c.git
+WORKDIR /src/json-c/build
+RUN emcmake cmake \
+-DCMAKE_BUILD_TYPE=Release \
+-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+-DCMAKE_INSTALL_PREFIX=/install/libs \
+-DENABLE_THREADING=OFF -DBUILD_SHARED_LIBS=OFF -DDISABLE_EXTRA_LIBS=ON -DBUILD_APPS=OFF -DBUILD_TESTING=OFF ..
+RUN cmake --build . -j && cmake --build . --target install
+RUN ${LLVM_NM} /install/libs/lib/libjson-c.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libjson-c.exports
+
+WORKDIR /src
+RUN git clone --depth 1 --single-branch --branch=v1.24 https://github.com/ebiggers/libdeflate.git
+WORKDIR /src/libdeflate/build
+RUN emcmake cmake \
+-DCMAKE_BUILD_TYPE=Release \
+-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+-DCMAKE_INSTALL_PREFIX=/install/libs \
+-DLIBDEFLATE_BUILD_SHARED_LIB=OFF -DLIBDEFLATE_BUILD_TESTS=OFF ..
+RUN cmake --build . -j && cmake --build . --target install
+RUN ${LLVM_NM} /install/libs/lib/libdeflate.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libdeflate.exports
+
+WORKDIR /src
+RUN curl -L https://gitlab.com/libtiff/libtiff/-/archive/v4.7.1/libtiff-v4.7.1.tar.gz | tar xz
+# RUN tar -xvf libtiff-v4.7.1.tar.gz
+WORKDIR /src/libtiff-v4.7.1
+RUN ./autogen.sh
+# we're disabling jpeg here but gdal uses jpeg (internal build if not specified - so it would make sense to enable it here as well)
+RUN emconfigure ./configure \
+--with-pic --disable-webp --disable-zstd --disable-lzma --disable-jbig --disable-old-jpeg \
+--disable-jpeg --disable-pixarlog --disable-mdi --disable-opengl --disable-win32-io \
+--with-zlib-include-dir=/install/libs/include --with-zlib-lib-dir=/install/libs/lib \
+--with-libdeflate-include-dir=/install/libs/include --with-libdeflate-lib-dir=/install/libs/lib/ \
+--prefix=/install/libs --enable-shared=no
+RUN emmake make -j && emmake make install
+RUN ${LLVM_NM} /install/libs/lib/libtiff.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libtiff.exports
+
+WORKDIR /src
+RUN wget https://www.sqlite.org/2025/sqlite-src-3500400.zip 
+RUN unzip sqlite-src-3500400.zip
+# RUN unzip sqlite-src-3500400.zip
+WORKDIR /src/sqlite-src-3500400
+RUN emconfigure ./configure --disable-shared --disable-threadsafe --prefix=/install/libs --with-emsdk
+RUN emmake make -j && emmake make install 
+# we need a sqlite3 executable for the system on which we're building (needed by https://proj.org/en/stable/install.html#build-requirements)
+RUN emmake make clean && ./configure --disable-shared && make -j && cp sqlite3 /tmp/sqlite3
+RUN ${LLVM_NM} /install/libs/lib/libsqlite3.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libsqlite3.exports
+
+WORKDIR /src
+RUN wget https://download.osgeo.org/proj/proj-9.7.0.tar.gz
+RUN tar -xvf proj-9.7.0.tar.gz
+WORKDIR /src/proj-9.7.0
+RUN emcmake cmake \
+-DCMAKE_BUILD_TYPE=Release \
+-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+-DCMAKE_INSTALL_PREFIX:PATH=/install/libs \
+-DEMBED_RESOURCE_FILES=OFF \
+-DBUILD_SHARED_LIBS=OFF \
+-DSQLite3_INCLUDE_DIR=/install/libs/include/ -DSQLite3_LIBRARY=/install/libs/lib/libsqlite3.a -DEXE_SQLITE3=/tmp/sqlite3 \
+-DTIFF_LIBRARY=/install/libs/lib/libtiff.a -DTIFF_INCLUDE_DIR=/install/libs/include/ \
+-DENABLE_CURL=OFF -DBUILD_APPS=OFF -DBUILD_TESTING=OFF
+RUN cmake --build . -j && cmake --build . --target install
+RUN ${LLVM_NM} /install/libs/lib/libproj.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libproj.exports
+
+WORKDIR /src
+RUN wget https://download.osgeo.org/geos/geos-3.14.0.tar.bz2
+RUN tar -xvf geos-3.14.0.tar.bz2
+WORKDIR /src/geos-3.14.0/build
+RUN emcmake cmake \
+-DCMAKE_BUILD_TYPE=Release \
+-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+-DCMAKE_INSTALL_PREFIX=/install/libs \
+-DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DBUILD_GEOSOP=OFF ..
+RUN emmake make -j && emmake make install
+RUN ${LLVM_NM} /install/libs/lib/libgeos.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgeos.exports
+
+# WORKDIR /src
+# RUN wget https://github.com/OSGeo/gdal/releases/download/v3.11.4/gdal-3.11.4.tar.gz
+# RUN tar -xvf gdal-3.11.4.tar.gz
+# WORKDIR /src/gdal-3.11.4/build
+# # Docs: https://gdal.org/en/stable/development/building_from_source.html
+# RUN emcmake cmake \
+# -DCMAKE_BUILD_TYPE=Release \
+# -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+# -DCMAKE_INSTALL_PREFIX=/install/libs \
+# -DLIBXML2_INCLUDE_DIR=/install/libs/include/libxml2 -DLIBXML2_LIBRARY=/install/libs/lib/libxml2.a \
+# -DGEOS_INCLUDE_DIR=/install/libs/include/geos -DGEOS_LIBRARY=/install/libs/lib/libgeos.a \
+# -DTIFF_INCLUDE_DIR=/install/libs/include/ -DTIFF_LIBRARY=/install/libs/lib/libtiff.a \
+# -DSQLite3_INCLUDE_DIR=/install/libs/include/ -DSQLite3_LIBRARY=/install/libs/lib/libsqlite3.a -DEXE_SQLITE3=/tmp/sqlite3 \
+# -DZLIB_LIBRARY=/install/libs/lib/libz.a -DZLIB_INCLUDE_DIR=/install/libs/include \
+# -DOPENSSL_ROOT_DIR=/install/libs \
+# -DPROJ_LIBRARY=/install/libs/lib/libproj.a -DPROJ_INCLUDE_DIR=/install/libs/include/ \
+# -DJSONC_LIBRARY=/install/libs/lib/libjson-c.a -DJSONC_INCLUDE_DIR=/install/libs/include/json-c -DGDAL_USE_JSONC=ON -DGDAL_USE_JSONC_INTERNAL=OFF \
+# -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
+# -DGDAL_USE_HDFS=OFF \
+# -DACCEPT_MISSING_SQLITE3_MUTEX_ALLOC:BOOL=ON \
+# ..
+# RUN cmake --build . -j && cmake --build . --target install
+# RUN ${LLVM_NM} /install/libs/lib/libgdal.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgdal.exports
+
 ARG TARGETARCH
 FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
 FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
 FROM base-${TARGETARCH} AS runner
+
+SHELL ["/bin/bash", "-c"]
 
 RUN apt update && apt upgrade -y && apt install -y \
     xz-utils autoconf libtool automake pkgconf bison flex
