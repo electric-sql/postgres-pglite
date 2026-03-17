@@ -234,6 +234,7 @@ dlopen
 dlsym
 downcase_truncate_identifier
 dup
+duplocale
 emscripten_force_exit
 EncodeDateOnly
 EncodeDateTime
