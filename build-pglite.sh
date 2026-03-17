@@ -71,6 +71,7 @@ PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
 EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 PGLITE_LDFLAGS_EX="\
+-sINITIAL_MEMORY=32MB \
 -sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
@@ -80,7 +81,6 @@ PGLITE_LDFLAGS_EX="\
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
 -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
--sTOTAL_MEMORY=512MB \
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
 $(pwd)/pglite/src/pglitec/pglitec.o \
@@ -157,22 +157,9 @@ PGPRELOAD="\
 PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
-#WASM_COMPILE_FLAGS="-m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling"
-# PGLITE_EMSCRIPTEN_FLAGS="-sWASM_BIGINT \
-# -sINVOKE_RUN=0 \
-# -sSUPPORT_LONGJMP=emscripten \
-# -sFORCE_FILESYSTEM=1 \
-# -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
-# -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
-# -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
-# -sERROR_ON_UNDEFINED_SYMBOLS=0 \
-# -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
-# -sEXPORTED_FUNCTIONS=@$PG_IMPORTS_DIR/exported_functions.txt \
-# $PGPRELOAD \
-# -lnodefs.js -lidbfs.js \
-# -o pglite.html"
-
 POSTGRES_PGLITE_FLAGS="\
+-sSTACK_SIZE=8MB \
+-sINITIAL_MEMORY=128MB \
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
 $PGPRELOAD \
