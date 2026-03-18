@@ -95,6 +95,7 @@ pglite-exported-functions:
 	| sort -u > '/install/pglite/excluded.imports.gen'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite/static/included.pglite.exports' | \
 	sort -u | \
+	grep -v -E '^(invoke_|__indirect_function_table)' | \
 	grep -Fvx -f '/install/pglite/excluded.imports.gen' | \
 	awk NF | \
 	sed 's/^/_/' \
