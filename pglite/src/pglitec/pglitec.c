@@ -22,6 +22,7 @@
 #include <pwd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <setjmp.h>
 #include <string.h>
 
@@ -34,9 +35,17 @@
 
 volatile int is_pglite_active = 0;
 
+void EMSCRIPTEN_KEEPALIVE clear_setitimer(void) {
+    struct itimerval zero = {{0, 0}, {0, 0}};
+    setitimer(ITIMER_REAL, &zero, NULL);
+}
+
 int pgl_setPGliteActive(int newValue) {
 	int current = is_pglite_active;
 	is_pglite_active = newValue;
+    if (newValue == 0) {
+        clear_setitimer();
+    }
 	return current;
 }
 
