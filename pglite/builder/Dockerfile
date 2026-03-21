@@ -179,6 +179,35 @@ RUN ${LLVM_NM} /install/libs/lib/libgeos.a | awk '$2 ~ /^[TDB]$/ {print $3}' | s
 # RUN cmake --build . -j && cmake --build . --target install
 # RUN ${LLVM_NM} /install/libs/lib/libgdal.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgdal.exports
 
+# Build ICU from source
+WORKDIR /src
+RUN curl -L https://github.com/unicode-org/icu/releases/download/release-76-1/icu4c-76_1-src.tgz | tar -xz
+
+# Step 1: Build native ICU (needed for cross-compilation tools like icupkg, gencnval)
+WORKDIR /src/icu/source
+RUN mkdir /src/icu-native
+RUN cd /src/icu-native && \
+    /src/icu/source/configure --disable-shared --enable-static --disable-tests --disable-samples && \
+    make -j
+
+# Step 2: Build wasm ICU
+WORKDIR /src/icu-wasm
+RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS} -std=c++17" \
+    emconfigure /src/icu/source/configure \
+    --host=wasm32-unknown-linux-gnu \
+    --with-cross-build=/src/icu-native \
+    --with-data-packaging=static \
+    --disable-shared \
+    --enable-static \
+    --disable-tests \
+    --disable-samples \
+    --disable-extras \
+    --disable-icuio \
+    --disable-layoutex \
+    --prefix=/install/libs
+RUN emmake make -j PKGDATA_OPTS="--without-assembly -O $(pwd)/data/icupkg.inc"
+RUN emmake make install
+
 ARG TARGETARCH
 FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
 FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64

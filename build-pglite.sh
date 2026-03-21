@@ -71,7 +71,7 @@ PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
 EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 PGLITE_LDFLAGS_EX="\
--sINITIAL_MEMORY=32MB \
+-sINITIAL_MEMORY=64MB \
 -sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
@@ -99,9 +99,9 @@ ac_cv_exeext=.js \
 --disable-largefile \
 --with-openssl=no \
 --without-readline \
---without-icu \
---with-includes=$INSTALL_PREFIX/include:$INSTALL_PREFIX/include/libxml2:$(pwd)/pglite/src/include \
---with-libraries=$INSTALL_PREFIX/lib:$(pwd)/pglite/src/pglite-libc \
+--with-icu \
+--with-includes=$INSTALL_PREFIX/include:$INSTALL_PREFIX/include/libxml2 \
+--with-libraries=$INSTALL_PREFIX/lib \
 --with-uuid=ossp \
 --with-zlib \
 --with-libxml \
@@ -114,6 +114,8 @@ if [ "$RUN_CONFIGURE" = true ]; then
     LDFLAGS=$PGLITE_LDFLAGS \
     LDFLAGS_SL=$PGLITE_LDFLAGS_SL \
     LDFLAGS_EX=$PGLITE_LDFLAGS_EX \
+    ICU_CFLAGS="-I/install/libs/include" \
+    ICU_LIBS="-L/install/libs/lib -licui18n -licuuc -licudata" \
     CFLAGS=${PGLITE_CFLAGS} emconfigure ./configure $CONFIGURE_PARAMS || { echo 'error: emconfigure failed' ; exit 11; }
 else
     echo "Warning: configure has not been run because RUN_CONFIGURE=${RUN_CONFIGURE}"
