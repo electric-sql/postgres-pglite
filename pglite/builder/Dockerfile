@@ -190,13 +190,16 @@ RUN cd /src/icu-native && \
     /src/icu/source/configure --disable-shared --enable-static --disable-tests --disable-samples && \
     make -j
 
+RUN mkdir -p /install/libs/share/icu/76.1/icudt76l/brkitr /install/libs/share/icu/76.1/icudt76l/coll /install/libs/share/icu/76.1/icudt76l/curr /install/libs/share/icu/76.1/icudt76l/lang /install/libs/share/icu/76.1/icudt76l/rbnf /install/libs/share/icu/76.1/icudt76l/region /install/libs/share/icu/76.1/icudt76l/translit /install/libs/share/icu/76.1/icudt76l/unit /install/libs/share/icu/76.1/icudt76l/zone
+
 # Step 2: Build wasm ICU
+# --with-data-packaging: https://unicode-org.github.io/icu/userguide/icu_data/#building-and-linking-against-icu-data
 WORKDIR /src/icu-wasm
-RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS} -std=c++17" \
+RUN  CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS} -std=c++17" \
     emconfigure /src/icu/source/configure \
     --host=wasm32-unknown-linux-gnu \
     --with-cross-build=/src/icu-native \
-    --with-data-packaging=static \
+    --with-data-packaging=archive \
     --disable-shared \
     --enable-static \
     --disable-tests \
