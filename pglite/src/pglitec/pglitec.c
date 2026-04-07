@@ -25,6 +25,7 @@
 #include <sys/time.h>
 #include <setjmp.h>
 #include <string.h>
+#include <signal.h>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -446,6 +447,36 @@ int EMSCRIPTEN_KEEPALIVE pgl_getsockname(int __fd, struct sockaddr * __addr,
 	return 0;
 }
 
+static int next_socket_fd = 33;
+
+int EMSCRIPTEN_KEEPALIVE pgl_socket(int domain, int type, int protocol) {
+	// dummy
+	return next_socket_fd++;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_bind(int socket, const struct sockaddr *address, socklen_t address_len) {
+	// dummy
+	return 0;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_listen(int socket, int backlog) {
+	// dummy
+	return 0;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_accept(int socket, struct sockaddr *address, socklen_t *address_len) {
+	// dummy
+	return next_socket_fd++;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_close(int fd) {
+    // not great because close is used for other file descriptors, not just sockets
+    if (fd < next_socket_fd) {
+        return 0;
+    }
+    return close(fd);
+}
+
 /*
 * Overrides the recv() libc function
 */
@@ -478,4 +509,64 @@ struct pollfd {
 int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout) {
     // dummy
 	return nfds;
+}
+
+/*
+* Emulate fork for multi-process
+*/
+
+typedef pid_t (*pglite_fork_t)();
+pglite_fork_t pglite_fork = NULL;
+
+pglite_fork_t EMSCRIPTEN_KEEPALIVE pgl_set_fork_fn(pglite_fork_t fork_fn) {
+    pglite_fork_t prev = pglite_fork;
+    pglite_fork = fork_fn;
+    return prev;
+}
+
+pid_t EMSCRIPTEN_KEEPALIVE pgl_fork() {
+    if (pglite_fork) {
+        return pglite_fork();
+    }
+    return fork();
+}
+
+/*
+* Emulate kill()
+*/
+
+typedef int (*pglite_kill_t)(pid_t pid, int signal);
+pglite_kill_t pglite_kill = NULL;
+
+pglite_kill_t EMSCRIPTEN_KEEPALIVE pgl_set_kill_fn(pglite_kill_t kill_fn) {
+    pglite_kill_t prev = pglite_kill;
+    pglite_kill = kill_fn;
+    return prev;
+}
+
+pid_t EMSCRIPTEN_KEEPALIVE pgl_kill(pid_t pid, int signal) {
+    if (pglite_kill) {
+        return pglite_kill(pid, signal);
+    }
+    return kill(pid, signal);
+}
+
+/**
+ * Emulate getpid()
+ */
+
+typedef int (*pglite_getpid_t)();
+pglite_getpid_t pglite_getpid = NULL;
+
+pglite_getpid_t EMSCRIPTEN_KEEPALIVE pgl_set_getpid_fn(pglite_getpid_t getpid_fn) {
+    pglite_getpid_t prev = pglite_getpid;
+    pglite_getpid = getpid_fn;
+    return prev;
+}
+
+pid_t EMSCRIPTEN_KEEPALIVE pgl_getpid() {
+    if (pglite_getpid) {
+        return pglite_getpid();
+    }
+    return getpid();
 }

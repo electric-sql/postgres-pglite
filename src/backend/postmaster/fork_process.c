@@ -67,6 +67,7 @@ fork_process(void)
 	if (result == 0)
 	{
 		/* fork succeeded, in child */
+		// tdrz: 1. extract this to separate function; will call it after fork		
 		MyProcPid = getpid();
 #ifdef LINUX_PROFILE
 		setitimer(ITIMER_PROF, &prof_itimer, NULL);

@@ -274,6 +274,7 @@ postmaster_child_launch(BackendType child_type,
 		/*
 		 * Run the appropriate Main function
 		 */
+		// tdrz: 2. call main in forked process		
 		child_process_kinds[child_type].main_fn(startup_data, startup_data_len);
 		pg_unreachable();		/* main_fn never returns */
 	}

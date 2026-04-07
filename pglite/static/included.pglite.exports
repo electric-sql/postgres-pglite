@@ -455,6 +455,7 @@ post_parse_analyze_hook
 PostgresMainLongJmp
 PostgresMainLoopOnce
 PostgresSendReadyForQueryIfNecessary
+PostmasterServerLoopOnce
 pow
 pq_buffer_remaining_data
 pread

@@ -1619,22 +1619,14 @@ ConfigurePostmasterWaitSet(bool accept_connections)
 	}
 }
 
-/*
- * Main idle loop of postmaster
- */
-static int
-ServerLoop(void)
-{
-	time_t		last_lockfile_recheck_time,
-				last_touch_time;
-	WaitEvent	events[MAXLISTEN];
-	int			nevents;
+#ifdef __PGLITE__	
+static time_t last_lockfile_recheck_time,
+			last_touch_time;
+static WaitEvent events[MAXLISTEN];
+static int nevents;
+#endif
 
-	ConfigurePostmasterWaitSet(true);
-	last_lockfile_recheck_time = last_touch_time = time(NULL);
-
-	for (;;)
-	{
+void PostmasterServerLoopOnce() {
 		time_t		now;
 
 		nevents = WaitEventSetWait(pm_wait_set,
@@ -1825,6 +1817,27 @@ ServerLoop(void)
 			TouchSocketLockFiles();
 			last_touch_time = now;
 		}
+}
+
+/*
+ * Main idle loop of postmaster
+ */
+static int
+ServerLoop(void)
+{
+#ifndef __PGLITE__	
+	time_t		last_lockfile_recheck_time,
+				last_touch_time;
+	WaitEvent	events[MAXLISTEN];
+	int			nevents;
+#endif
+
+	ConfigurePostmasterWaitSet(true);
+	last_lockfile_recheck_time = last_touch_time = time(NULL);
+
+	for (;;)
+	{
+		PostmasterServerLoopOnce();
 	}
 }
 

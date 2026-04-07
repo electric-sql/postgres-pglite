@@ -42,7 +42,10 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Drecv=pgl_recv -Dsend=pgl_send -Dconnect=pgl_connect \
 -Dpoll=pgl_poll \
 -Dshmget=pgl_shmget -Dshmat=pgl_shmat -Dshmdt=pgl_shmdt -Dshmctl=pgl_shmctl \
--Dlongjmp=pgl_longjmp -Dsiglongjmp=pgl_siglongjmp"
+-Dlongjmp=pgl_longjmp -Dsiglongjmp=pgl_siglongjmp \
+-Dfork=pgl_fork -Dkill=pgl_kill \
+-Dsocket=pgl_socket -Dbind=pgl_bind -Dlisten=pgl_listen -Daccept=pgl_accept -Dclose=pgl_close \
+-Dgetpid=pgl_getpid"
 # we don't want to override sigsetjmp and setjmp!
 # -Dsigsetjmp=pgl_sigsetjmp -Dsiglongjmp=pgl_siglongjmp \
 # -Dsetjmp=pgl_setjmp -Dlongjmp=pgl_longjmp"
