@@ -253,6 +253,7 @@ errstart
 errstart_cold
 escape_json
 exit
+exit
 exp
 exp2
 exprType

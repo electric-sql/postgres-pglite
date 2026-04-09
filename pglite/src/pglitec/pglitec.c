@@ -447,32 +447,88 @@ int EMSCRIPTEN_KEEPALIVE pgl_getsockname(int __fd, struct sockaddr * __addr,
 	return 0;
 }
 
-static int next_socket_fd = 33;
+static int next_socket_fd = 0;
+
+typedef int (*pglite_socket_t)(int domain, int type, int protocol);
+pglite_socket_t pglite_socket = NULL;
+
+pglite_socket_t EMSCRIPTEN_KEEPALIVE pgl_set_socket_fn(pglite_socket_t socket_fn) {
+    pglite_socket_t prev = pglite_socket;
+    pglite_socket = socket_fn;
+    return prev;
+}
 
 int EMSCRIPTEN_KEEPALIVE pgl_socket(int domain, int type, int protocol) {
-	// dummy
-	return next_socket_fd++;
+    if (pglite_socket) {
+        return pglite_socket(domain, type, protocol);
+    }
+    return next_socket_fd++;
+}
+
+typedef int (*pglite_bind_t)(int socket, const struct sockaddr *address, socklen_t address_len);
+pglite_bind_t pglite_bind = NULL;
+
+pglite_bind_t EMSCRIPTEN_KEEPALIVE pgl_set_bind_fn(pglite_bind_t bind_fn) {
+    pglite_bind_t prev = pglite_bind;
+    pglite_bind = bind_fn;
+    return prev;
 }
 
 int EMSCRIPTEN_KEEPALIVE pgl_bind(int socket, const struct sockaddr *address, socklen_t address_len) {
-	// dummy
+    if (pglite_bind) {
+        return pglite_bind(socket, address, address_len);
+    }
 	return 0;
+}
+
+typedef int (*pglite_listen_t)(int socket, int backlog);
+pglite_listen_t pglite_listen = NULL;
+
+pglite_listen_t EMSCRIPTEN_KEEPALIVE pgl_set_listen_fn(pglite_listen_t listen_fn) {
+    pglite_listen_t prev = pglite_listen;
+    pglite_listen = listen_fn;
+    return prev;
 }
 
 int EMSCRIPTEN_KEEPALIVE pgl_listen(int socket, int backlog) {
-	// dummy
+    if (pglite_listen) {
+        return pglite_listen(socket, backlog);
+    }
 	return 0;
 }
 
+typedef int (*pglite_accept_t)(int socket, struct sockaddr *address, socklen_t *address_len);
+pglite_accept_t pglite_accept = NULL;
+
+pglite_accept_t EMSCRIPTEN_KEEPALIVE pgl_set_accept_fn(pglite_accept_t accept_fn) {
+    pglite_accept_t prev = pglite_accept;
+    pglite_accept = accept_fn;
+    return prev;
+}
+
 int EMSCRIPTEN_KEEPALIVE pgl_accept(int socket, struct sockaddr *address, socklen_t *address_len) {
-	// dummy
-	return next_socket_fd++;
+    if (pglite_accept) {
+        return pglite_accept(socket, address, address_len);
+    }
+    return next_socket_fd++;
+}
+
+typedef int (*pglite_close_t)(int fd);
+pglite_close_t pglite_close = NULL;
+
+pglite_close_t EMSCRIPTEN_KEEPALIVE pgl_set_close_fn(pglite_close_t close_fn) {
+    pglite_close_t prev = pglite_close;
+    pglite_close = close_fn;
+    return prev;
 }
 
 int EMSCRIPTEN_KEEPALIVE pgl_close(int fd) {
-    // not great because close is used for other file descriptors, not just sockets
-    if (fd < next_socket_fd) {
-        return 0;
+    if (pglite_close) {
+        int ret = pglite_close(fd);
+        if (ret < 0) {
+            return close(fd);
+        }
+        return ret;
     }
     return close(fd);
 }
@@ -506,8 +562,20 @@ struct pollfd {
 	short revents;    /* returned events */
 };
 
+typedef ssize_t (*pglite_poll_t)(struct pollfd fds[], ssize_t nfds, int timeout);
+pglite_poll_t pglite_poll = NULL;
+
+pglite_poll_t EMSCRIPTEN_KEEPALIVE pgl_set_poll_fn(pglite_poll_t poll_fn) {
+    pglite_poll_t prev = pglite_poll;
+    pglite_poll = poll_fn;
+    return prev;
+}
+
 int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout) {
-    // dummy
+    if (pglite_poll) {
+        return pglite_poll(fds, nfds, timeout);
+    }
+    // this means all fds have triggered
 	return nfds;
 }
 
