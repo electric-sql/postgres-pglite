@@ -45,7 +45,8 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Dlongjmp=pgl_longjmp -Dsiglongjmp=pgl_siglongjmp \
 -Dfork=pgl_fork -Dkill=pgl_kill \
 -Dsocket=pgl_socket -Dbind=pgl_bind -Dlisten=pgl_listen -Daccept=pgl_accept -Dclose=pgl_close \
--Dgetpid=pgl_getpid"
+-Dgetpid=pgl_getpid \
+-Dpipe=pgl_pipe"
 # we don't want to override sigsetjmp and setjmp!
 # -Dsigsetjmp=pgl_sigsetjmp -Dsiglongjmp=pgl_siglongjmp \
 # -Dsetjmp=pgl_setjmp -Dlongjmp=pgl_longjmp"
@@ -72,7 +73,7 @@ PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0"
 PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,PIPEFS,SOCKETFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=32MB \
 -sWASM_BIGINT \
@@ -164,7 +165,7 @@ PGPRELOAD="\
 --preload-file $(pwd)/pglite/static/empty@/pglite/pgstdout \
 --preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a"
 
-PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
+PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,PIPEFS,SOCKETFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 POSTGRES_PGLITE_FLAGS="\

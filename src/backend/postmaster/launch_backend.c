@@ -68,6 +68,13 @@
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
 
+#ifdef __PGLITE__
+extern int pglite_child_type; // BACKEND_TYPE
+extern char* pglite_startup_data;
+extern size_t pglite_startup_data_len;
+extern ClientSocket *pglite_client_sock;
+#endif
+
 #ifdef EXEC_BACKEND
 #include "nodes/queryjumble.h"
 #include "storage/pg_shmem.h"
@@ -216,6 +223,44 @@ PostmasterChildName(BackendType child_type)
 	return child_process_kinds[child_type].name;
 }
 
+#ifdef __PGLITE__
+void after_fork_process_inchild(int child_type, char* startup_data, size_t startup_data_len, ClientSocket *client_sock) {
+	/* Close the postmaster's sockets */
+	ClosePostmasterPorts(child_type == B_LOGGER);
+
+	/* Detangle from postmaster */
+	InitPostmasterChild();
+
+	/* Detach shared memory if not needed. */
+	if (!child_process_kinds[child_type].shmem_attach)
+	{
+		dsm_detach_all();
+		PGSharedMemoryDetach();
+	}
+
+	/*
+	 * Enter the Main function with TopMemoryContext.  The startup data is
+	 * allocated in PostmasterContext, so we cannot release it here yet.
+	 * The Main function will do it after it's done handling the startup
+	 * data.
+	 */
+	MemoryContextSwitchTo(TopMemoryContext);
+
+	if (client_sock)
+	{
+		MyClientSocket = palloc(sizeof(ClientSocket));
+		memcpy(MyClientSocket, client_sock, sizeof(ClientSocket));
+	}
+
+	/*
+	 * Run the appropriate Main function
+	 */
+	child_process_kinds[child_type].main_fn(startup_data, startup_data_len);
+	pg_unreachable();		/* main_fn never returns */
+}
+#endif
+
+
 /*
  * Start a new postmaster child process.
  *
@@ -241,42 +286,16 @@ postmaster_child_launch(BackendType child_type,
 							startup_data, startup_data_len, client_sock);
 	/* the child process will arrive in SubPostmasterMain */
 #else							/* !EXEC_BACKEND */
+#ifdef __PGLITE__
+	pglite_child_type = child_type;
+	pglite_startup_data = startup_data;
+	pglite_startup_data_len = startup_data_len;
+	pglite_client_sock = client_sock;
+#endif
 	pid = fork_process();
 	if (pid == 0)				/* child */
 	{
-		/* Close the postmaster's sockets */
-		ClosePostmasterPorts(child_type == B_LOGGER);
-
-		/* Detangle from postmaster */
-		InitPostmasterChild();
-
-		/* Detach shared memory if not needed. */
-		if (!child_process_kinds[child_type].shmem_attach)
-		{
-			dsm_detach_all();
-			PGSharedMemoryDetach();
-		}
-
-		/*
-		 * Enter the Main function with TopMemoryContext.  The startup data is
-		 * allocated in PostmasterContext, so we cannot release it here yet.
-		 * The Main function will do it after it's done handling the startup
-		 * data.
-		 */
-		MemoryContextSwitchTo(TopMemoryContext);
-
-		if (client_sock)
-		{
-			MyClientSocket = palloc(sizeof(ClientSocket));
-			memcpy(MyClientSocket, client_sock, sizeof(ClientSocket));
-		}
-
-		/*
-		 * Run the appropriate Main function
-		 */
-		// tdrz: 2. call main in forked process		
-		child_process_kinds[child_type].main_fn(startup_data, startup_data_len);
-		pg_unreachable();		/* main_fn never returns */
+		after_fork_process_inchild(child_type, startup_data, startup_data_len, client_sock);
 	}
 #endif							/* EXEC_BACKEND */
 	return pid;

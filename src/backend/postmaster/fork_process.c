@@ -23,50 +23,9 @@
 #include "postmaster/fork_process.h"
 
 #ifndef WIN32
-/*
- * Wrapper for fork(). Return values are the same as those for fork():
- * -1 if the fork failed, 0 in the child process, and the PID of the
- * child in the parent process.  Signals are blocked while forking, so
- * the child must unblock.
- */
-pid_t
-fork_process(void)
-{
-	pid_t		result;
-	const char *oomfilename;
-	sigset_t	save_mask;
 
-#ifdef LINUX_PROFILE
-	struct itimerval prof_itimer;
-#endif
-
-	/*
-	 * Flush stdio channels just before fork, to avoid double-output problems.
-	 */
-	fflush(NULL);
-
-#ifdef LINUX_PROFILE
-
-	/*
-	 * Linux's fork() resets the profiling timer in the child process. If we
-	 * want to profile child processes then we need to save and restore the
-	 * timer setting.  This is a waste of time if not profiling, however, so
-	 * only do it if commanded by specific -DLINUX_PROFILE switch.
-	 */
-	getitimer(ITIMER_PROF, &prof_itimer);
-#endif
-
-	/*
-	 * We start postmaster children with signals blocked.  This allows them to
-	 * install their own handlers before unblocking, to avoid races where they
-	 * might run the postmaster's handler and miss an important control
-	 * signal. With more analysis this could potentially be relaxed.
-	 */
-	sigprocmask(SIG_SETMASK, &BlockSig, &save_mask);
-	result = fork();
-	if (result == 0)
-	{
-		/* fork succeeded, in child */
+void after_fork_inchild() {
+		const char *oomfilename;
 		// tdrz: 1. extract this to separate function; will call it after fork		
 		MyProcPid = getpid();
 #ifdef LINUX_PROFILE
@@ -116,6 +75,53 @@ fork_process(void)
 
 		/* do post-fork initialization for random number generation */
 		pg_strong_random_init();
+}
+
+/*
+ * Wrapper for fork(). Return values are the same as those for fork():
+ * -1 if the fork failed, 0 in the child process, and the PID of the
+ * child in the parent process.  Signals are blocked while forking, so
+ * the child must unblock.
+ */
+pid_t
+fork_process(void)
+{
+	pid_t		result;
+	// const char *oomfilename;
+	sigset_t	save_mask;
+
+#ifdef LINUX_PROFILE
+	struct itimerval prof_itimer;
+#endif
+
+	/*
+	 * Flush stdio channels just before fork, to avoid double-output problems.
+	 */
+	fflush(NULL);
+
+#ifdef LINUX_PROFILE
+
+	/*
+	 * Linux's fork() resets the profiling timer in the child process. If we
+	 * want to profile child processes then we need to save and restore the
+	 * timer setting.  This is a waste of time if not profiling, however, so
+	 * only do it if commanded by specific -DLINUX_PROFILE switch.
+	 */
+	getitimer(ITIMER_PROF, &prof_itimer);
+#endif
+
+	/*
+	 * We start postmaster children with signals blocked.  This allows them to
+	 * install their own handlers before unblocking, to avoid races where they
+	 * might run the postmaster's handler and miss an important control
+	 * signal. With more analysis this could potentially be relaxed.
+	 */
+	sigprocmask(SIG_SETMASK, &BlockSig, &save_mask);
+	result = fork();
+	if (result == 0)
+	{
+		/* fork succeeded, in child */
+		after_fork_inchild();
 	}
 	else
 	{

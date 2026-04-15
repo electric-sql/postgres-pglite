@@ -26,6 +26,7 @@
 #include <setjmp.h>
 #include <string.h>
 #include <signal.h>
+#include <stdlib.h>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -405,22 +406,25 @@ pgl_munmap(void *addr, size_t length) {
 * read FROM JS
 * Callback used for reading data from the frontend
 */
-typedef ssize_t (*pgl_read_t)(void *buffer, size_t max_length);
-pgl_read_t pgl_read;
+typedef ssize_t (*pglite_recv_t)(int __fd, void *__buf, size_t __n, int __flags);
+pglite_recv_t pglite_recv = NULL;
+
+pglite_recv_t EMSCRIPTEN_KEEPALIVE pgl_set_recv_fn(pglite_recv_t recv_fn) {
+    pglite_recv_t prev = pglite_recv;
+    pglite_recv = recv_fn;
+    return prev;
+}
 
 /* write TO JS
 * Callback used for writing data to the frontend
 */
-typedef ssize_t (*pgl_write_t)(void *buffer, size_t length);
-pgl_write_t pgl_write;
+typedef ssize_t (*pglite_send_t)(int __fd, const void *__buf, size_t __n, int __flags);
+pglite_send_t pglite_send = NULL;
 
-/*
-* Set the above callbacks
-*/
-void EMSCRIPTEN_KEEPALIVE
-pgl_set_rw_cbs(pgl_read_t read_cb, pgl_write_t write_cb) {
-    pgl_read = read_cb;
-    pgl_write = write_cb;
+pglite_send_t EMSCRIPTEN_KEEPALIVE pgl_set_send_fn(pglite_send_t send_fn) {
+    pglite_send_t prev = pglite_send;
+    pglite_send = send_fn;
+    return prev;
 }
 
 int EMSCRIPTEN_KEEPALIVE pgl_fcntl(int __fd, int __cmd, ...) {
@@ -538,7 +542,7 @@ int EMSCRIPTEN_KEEPALIVE pgl_close(int fd) {
 */
 
 ssize_t EMSCRIPTEN_KEEPALIVE pgl_recv(int __fd, void *__buf, size_t __n, int __flags) {
-	ssize_t got = pgl_read(__buf, __n);
+	ssize_t got = pglite_recv(__fd, __buf, __n, __flags);
 	return got;
 }
 
@@ -547,7 +551,7 @@ ssize_t EMSCRIPTEN_KEEPALIVE pgl_recv(int __fd, void *__buf, size_t __n, int __f
 */
 
 ssize_t EMSCRIPTEN_KEEPALIVE pgl_send(int __fd, const void *__buf, size_t __n, int __flags) {
-	ssize_t wrote = pgl_write(__buf, __n);
+	ssize_t wrote = pglite_send(__fd, __buf, __n, __flags);
 	return wrote;
 }
 
@@ -583,7 +587,12 @@ int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout
 * Emulate fork for multi-process
 */
 
-typedef pid_t (*pglite_fork_t)();
+int pglite_child_type = 0; // BACKEND_TYPE
+char* pglite_startup_data = NULL;
+size_t pglite_startup_data_len = 0;
+void *pglite_client_sock = NULL;
+
+typedef pid_t (*pglite_fork_t)(int child_type, char* startup_data, size_t startup_data_len, void *client_sock);
 pglite_fork_t pglite_fork = NULL;
 
 pglite_fork_t EMSCRIPTEN_KEEPALIVE pgl_set_fork_fn(pglite_fork_t fork_fn) {
@@ -594,7 +603,7 @@ pglite_fork_t EMSCRIPTEN_KEEPALIVE pgl_set_fork_fn(pglite_fork_t fork_fn) {
 
 pid_t EMSCRIPTEN_KEEPALIVE pgl_fork() {
     if (pglite_fork) {
-        return pglite_fork();
+        return pglite_fork(pglite_child_type, pglite_startup_data, pglite_startup_data_len, pglite_client_sock);
     }
     return fork();
 }
@@ -638,3 +647,84 @@ pid_t EMSCRIPTEN_KEEPALIVE pgl_getpid() {
     }
     return getpid();
 }
+
+/*
+* Emulate pipe()
+*/
+
+typedef int (*pglite_pipe_t)(int pipefd[2]);
+pglite_pipe_t pglite_pipe = NULL;
+
+pglite_pipe_t EMSCRIPTEN_KEEPALIVE pgl_set_pipe_fn(pglite_pipe_t pipe_fn) {
+    pglite_pipe_t prev = pglite_pipe;
+    pglite_pipe = pipe_fn;
+    return prev;
+}
+
+typedef struct pipe_node {
+    int fd;
+    int *pipedes;
+    struct pipe_node *next;
+} pipe_node_t;
+
+static pipe_node_t *pipe_list = NULL;
+
+static void pipe_list_add(int fd, int *pipedes) {
+    pipe_node_t *node = (pipe_node_t *)malloc(sizeof(pipe_node_t));
+    node->fd = fd;
+    node->pipedes = pipedes;
+    node->next = pipe_list;
+    pipe_list = node;
+}
+
+int * EMSCRIPTEN_KEEPALIVE pgl_pipe_lookup(int fd) {
+    for (pipe_node_t *n = pipe_list; n; n = n->next) {
+        if (n->fd == fd)
+            return n->pipedes;
+    }
+    return NULL;
+}
+
+void EMSCRIPTEN_KEEPALIVE pgl_pipe_remove(int fd) {
+    pipe_node_t **pp = &pipe_list;
+    while (*pp) {
+        if ((*pp)->fd == fd) {
+            pipe_node_t *tmp = *pp;
+            *pp = tmp->next;
+            free(tmp);
+            return;
+        }
+        pp = &(*pp)->next;
+    }
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_pipe_replace(int prevFd, int newFd) {
+    for (pipe_node_t *n = pipe_list; n; n = n->next) {
+        if (n->fd == prevFd) {
+            *(n->pipedes) = newFd;
+            n->fd = newFd;
+            return 0;
+        }
+            
+    }
+    return 1;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_pipe(int __pipedes[2]) {
+    if (pglite_pipe) {
+        return pglite_pipe(__pipedes);
+    }
+    int res = pipe(__pipedes);
+    if (res == 0) {
+        pipe_list_add(__pipedes[0], &__pipedes[0]);
+        pipe_list_add(__pipedes[1], &__pipedes[1]);
+    }
+    return res;
+}
+
+// extern int postmaster_alive_fds[2];
+
+// void EMSCRIPTEN_KEEPALIVE pgl_set_postmaster_alive_fds(int fd0, int fd1) {
+//     postmaster_alive_fds[0] = fd0;
+//     postmaster_alive_fds[1] = fd1;
+// }
