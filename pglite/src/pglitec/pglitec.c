@@ -631,6 +631,54 @@ pid_t EMSCRIPTEN_KEEPALIVE pgl_kill(pid_t pid, int signal) {
     return kill(pid, signal);
 }
 
+/*
+* Emulate sigaction()
+* Extracts sa_handler from the struct, delegates to JS, and populates oldact.
+*/
+
+typedef void (*pgl_sighandler_t)(int);
+typedef pgl_sighandler_t (*pglite_sigaction_t)(int signum, pgl_sighandler_t handler);
+pglite_sigaction_t pglite_sigaction = NULL;
+
+pglite_sigaction_t EMSCRIPTEN_KEEPALIVE pgl_set_sigaction_fn(pglite_sigaction_t sigaction_fn) {
+    pglite_sigaction_t prev = pglite_sigaction;
+    pglite_sigaction = sigaction_fn;
+    return prev;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_sigaction(int signum, const struct sigaction *act, struct sigaction *oldact) {
+    if (pglite_sigaction) {
+        pgl_sighandler_t new_handler = act ? act->sa_handler : SIG_DFL;
+        pgl_sighandler_t prev = pglite_sigaction(signum, new_handler);
+        if (oldact) {
+            memset(oldact, 0, sizeof(struct sigaction));
+            oldact->sa_handler = prev;
+        }
+        return 0;
+    }
+    return sigaction(signum, act, oldact);
+}
+
+/*
+* Emulate waitpid()
+*/
+
+typedef pid_t (*pglite_waitpid_t)(pid_t pid, int *status, int options);
+pglite_waitpid_t pglite_waitpid = NULL;
+
+pglite_waitpid_t EMSCRIPTEN_KEEPALIVE pgl_set_waitpid_fn(pglite_waitpid_t waitpid_fn) {
+    pglite_waitpid_t prev = pglite_waitpid;
+    pglite_waitpid = waitpid_fn;
+    return prev;
+}
+
+pid_t EMSCRIPTEN_KEEPALIVE pgl_waitpid(pid_t pid, int *status, int options) {
+    if (pglite_waitpid) {
+        return pglite_waitpid(pid, status, options);
+    }
+    return waitpid(pid, status, options);
+}
+
 /**
  * Emulate getpid()
  */

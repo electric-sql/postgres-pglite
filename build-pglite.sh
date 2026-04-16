@@ -27,11 +27,7 @@ fi
 
 # first build pglite-libc object WITHOUT the overriding flags
 # pushd pglite/src/pglitec && emcc -g --no-wasm-opt -gsource-map -static -fPIC -o pglitec.o -c pglitec.c && popd
-pushd pglite/src/pglitec && \
-    emcc $PGLITE_CFLAGS -static -fpic -o pglitec.o -c pglitec.c && \
-    emcc $PGLITE_CFLAGS -static -fpic -o pglitec_pipe.o -c pglitec_pipe.c && \
-    emar rcs libpglitec.a pglitec.o pglitec_pipe.o && \
-    popd
+emmake make CFLAGS="$PGLITE_CFLAGS" -C pglite/src/pglitec -j
 
 # -Dread=pgl_read -Dwrite=pgl_write
 PGLITE_CFLAGS="$PGLITE_CFLAGS \
@@ -47,7 +43,7 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Dpoll=pgl_poll \
 -Dshmget=pgl_shmget -Dshmat=pgl_shmat -Dshmdt=pgl_shmdt -Dshmctl=pgl_shmctl \
 -Dlongjmp=pgl_longjmp -Dsiglongjmp=pgl_siglongjmp \
--Dfork=pgl_fork -Dkill=pgl_kill \
+-Dfork=pgl_fork -Dkill=pgl_kill -Dsignal=pgl_signal \
 -Dsocket=pgl_socket -Dbind=pgl_bind -Dlisten=pgl_listen -Daccept=pgl_accept -Dclose=pgl_close \
 -Dgetpid=pgl_getpid \
 -Dpipe=pgl_pipe"
@@ -77,7 +73,7 @@ PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0"
 PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,PIPEFS,SOCKETFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,PIPEFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=32MB \
 -sWASM_BIGINT \
@@ -169,7 +165,7 @@ PGPRELOAD="\
 --preload-file $(pwd)/pglite/static/empty@/pglite/pgstdout \
 --preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a"
 
-PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,PIPEFS,SOCKETFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
+PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,PIPEFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 POSTGRES_PGLITE_FLAGS="\
@@ -180,7 +176,7 @@ POSTGRES_PGLITE_FLAGS="\
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
 $PGPRELOAD \
 -lnodefs.js -lidbfs.js \
---post-js $(pwd)/pglite/src/pglite-post.js"
+--post-js $(pwd)/pglite/src/js/post-js-hacks.js"
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" emmake make PORTNAME=emscripten -C src/backend/ -j pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
