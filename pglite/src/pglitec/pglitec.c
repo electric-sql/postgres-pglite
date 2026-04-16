@@ -28,6 +28,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <poll.h>
+#include <sys/wait.h>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>

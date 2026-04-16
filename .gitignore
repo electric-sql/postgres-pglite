@@ -53,3 +53,6 @@ lib*.pc
 dist
 *.defs.txt
 *.undef.txt
+
+# we really really want these
+!post-js-hacks.js
