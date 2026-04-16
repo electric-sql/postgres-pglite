@@ -224,7 +224,7 @@ PostmasterChildName(BackendType child_type)
 }
 
 #ifdef __PGLITE__
-void after_fork_process_inchild(int child_type, char* startup_data, size_t startup_data_len, ClientSocket *client_sock) {
+int after_fork_process_inchild(int child_type, char* startup_data, size_t startup_data_len, ClientSocket *client_sock) {
 	/* Close the postmaster's sockets */
 	ClosePostmasterPorts(child_type == B_LOGGER);
 
@@ -257,6 +257,7 @@ void after_fork_process_inchild(int child_type, char* startup_data, size_t start
 	 */
 	child_process_kinds[child_type].main_fn(startup_data, startup_data_len);
 	pg_unreachable();		/* main_fn never returns */
+	return -102;
 }
 #endif
 

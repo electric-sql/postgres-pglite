@@ -27,7 +27,11 @@ fi
 
 # first build pglite-libc object WITHOUT the overriding flags
 # pushd pglite/src/pglitec && emcc -g --no-wasm-opt -gsource-map -static -fPIC -o pglitec.o -c pglitec.c && popd
-pushd pglite/src/pglitec && emcc $PGLITE_CFLAGS -static -fpic -o pglitec.o -c pglitec.c && popd
+pushd pglite/src/pglitec && \
+    emcc $PGLITE_CFLAGS -static -fpic -o pglitec.o -c pglitec.c && \
+    emcc $PGLITE_CFLAGS -static -fpic -o pglitec_pipe.o -c pglitec_pipe.c && \
+    emar rcs libpglitec.a pglitec.o pglitec_pipe.o && \
+    popd
 
 # -Dread=pgl_read -Dwrite=pgl_write
 PGLITE_CFLAGS="$PGLITE_CFLAGS \
@@ -87,7 +91,7 @@ PGLITE_LDFLAGS_EX="\
 -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
-$(pwd)/pglite/src/pglitec/pglitec.o \
+$(pwd)/pglite/src/pglitec/libpglitec.a \
 -lproxyfs.js"
 
 # --with-blocksize=16 
@@ -175,7 +179,8 @@ POSTGRES_PGLITE_FLAGS="\
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
 $PGPRELOAD \
--lnodefs.js -lidbfs.js"
+-lnodefs.js -lidbfs.js \
+--post-js $(pwd)/pglite/src/pglite-post.js"
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" emmake make PORTNAME=emscripten -C src/backend/ -j pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
