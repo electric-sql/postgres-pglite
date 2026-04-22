@@ -169,9 +169,13 @@ static int	signal_fd = -1;
 
 #ifdef WAIT_USE_SELF_PIPE
 /* Read and write ends of the self-pipe */
+#ifdef __PGLITE__
+int	selfpipe_readfd = -1;
+int	selfpipe_writefd = -1;
+#else
 static int	selfpipe_readfd = -1;
 static int	selfpipe_writefd = -1;
-
+#endif
 /* Process owning the self-pipe --- needed for checking purposes */
 static int	selfpipe_owner_pid = 0;
 

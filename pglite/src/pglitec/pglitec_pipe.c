@@ -69,18 +69,50 @@ void EMSCRIPTEN_KEEPALIVE pipe_remove(int fd) {
     }
 }
 
+__attribute__((weak)) int	selfpipe_readfd = -1;
+__attribute__((weak)) int	selfpipe_writefd = -1;
+__attribute__((weak)) int	postmaster_alive_fds[2] = {-1, -1};
+
+__attribute__((weak)) int	NumListenSockets = 0;
+__attribute__((weak)) int *ListenSockets = NULL;
+
+int EMSCRIPTEN_KEEPALIVE hlp_pipe_init_pipes() {
+    int __pipedes[2];
+    int res = pipe(__pipedes);
+    selfpipe_readfd = __pipedes[0];
+    selfpipe_writefd = __pipedes[1];
+    res = pipe(postmaster_alive_fds);
+
+    NumListenSockets = 0;
+	ListenSockets = NULL;
+
+    return res;
+}
+
 int EMSCRIPTEN_KEEPALIVE hlp_pipe_replace(int prevFd, int newFd) {
-    for (pipe_node_t *n = pipe_list; n; n = n->next) {
-        if (n->fd_read == prevFd) {
-            *(&n->pipedes[0]) = newFd;
-            n->fd_read = newFd;
-            return 0;
-        } if (n->fd_write == prevFd) {
-            *(&n->pipedes[1]) = newFd;
-            n->fd_write = newFd;
-            return 0;
-        }
+    if (prevFd == selfpipe_readfd) {
+        selfpipe_readfd = newFd;
     }
+    if (prevFd == selfpipe_writefd) {
+        selfpipe_writefd = newFd;
+    }
+    if (postmaster_alive_fds[0] == prevFd) {
+        postmaster_alive_fds[0] = newFd;
+    }
+    if (postmaster_alive_fds[1] == prevFd) {
+        postmaster_alive_fds[1] = newFd;
+    }
+    // for (pipe_node_t *n = pipe_list; n; n = n->next) {
+    //     if (n->fd_read == prevFd) {
+    //         *(&n->pipedes[0]) = newFd;
+    //         n->fd_read = newFd;
+    //         return 0;
+    //     } if (n->fd_write == prevFd) {
+    //         *(&n->pipedes[1]) = newFd;
+    //         n->fd_write = newFd;
+    //         return 0;
+    //     }
+    // }
     return 1;
 }
 

@@ -22,6 +22,7 @@
 #include <pwd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/time.h>
 #include <setjmp.h>
 #include <string.h>
@@ -29,6 +30,7 @@
 #include <stdlib.h>
 #include <poll.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -453,6 +455,38 @@ int EMSCRIPTEN_KEEPALIVE pgl_getsockname(int __fd, struct sockaddr * __addr,
 	return 0;
 }
 
+/*
+ * Mirror of ClientSocket from libpq-be.h:
+ *   typedef struct ClientSocket { pgsocket sock; SockAddr raddr; } ClientSocket;
+ * where pgsocket = int, SockAddr = { sockaddr_storage addr; socklen_t salen; }
+ */
+typedef struct {
+	int			sock;
+	struct sockaddr_storage addr;
+	socklen_t	salen;
+} PglClientSocket;
+
+static PglClientSocket pgl_dummy_client_socket;
+static int pgl_dummy_client_socket_inited = 0;
+
+static void pgl_init_dummy_client_socket(void) {
+	struct sockaddr_un *un;
+	memset(&pgl_dummy_client_socket, 0, sizeof(pgl_dummy_client_socket));
+	pgl_dummy_client_socket.sock = open("/tmp/.s.PGSQL.5432.connected", O_RDWR | O_CREAT, 0600);
+	un = (struct sockaddr_un *)&pgl_dummy_client_socket.addr;
+	un->sun_family = AF_UNIX;
+	strcpy(un->sun_path, "/tmp/.s.PGSQL.5432.connected");
+	pgl_dummy_client_socket.salen = sizeof(struct sockaddr_un);
+}
+
+void *EMSCRIPTEN_KEEPALIVE hlp_get_dummy_client_socket_ptr(void) {
+	if (!pgl_dummy_client_socket_inited) {
+		pgl_init_dummy_client_socket();
+		pgl_dummy_client_socket_inited = 1;
+	}
+	return &pgl_dummy_client_socket;
+}
+
 // static int next_socket_fd = 0;
 
 // typedef int (*pglite_socket_t)(int domain, int type, int protocol);
@@ -562,11 +596,15 @@ int EMSCRIPTEN_KEEPALIVE pgl_connect(int socket, const struct sockaddr *address,
 	return 0;
 }
 
-// struct pollfd {
-//     int   fd;         /* file descriptor */
-//     short events;     /* requested events */
-// 	short revents;    /* returned events */
-// };
+typedef struct Latch
+{
+	sig_atomic_t is_set;
+	sig_atomic_t maybe_sleeping;
+	bool		is_shared;
+	int			owner_pid;
+} Latch;
+
+__attribute__((weak)) struct Latch *MyLatch = NULL;
 
 typedef ssize_t (*pglite_poll_t)(struct pollfd fds[], ssize_t nfds, int timeout);
 pglite_poll_t pglite_poll = NULL;
@@ -582,7 +620,7 @@ int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout
     //     return pglite_poll(fds, nfds, timeout);
     // }
     int ret = poll(fds, nfds, 0);
-    if (ret == 0)
+    if (ret == 0 && (!MyLatch || !MyLatch->is_set))
         exit(102);
     return ret;
 }
@@ -699,6 +737,7 @@ pid_t EMSCRIPTEN_KEEPALIVE pgl_getpid() {
     }
     return getpid();
 }
+
 
 
 

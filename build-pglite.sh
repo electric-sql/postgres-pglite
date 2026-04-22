@@ -27,7 +27,7 @@ fi
 
 # first build pglite-libc object WITHOUT the overriding flags
 # pushd pglite/src/pglitec && emcc -g --no-wasm-opt -gsource-map -static -fPIC -o pglitec.o -c pglitec.c && popd
-emmake make CFLAGS="$PGLITE_CFLAGS" -C pglite/src/pglitec -j
+emmake make CFLAGS="$PGLITE_CFLAGS" -C pglite/src/pglitec -j || { echo 'error: building libpglitec failed' ; exit 6; }
 
 # -Dread=pgl_read -Dwrite=pgl_write
 PGLITE_CFLAGS="$PGLITE_CFLAGS \
@@ -46,7 +46,8 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Dfork=pgl_fork -Dkill=pgl_kill -Dsignal=pgl_signal \
 -Dsocket=pgl_socket -Dbind=pgl_bind -Dlisten=pgl_listen -Daccept=pgl_accept -Dclose=pgl_close \
 -Dgetpid=pgl_getpid \
--Dpipe=pgl_pipe"
+-Dpipe=pgl_pipe \
+-Dsigaction=pgl_sigaction -Dwaitpid=pgl_waitpid"
 # we don't want to override sigsetjmp and setjmp!
 # -Dsigsetjmp=pgl_sigsetjmp -Dsiglongjmp=pgl_siglongjmp \
 # -Dsetjmp=pgl_setjmp -Dlongjmp=pgl_longjmp"
@@ -73,7 +74,7 @@ PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0"
 PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,PIPEFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,PIPEFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,wasmTable"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=32MB \
 -sWASM_BIGINT \
@@ -165,7 +166,7 @@ PGPRELOAD="\
 --preload-file $(pwd)/pglite/static/empty@/pglite/pgstdout \
 --preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a"
 
-PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,PIPEFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
+PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,PIPEFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV,wasmTable"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 POSTGRES_PGLITE_FLAGS="\

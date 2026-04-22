@@ -218,8 +218,14 @@ int			ReservedConnections;
 
 /* The socket(s) we're listening to. */
 #define MAXLISTEN	64
+
+#ifdef __PGLITE__
+int	NumListenSockets = 0;
+pgsocket *ListenSockets = NULL;
+#else
 static int	NumListenSockets = 0;
 static pgsocket *ListenSockets = NULL;
+#endif
 
 /* still more option variables */
 bool		EnableSSL = false;
