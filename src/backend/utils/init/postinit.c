@@ -66,7 +66,7 @@
 #include "utils/syscache.h"
 #include "utils/timeout.h"
 
-static HeapTuple GetDatabaseTuple(const char *dbname);
+HeapTuple GetDatabaseTuple(const char *dbname);
 static HeapTuple GetDatabaseTupleByOid(Oid dboid);
 static void PerformAuthentication(Port *port);
 static void CheckMyDatabase(const char *name, bool am_superuser, bool override_allow_connections);
@@ -97,7 +97,7 @@ static void process_settings(Oid databaseid, Oid roleid);
  * cache file, and so we can do an indexscan.  criticalSharedRelcachesBuilt
  * tells whether we got the cached descriptors.
  */
-static HeapTuple
+HeapTuple
 GetDatabaseTuple(const char *dbname)
 {
 	HeapTuple	tuple;

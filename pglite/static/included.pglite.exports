@@ -685,3 +685,5 @@ WalReceiverMain
 WalSummarizerMain
 WalWriterMain
 SysLoggerMain
+GetDatabaseTuple
+pq_endmsgread

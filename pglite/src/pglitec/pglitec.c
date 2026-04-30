@@ -17,6 +17,8 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/shm.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
 #include <pwd.h>
@@ -267,6 +269,7 @@ typedef struct ShmSegment {
     size_t size;
     void *addr;
     int shmflg;
+    int backing_fd;
     struct ShmSegment *next;
 } ShmSegment;
 
@@ -307,6 +310,16 @@ pgl_shmget(key_t key, size_t size, int shmflg) {
         new_seg->addr = mem;
         new_seg->shmflg = shmflg;
         new_seg->next = shm_list;
+
+        mkdir("/pglite_shm", 0700);
+        char path[64];
+        snprintf(path, sizeof(path), "/pglite_shm/sysv_%d", (int)key);
+        int bfd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+        if (bfd >= 0) {
+            write(bfd, mem, pagesize);
+        }
+        new_seg->backing_fd = bfd;
+
         shm_list = new_seg;
 
         return new_seg->shmid;
@@ -386,18 +399,143 @@ pgl_shmctl(int shmid, int cmd, struct shmid_ds *buf) {
     return -1;
 }
 
-/* ========== MMAP/MUNMAP ==========
- * Dummy munmap implementation for emscripten.
- * Emscripten's munmap can corrupt unrelated files in MEMFS,
- * so we just return success without doing anything.
- * Memory will be reclaimed when the WASM instance terminates.
- */
+// ============ POSIX SHM ===============
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_shm_open(const char *name, int oflag, mode_t mode) {
+    // char path[256];
+    // snprintf(path, sizeof(path), "/tmp/pglite_shm%s", name);
+    return open(name, oflag, mode);
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_shm_unlink(const char *name) {
+    // char path[256];
+    // snprintf(path, sizeof(path), "/tmp/pglite_shm%s", name);
+    return unlink(name);
+}
+
+// ============ MMAP/MUNMAP ===============
+
+typedef struct MmapRegion {
+    void *addr;
+    size_t length;
+    int backing_fd;
+    struct MmapRegion *next;
+} MmapRegion;
+
+static MmapRegion *mmap_list = NULL;
+
+typedef void (*hlp_shmem_t)(unsigned int, unsigned int);
+hlp_shmem_t hlp_shmem = NULL;
+
+hlp_shmem_t EMSCRIPTEN_KEEPALIVE set_hlp_shmem(hlp_shmem_t new) {
+    hlp_shmem_t prev = hlp_shmem;
+    hlp_shmem = new;
+    return prev;
+}
+
+void * EMSCRIPTEN_KEEPALIVE
+pgl_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+    (void)addr; (void)prot; (void)flags;
+
+    void *mem = malloc(length);
+    if (!mem) {
+        errno = ENOMEM;
+        return MAP_FAILED;
+    }
+    memset(mem, 0, length);
+
+    if (fd >= 0) {
+        off_t saved = lseek(fd, 0, SEEK_CUR);
+        lseek(fd, offset, SEEK_SET);
+        read(fd, mem, length);
+        lseek(fd, saved, SEEK_SET);
+    }
+
+    MmapRegion *r = malloc(sizeof(MmapRegion));
+    if (!r) {
+        free(mem);
+        errno = ENOMEM;
+        return MAP_FAILED;
+    }
+    r->addr = mem;
+    r->length = length;
+
+    // int myfd = 0;
+    // if (fd >= 0) {
+    //     myfd = dup(fd);
+    // } else {
+    //     myfd = open("/tmp/.shmem", O_RDWR | O_CREAT, 0600);
+    // }
+
+    r->backing_fd = (fd >= 0) ? dup(fd) : -1;
+    r->next = mmap_list;
+    mmap_list = r;
+
+    // int myfd = open("/tmp/.shmem", O_RDWR | O_CREAT | O_TRUNC, 0600);
+    // dprintf(myfd, "%lu\n%lu\n", r->addr, r->length);
+    // close(myfd);
+
+    if (hlp_shmem && r->backing_fd == -1) {
+        hlp_shmem((unsigned int) r->addr, (unsigned int) r->length);
+    }
+
+    return mem;
+}
+
 int EMSCRIPTEN_KEEPALIVE
 pgl_munmap(void *addr, size_t length) {
-    (void)addr;
     (void)length;
-    // dummy
+    MmapRegion *r = mmap_list, *prev = NULL;
+    while (r) {
+        if (r->addr == addr) {
+            // first, flush the data to the backing FS
+            write(r->backing_fd, r->addr, r->length);
+            // safe to close the backing_fd
+            close(r->backing_fd);
+            if (prev) prev->next = r->next;
+            else mmap_list = r->next;
+            free(r->addr);
+            free(r);
+            return 0;
+        }
+        prev = r;
+        r = r->next;
+    }
     return 0;
+}
+
+// ============ SHM FLUSH/LOAD ===============
+
+void EMSCRIPTEN_KEEPALIVE pgl_shm_flush(void) {
+    for (ShmSegment *s = shm_list; s; s = s->next) {
+        if (s->backing_fd >= 0) {
+            lseek(s->backing_fd, 0, SEEK_SET);
+            write(s->backing_fd, s->addr, s->size);
+        }
+    }
+    for (MmapRegion *r = mmap_list; r; r = r->next) {
+        if (r->backing_fd >= 0) {
+            lseek(r->backing_fd, 0, SEEK_SET);
+            write(r->backing_fd, r->addr, r->length);
+        }
+    }
+}
+
+void EMSCRIPTEN_KEEPALIVE pgl_shm_load(void) {
+    for (ShmSegment *s = shm_list; s; s = s->next) {
+        if (s->backing_fd >= 0) {
+            lseek(s->backing_fd, 0, SEEK_SET);
+            read(s->backing_fd, s->addr, s->size);
+        }
+    }
+    for (MmapRegion *r = mmap_list; r; r = r->next) {
+        if (r->backing_fd >= 0) {
+            lseek(r->backing_fd, 0, SEEK_SET);
+            read(r->backing_fd, r->addr, r->length);
+        }
+    }
 }
 
 /* ============ SOCKET EMULATION =============
