@@ -1,0 +1,28 @@
+[submodule "pglite/other_extensions/vector"]
+	path = pglite/other_extensions/vector
+	url = https://github.com/pgvector/pgvector.git
+[submodule "pglite/other_extensions/pgtap"]
+	path = pglite/other_extensions/pgtap
+	url = https://github.com/theory/pgtap.git
+[submodule "pglite/other_extensions/pg_ivm"]
+	path = pglite/other_extensions/pg_ivm
+	url = https://github.com/sraoss/pg_ivm.git
+[submodule "pglite/other_extensions/pg_uuidv7"]
+	path = pglite/other_extensions/pg_uuidv7
+	url = https://github.com/fboulnois/pg_uuidv7/
+[submodule "pglite/other_extensions/pg_hashids"]
+	path = pglite/other_extensions/pg_hashids
+	url = https://github.com/iCyberon/pg_hashids
+[submodule "pglite/other_extensions/pgvector"]
+	path = pglite/other_extensions/pgvector
+	url = https://github.com/pgvector/pgvector.git
+[submodule "pglite/other_extensions/age"]
+	path = pglite/other_extensions/age
+	url = https://github.com/apache/age.git
+	branch = PG17
+[submodule "pglite/other_extensions/postgis"]
+	path = pglite/other_extensions/postgis
+	url = https://github.com/postgis/postgis.git
+[submodule "pglite/other_extensions/pg_textsearch"]
+	path = pglite/other_extensions/pg_textsearch
+	url = https://github.com/timescale/pg_textsearch.git
