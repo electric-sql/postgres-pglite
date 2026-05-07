@@ -524,6 +524,10 @@ pg_file_exists(const char *name)
 void
 pg_flush_data(int fd, off_t offset, off_t nbytes)
 {
+#ifdef __PGLITE__
+    //int res = sync_file_range(fd, offset, nbytes, SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER);
+    (void)fsync(fd);
+#else
 	/*
 	 * Right now file flushing is primarily used to avoid making later
 	 * fsync()/fdatasync() calls have less impact. Thus don't trigger flushes
@@ -694,6 +698,7 @@ retry:
 		return;
 	}
 #endif
+#endif // ifdef __PGLITE__
 }
 
 /*

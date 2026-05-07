@@ -28,6 +28,28 @@
 #include "libpq-int.h"
 #include "mb/pg_wchar.h"
 
+#ifdef __PGLITE__
+extern int	pg_char_to_encoding_private(const char *name);
+extern const char *pg_encoding_to_char_private(int encoding);
+extern int	pg_valid_server_encoding_id_private(int encoding);
+
+
+#if defined(pg_char_to_encoding)
+#undef pg_char_to_encoding
+#endif
+#define pg_char_to_encoding(encoding) pg_char_to_encoding_private(encoding)
+
+#if defined(pg_encoding_to_char)
+#undef pg_encoding_to_char
+#endif
+#define pg_encoding_to_char(encoding) pg_encoding_to_char_private(encoding)
+
+#if defined(pg_valid_server_encoding_id)
+#undef pg_valid_server_encoding_id
+#endif
+#define pg_valid_server_encoding_id(encoding) pg_valid_server_encoding_id_private(encoding)
+#endif
+
 /* keep this in same order as ExecStatusType in libpq-fe.h */
 char	   *const pgresStatus[] = {
 	"PGRES_EMPTY_QUERY",

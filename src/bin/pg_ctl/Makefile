@@ -35,12 +35,23 @@ pg_ctl: $(OBJS) | submake-libpgport $(SUBMAKE_LIBPQ)
 
 install: all installdirs
 	$(INSTALL_PROGRAM) pg_ctl$(X) '$(DESTDIR)$(bindir)/pg_ctl$(X)'
+ifeq ($(PORTNAME), emscripten)
+	$(INSTALL_PROGRAM) pg_ctl.wasm '$(DESTDIR)$(bindir)/pg_ctl.wasm'
+	$(INSTALL_PROGRAM) pg_ctl$(X) '$(DESTDIR)$(bindir)/pg_ctl.mjs'
+	$(INSTALL_PROGRAM) $(top_srcdir)/pglite/scripts/run_pg_cmd.mjs '$(DESTDIR)$(bindir)/run_pg_cmd.mjs'
+	(cd '$(DESTDIR)$(bindir)' && ln -sf 'run_pg_cmd.mjs' 'pg_ctl')
+endif
 
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
 
 uninstall:
 	rm -f '$(DESTDIR)$(bindir)/pg_ctl$(X)'
+ifeq ($(PORTNAME), emscripten)
+	rm -f '$(DESTDIR)$(bindir)/pg_ctl.wasm'
+	rm -f '$(DESTDIR)$(bindir)/pg_ctl.mjs'
+	rm -f '$(DESTDIR)$(bindir)/pg_ctl'
+endif
 
 clean distclean:
 	rm -f pg_ctl$(X) $(OBJS)
