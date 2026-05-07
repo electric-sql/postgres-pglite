@@ -5,6 +5,7 @@ SUBDIRS = \
 		pg_ivm \
 		vector \
 		pgtap \
+		age \
 		pg_uuidv7 \
 		pg_hashids \
 		pg_textsearch
