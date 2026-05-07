@@ -5015,8 +5015,9 @@ void PostgresMainLongJmp() {
 void
 PostgresMain(const char *dbname, const char *username)
 {
+#ifndef __PGLITE__
 	sigjmp_buf	local_sigjmp_buf;
-
+#endif
 	/* these must be volatile to ensure state is preserved across longjmp: */
 	volatile bool send_ready_for_query = true;
 	volatile bool idle_in_transaction_timeout_enabled = false;
@@ -5228,7 +5229,7 @@ PostgresMain(const char *dbname, const char *username)
 	}
 
 	/* We can now handle ereport(ERROR) */
-	PG_exception_stack = &local_sigjmp_buf;
+	PG_exception_stack = &postgresmain_sigjmp_buf;
 
 	if (!ignore_till_sync)
 		send_ready_for_query = true;	/* initially, or after error */
