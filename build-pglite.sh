@@ -161,7 +161,8 @@ PGPRELOAD="\
 --preload-file $(pwd)/pglite/static/password@/pglite/password \
 --preload-file $(pwd)/pglite/static/empty@/pglite/pgstdin \
 --preload-file $(pwd)/pglite/static/empty@/pglite/pgstdout \
---preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a"
+--preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a \
+--preload-file $(pwd)/pglite/static/icu/76.1@/pglite/icu"
 
 PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
 
