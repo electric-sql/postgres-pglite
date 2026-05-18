@@ -152,7 +152,7 @@ emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions || {
 PGROOT=/pglite
 # PG_IMPORTS_DIR=$PGROOT/imports
 PGPRELOAD="\
---preload-file $(pwd)/pglite/static/PGPASSFILE@/home/web_user/.pgpass \
+--preload-file $(pwd)/pglite/static/PGPASSFILE@/home/postgres/.pgpass \
 --preload-file $(pwd)/pglite/static/empty@/pglite/bin/initdb \
 --preload-file $(pwd)/pglite/static/empty@/pglite/bin/pg_dump \
 --preload-file $(pwd)/pglite/static/empty@/pglite/bin/postgres \
@@ -169,6 +169,7 @@ PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8To
 POSTGRES_PGLITE_FLAGS="\
 -sSTACK_SIZE=8MB \
 -sINITIAL_MEMORY=128MB \
+-sIMPORTED_MEMORY=1 \
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
 $PGPRELOAD \

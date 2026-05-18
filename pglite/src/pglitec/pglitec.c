@@ -161,10 +161,10 @@ pgl_getuid(void) {
 struct passwd* EMSCRIPTEN_KEEPALIVE
 pgl_getpwuid(uid_t uid) {
     static struct passwd pw;
-    static char name[] = "web_user";
+    static char name[] = "postgres";
     static char passwd[] = "x";
     static char gecos[] = "Static User";
-    static char dir[] = "/home/web_user";
+    static char dir[] = "/home/postgres";
     static char shell[] = "/bin/sh";
 
     pw.pw_name   = name;
