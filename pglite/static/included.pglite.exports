@@ -507,6 +507,7 @@ readstoplist
 realloc
 realpath
 regclassin
+register_label_provider
 RegisterExtensibleNodeMethods
 RelationClose
 RelationGetIndexList
