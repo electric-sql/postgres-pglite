@@ -195,7 +195,7 @@ RUN mkdir -p /install/libs/share/icu/76.1/icudt76l/brkitr /install/libs/share/ic
 # Step 2: Build wasm ICU
 # --with-data-packaging: https://unicode-org.github.io/icu/userguide/icu_data/#building-and-linking-against-icu-data
 WORKDIR /src/icu-wasm
-RUN  CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS} -std=c++17" \
+RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS} -std=c++17" \
     emconfigure /src/icu/source/configure \
     --host=wasm32-unknown-linux-gnu \
     --with-cross-build=/src/icu-native \
