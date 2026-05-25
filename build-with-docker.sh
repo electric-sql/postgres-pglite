@@ -7,7 +7,7 @@ echo "DEBUG=${DEBUG}"
 docker run $@ \
   --rm \
   -e DEBUG=${DEBUG:-false} \
-  -e PGLITE_VERSION=${PGLITE_VERSION} \  
+  -e PGLITE_VERSION=${PGLITE_VERSION} \
   --workdir=${DOCKER_WORKSPACE} \
   -v .:${DOCKER_WORKSPACE}:rw \
   -v ./dist:/pglite:rw \
