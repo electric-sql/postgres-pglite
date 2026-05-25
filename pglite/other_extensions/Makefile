@@ -7,7 +7,8 @@ SUBDIRS = \
 		pgtap \
 		age \
 		pg_uuidv7 \
-		pg_hashids
+		pg_hashids \
+		pg_textsearch
 
 prefix ?= /pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build
