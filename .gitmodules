@@ -25,4 +25,5 @@
 	url = https://github.com/postgis/postgis.git
 [submodule "pglite/other_extensions/pg_textsearch"]
 	path = pglite/other_extensions/pg_textsearch
-	url = https://github.com/timescale/pg_textsearch.git
+	url = https://github.com/tdrz/pg_textsearch.git
+	branch = tdrz/v1.2.0
