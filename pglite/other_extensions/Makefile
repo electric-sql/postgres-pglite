@@ -12,8 +12,7 @@ SUBDIRS = \
 
 prefix ?= /pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build
-ARCHIVE_DIR := /pglite/extensions
-POSTGIS_ARCHIVE_DIR := /pglite/extensions/postgis
+ARCHIVE_DIR := /pglite/extensions/other
 
 EXTENSIONS := $(SUBDIRS)
 EXTENSIONS += postgis
@@ -45,15 +44,12 @@ age.tar.gz:
 	cd $(EXTENSIONS_BUILD_ROOT)/age/$(prefix) && \
 	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
 	tar -czf $(ARCHIVE_DIR)/age.tar.gz $$files
-# 	tar -C $(EXTENSIONS_BUILD_ROOT)/$*/$(prefix) -czf $(ARCHIVE_DIR)/$*.tar.gz .
 
 dist-postgis:
 	@echo "=== Adding proj data to postgis archive ==="
 	gunzip $(ARCHIVE_DIR)/postgis.tar.gz
 	tar -rf $(ARCHIVE_DIR)/postgis.tar -C /install/libs share/proj
 	gzip $(ARCHIVE_DIR)/postgis.tar
-	@echo "=== Moving postgis ==="
-	mkdir -p $(POSTGIS_ARCHIVE_DIR) && mv $(ARCHIVE_DIR)/postgis.tar.gz $(POSTGIS_ARCHIVE_DIR)
 
 .PHONY: dist
 
