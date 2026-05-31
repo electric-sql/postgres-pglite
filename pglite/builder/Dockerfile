@@ -78,6 +78,38 @@ WORKDIR /install/libs/lib
 RUN ln -s libuuid.a libossp-uuid.a # contrib extensions use -lossp-uuid
 RUN ${LLVM_NM} /install/libs/lib/libossp-uuid.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libossp-uuid.exports
 
+# Build ICU from source
+WORKDIR /src
+RUN curl -L https://github.com/unicode-org/icu/releases/download/release-76-1/icu4c-76_1-src.tgz | tar -xz
+
+# Step 1: Build native ICU (needed for cross-compilation tools like icupkg, gencnval)
+WORKDIR /src/icu/source
+RUN mkdir /src/icu-native
+RUN cd /src/icu-native && \
+    /src/icu/source/configure --disable-shared --enable-static --disable-tests --disable-samples && \
+    make -j
+
+RUN mkdir -p /install/libs/share/icu/76.1/icudt76l/brkitr /install/libs/share/icu/76.1/icudt76l/coll /install/libs/share/icu/76.1/icudt76l/curr /install/libs/share/icu/76.1/icudt76l/lang /install/libs/share/icu/76.1/icudt76l/rbnf /install/libs/share/icu/76.1/icudt76l/region /install/libs/share/icu/76.1/icudt76l/translit /install/libs/share/icu/76.1/icudt76l/unit /install/libs/share/icu/76.1/icudt76l/zone
+
+# Step 2: Build wasm ICU
+# --with-data-packaging: https://unicode-org.github.io/icu/userguide/icu_data/#building-and-linking-against-icu-data
+WORKDIR /src/icu-wasm
+RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS} -std=c++17" \
+    emconfigure /src/icu/source/configure \
+    --host=wasm32-unknown-linux-gnu \
+    --with-cross-build=/src/icu-native \
+    --with-data-packaging=archive \
+    --disable-shared \
+    --enable-static \
+    --disable-tests \
+    --disable-samples \
+    --disable-extras \
+    --disable-icuio \
+    --disable-layoutex \
+    --prefix=/install/libs
+RUN emmake make -j PKGDATA_OPTS="--without-assembly -O $(pwd)/data/icupkg.inc"
+RUN emmake make install
+
 # for postgis
 WORKDIR /src
 RUN git clone --depth 1 --single-branch --branch=json-c-0.18-20240915 https://github.com/json-c/json-c.git
@@ -155,84 +187,55 @@ RUN emcmake cmake \
 RUN emmake make -j && emmake make install
 RUN ${LLVM_NM} /install/libs/lib/libgeos.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgeos.exports
 
-# WORKDIR /src
-# RUN wget https://github.com/OSGeo/gdal/releases/download/v3.11.4/gdal-3.11.4.tar.gz
-# RUN tar -xvf gdal-3.11.4.tar.gz
-# WORKDIR /src/gdal-3.11.4/build
-# # Docs: https://gdal.org/en/stable/development/building_from_source.html
-# RUN emcmake cmake \
-# -DCMAKE_BUILD_TYPE=Release \
-# -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-# -DCMAKE_INSTALL_PREFIX=/install/libs \
-# -DLIBXML2_INCLUDE_DIR=/install/libs/include/libxml2 -DLIBXML2_LIBRARY=/install/libs/lib/libxml2.a \
-# -DGEOS_INCLUDE_DIR=/install/libs/include/geos -DGEOS_LIBRARY=/install/libs/lib/libgeos.a \
-# -DTIFF_INCLUDE_DIR=/install/libs/include/ -DTIFF_LIBRARY=/install/libs/lib/libtiff.a \
-# -DSQLite3_INCLUDE_DIR=/install/libs/include/ -DSQLite3_LIBRARY=/install/libs/lib/libsqlite3.a -DEXE_SQLITE3=/tmp/sqlite3 \
-# -DZLIB_LIBRARY=/install/libs/lib/libz.a -DZLIB_INCLUDE_DIR=/install/libs/include \
-# -DOPENSSL_ROOT_DIR=/install/libs \
-# -DPROJ_LIBRARY=/install/libs/lib/libproj.a -DPROJ_INCLUDE_DIR=/install/libs/include/ \
-# -DJSONC_LIBRARY=/install/libs/lib/libjson-c.a -DJSONC_INCLUDE_DIR=/install/libs/include/json-c -DGDAL_USE_JSONC=ON -DGDAL_USE_JSONC_INTERNAL=OFF \
-# -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
-# -DGDAL_USE_HDFS=OFF \
-# -DACCEPT_MISSING_SQLITE3_MUTEX_ALLOC:BOOL=ON \
-# ..
-# RUN cmake --build . -j && cmake --build . --target install
-# RUN ${LLVM_NM} /install/libs/lib/libgdal.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgdal.exports
-
-# Build ICU from source
 WORKDIR /src
-RUN curl -L https://github.com/unicode-org/icu/releases/download/release-76-1/icu4c-76_1-src.tgz | tar -xz
+RUN wget https://github.com/OSGeo/gdal/releases/download/v3.11.4/gdal-3.11.4.tar.gz
+RUN tar -xvf gdal-3.11.4.tar.gz
+WORKDIR /src/gdal-3.11.4/build
+# Docs: https://gdal.org/en/stable/development/building_from_source.html
+RUN emcmake cmake \
+-DCMAKE_C_FLAGS="-fPIC" \
+-DCMAKE_CXX_FLAGS="-fPIC" \
+-DCMAKE_BUILD_TYPE=Release \
+-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+-DCMAKE_INSTALL_PREFIX=/install/libs \
+-DLIBXML2_INCLUDE_DIR=/install/libs/include/libxml2 -DLIBXML2_LIBRARY=/install/libs/lib/libxml2.a \
+-DGEOS_INCLUDE_DIR=/install/libs/include/geos -DGEOS_LIBRARY=/install/libs/lib/libgeos.a \
+-DTIFF_INCLUDE_DIR=/install/libs/include/ -DTIFF_LIBRARY=/install/libs/lib/libtiff.a \
+-DSQLite3_INCLUDE_DIR=/install/libs/include/ -DSQLite3_LIBRARY=/install/libs/lib/libsqlite3.a -DEXE_SQLITE3=/tmp/sqlite3 \
+-DZLIB_LIBRARY=/install/libs/lib/libz.a -DZLIB_INCLUDE_DIR=/install/libs/include \
+-DOPENSSL_ROOT_DIR=/install/libs \
+-DPROJ_LIBRARY=/install/libs/lib/libproj.a -DPROJ_INCLUDE_DIR=/install/libs/include/ \
+-DJSONC_LIBRARY=/install/libs/lib/libjson-c.a -DJSONC_INCLUDE_DIR=/install/libs/include/json-c -DGDAL_USE_JSONC=ON -DGDAL_USE_JSONC_INTERNAL=OFF \
+-DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
+-DGDAL_USE_HDFS=OFF \
+-DACCEPT_MISSING_SQLITE3_MUTEX_ALLOC:BOOL=ON \
+-DCMAKE_SHARED_LINKER_FLAGS="-Wl,--whole-archive -lxml2 -lgeos -ltiff -lsqlite3 -lproj -ljson-c -Wl,--no-whole-archive" \
+..
+RUN cmake --build . -j && cmake --build . --target install
+RUN ${LLVM_NM} /install/libs/lib/libgdal.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgdal.exports
 
-# Step 1: Build native ICU (needed for cross-compilation tools like icupkg, gencnval)
-WORKDIR /src/icu/source
-RUN mkdir /src/icu-native
-RUN cd /src/icu-native && \
-    /src/icu/source/configure --disable-shared --enable-static --disable-tests --disable-samples && \
-    make -j
+# ARG TARGETARCH
+# FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
+# FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
+# FROM base-${TARGETARCH} AS runner
 
-RUN mkdir -p /install/libs/share/icu/76.1/icudt76l/brkitr /install/libs/share/icu/76.1/icudt76l/coll /install/libs/share/icu/76.1/icudt76l/curr /install/libs/share/icu/76.1/icudt76l/lang /install/libs/share/icu/76.1/icudt76l/rbnf /install/libs/share/icu/76.1/icudt76l/region /install/libs/share/icu/76.1/icudt76l/translit /install/libs/share/icu/76.1/icudt76l/unit /install/libs/share/icu/76.1/icudt76l/zone
+# SHELL ["/bin/bash", "-c"]
 
-# Step 2: Build wasm ICU
-# --with-data-packaging: https://unicode-org.github.io/icu/userguide/icu_data/#building-and-linking-against-icu-data
-WORKDIR /src/icu-wasm
-RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS} -std=c++17" \
-    emconfigure /src/icu/source/configure \
-    --host=wasm32-unknown-linux-gnu \
-    --with-cross-build=/src/icu-native \
-    --with-data-packaging=archive \
-    --disable-shared \
-    --enable-static \
-    --disable-tests \
-    --disable-samples \
-    --disable-extras \
-    --disable-icuio \
-    --disable-layoutex \
-    --prefix=/install/libs
-RUN emmake make -j PKGDATA_OPTS="--without-assembly -O $(pwd)/data/icupkg.inc"
-RUN emmake make install
+# RUN apt update && apt upgrade -y && apt install -y \
+#     xz-utils autoconf libtool automake pkgconf bison flex
 
-ARG TARGETARCH
-FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
-FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
-FROM base-${TARGETARCH} AS runner
+# # this is where the libraries will be installed and subsequently where the LIBS and INCLUDES can be found
+# ARG INSTALL_PREFIX=/install/libs
+# ENV INSTALL_PREFIX=${INSTALL_PREFIX}
 
-SHELL ["/bin/bash", "-c"]
+# ARG LIB_EXPORTS_DIR=/install/exports
+# ENV LIB_EXPORTS_DIR=${LIB_EXPORTS_DIR}
 
-RUN apt update && apt upgrade -y && apt install -y \
-    xz-utils autoconf libtool automake pkgconf bison flex
+# COPY --from=builder /install/libs ${INSTALL_PREFIX}
+# COPY --from=builder /install/exports ${LIB_EXPORTS_DIR}
 
-# this is where the libraries will be installed and subsequently where the LIBS and INCLUDES can be found
-ARG INSTALL_PREFIX=/install/libs
-ENV INSTALL_PREFIX=${INSTALL_PREFIX}
+# # allow access to anyone 
+# RUN chmod -R 777 /install
 
-ARG LIB_EXPORTS_DIR=/install/exports
-ENV LIB_EXPORTS_DIR=${LIB_EXPORTS_DIR}
-
-COPY --from=builder /install/libs ${INSTALL_PREFIX}
-COPY --from=builder /install/exports ${LIB_EXPORTS_DIR}
-
-# allow access to anyone 
-RUN chmod -R 777 /install
-
-# needed in building pglite.wasm
-ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
+# # needed in building pglite.wasm
+# ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
