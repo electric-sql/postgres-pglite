@@ -9,7 +9,6 @@ sed -i 's/SUBDIRS += @RASTER@ loader/SUBDIRS += @RASTER@/' GNUmakefile.in
 PROJ_VERSION=9.7.0 LDFLAGS="-L/install/libs/lib $PGLITE_CFLAGS" CFLAGS="${PGLITE_CFLAGS} -fPIC" CXXFLAGS="${PGLITE_CFLAGS} -fPIC" emconfigure ./configure \
 --with-pic \
 --without-protobuf \
---without-raster \
 --enable-static=no \
 --enable-shared=yes \
 --with-geosconfig=/install/libs/bin/geos-config \
