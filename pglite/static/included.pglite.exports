@@ -110,7 +110,17 @@ _ZNSt9type_infoD2Ev
 _Znwm
 _ZSt15get_new_handlerv
 _ZSt9terminatev
+_ZTIa
+_ZTIb
+_ZTId
+_ZTIf
+_ZTIh
+_ZTIi
+_ZTIj
+_ZTIl
+_ZTIm
 _ZTIPKc
+_ZTIs
 _ZTISt10bad_typeid
 _ZTISt11logic_error
 _ZTISt11range_error
@@ -127,6 +137,8 @@ _ZTISt8bad_cast
 _ZTISt9bad_alloc
 _ZTISt9exception
 _ZTISt9type_info
+_ZTIt
+_ZTIx
 _ZTSSt10bad_typeid
 _ZTSSt11logic_error
 _ZTSSt11range_error
@@ -206,6 +218,7 @@ cbrt
 chdir
 check_stack_depth
 clearerr
+clock
 clock_gettime
 close
 closedir

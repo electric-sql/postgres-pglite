@@ -11,5 +11,5 @@ docker run $@ \
   --workdir=${DOCKER_WORKSPACE} \
   -v .:${DOCKER_WORKSPACE}:rw \
   -v ./dist:/pglite:rw \
-  electricsql/pglite-builder:3.1.74-6-postgis-libicu-min \
+  electricsql/pglite-builder:3.1.74-7 \
   ./build-pglite.sh
