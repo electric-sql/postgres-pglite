@@ -110,7 +110,15 @@ _ZNSt9type_infoD2Ev
 _Znwm
 _ZSt15get_new_handlerv
 _ZSt9terminatev
+_ZTIa
 _ZTIb
+_ZTId
+_ZTIf
+_ZTIh
+_ZTIi
+_ZTIj
+_ZTIl
+_ZTIm
 _ZTIPKc
 _ZTIs
 _ZTISt10bad_typeid

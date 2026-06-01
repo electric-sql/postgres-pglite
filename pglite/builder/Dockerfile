@@ -12,7 +12,7 @@ RUN apt update && apt upgrade -y && apt install -y \
 
 SHELL ["/bin/bash", "-c"]
 
-RUN mkdir -p /install/libs /install/exports
+RUN mkdir -p /install/libs /install/exports /install/imports
 
 WORKDIR /install/libs
 
@@ -209,33 +209,35 @@ RUN emcmake cmake \
 -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
 -DGDAL_USE_HDFS=OFF \
 -DACCEPT_MISSING_SQLITE3_MUTEX_ALLOC:BOOL=ON \
--DCMAKE_SHARED_LINKER_FLAGS="-Wl,--whole-archive -lxml2 -lgeos -ltiff -lsqlite3 -lproj -ljson-c -Wl,--no-whole-archive" \
 ..
 RUN cmake --build . -j && cmake --build . --target install
 RUN ${LLVM_NM} /install/libs/lib/libgdal.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgdal.exports
+RUN find . -type f \( -name "*.o" -o -name "*.so" \) -exec ${LLVM_NM} --defined-only {} \; | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /tmp/libgdal.defs.txt
+RUN find . -name "*.o" -exec ${LLVM_NM} --undefined-only {} \; | awk '{print $2}' | sed '/^$/d' | sort -u > /tmp/libgdal.undef.txt
+RUN comm -23 /tmp/libgdal.undef.txt /tmp/libgdal.defs.txt > /install/imports/libgdal.imports
 
-# ARG TARGETARCH
-# FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
-# FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
-# FROM base-${TARGETARCH} AS runner
+ARG TARGETARCH
+FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
+FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
+FROM base-${TARGETARCH} AS runner
 
-# SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "-c"]
 
-# RUN apt update && apt upgrade -y && apt install -y \
-#     xz-utils autoconf libtool automake pkgconf bison flex
+RUN apt update && apt upgrade -y && apt install -y \
+    xz-utils autoconf libtool automake pkgconf bison flex
 
-# # this is where the libraries will be installed and subsequently where the LIBS and INCLUDES can be found
-# ARG INSTALL_PREFIX=/install/libs
-# ENV INSTALL_PREFIX=${INSTALL_PREFIX}
+# this is where the libraries will be installed and subsequently where the LIBS and INCLUDES can be found
+ARG INSTALL_PREFIX=/install/libs
+ENV INSTALL_PREFIX=${INSTALL_PREFIX}
 
-# ARG LIB_EXPORTS_DIR=/install/exports
-# ENV LIB_EXPORTS_DIR=${LIB_EXPORTS_DIR}
+ARG LIB_EXPORTS_DIR=/install/exports
+ENV LIB_EXPORTS_DIR=${LIB_EXPORTS_DIR}
 
-# COPY --from=builder /install/libs ${INSTALL_PREFIX}
-# COPY --from=builder /install/exports ${LIB_EXPORTS_DIR}
+COPY --from=builder /install/libs ${INSTALL_PREFIX}
+COPY --from=builder /install/exports ${LIB_EXPORTS_DIR}
 
-# # allow access to anyone 
-# RUN chmod -R 777 /install
+# allow access to anyone 
+RUN chmod -R 777 /install
 
-# # needed in building pglite.wasm
-# ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
+# needed in building pglite.wasm
+ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
