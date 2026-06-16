@@ -9,6 +9,8 @@ emcc --clear-cache
 # final output folder
 INSTALL_FOLDER=${INSTALL_FOLDER:-"/pglite"}
 
+export MAKEFLAGS="__PGLITE__=1"
+
 # build with optimizations by default aka release
 PGLITE_CFLAGS="-m32 -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types"
 if [ "$DEBUG" = true ]

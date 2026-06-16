@@ -681,3 +681,5 @@ WinGetPartitionRowCount
 wmemchr
 wmemcmp
 write
+fgets
+freeaddrinfo

@@ -11,7 +11,15 @@ OBJS = \
 PGFILEDESC = "postgres_fdw - foreign data wrapper for PostgreSQL"
 
 PG_CPPFLAGS = -I$(libpq_srcdir)
+ifdef __PGLITE__
+SHLIB_LINK_INTERNAL = -Wl,--whole-archive \
+  $(top_builddir)/src/interfaces/libpq/libpq.a \
+  $(top_builddir)/src/common/libpgcommon_shlib.a \
+  $(top_builddir)/src/port/libpgport_shlib.a \
+  -Wl,--no-whole-archive
+else
 SHLIB_LINK_INTERNAL = $(libpq)
+endif
 
 EXTENSION = postgres_fdw
 DATA = postgres_fdw--1.0.sql postgres_fdw--1.0--1.1.sql postgres_fdw--1.1--1.2.sql
