@@ -26,3 +26,6 @@
 [submodule "pglite/other_extensions/pg_textsearch"]
 	path = pglite/other_extensions/pg_textsearch
 	url = https://github.com/timescale/pg_textsearch/
+[submodule "pglite/other_extensions/pgmq"]
+	path = pglite/other_extensions/pgmq
+	url = https://github.com/pgmq/pgmq
