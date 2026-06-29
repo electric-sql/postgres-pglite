@@ -682,6 +682,44 @@ DropRelationLocalBuffers(RelFileLocator rlocator, ForkNumber forkNum,
 	}
 }
 
+#ifdef __PGLITE__
+void
+PgliteDropRelationLocalBuffersRange(RelFileLocator rlocator, ForkNumber forkNum,
+									BlockNumber firstBlock,
+									BlockNumber blockCount)
+{
+	int			i;
+	BlockNumber lastBlock;
+
+	if (blockCount == 0)
+	{
+		DropRelationLocalBuffers(rlocator, forkNum, firstBlock);
+		return;
+	}
+
+	lastBlock = firstBlock + blockCount;
+	if (lastBlock < firstBlock)
+		lastBlock = InvalidBlockNumber;
+
+	for (i = 0; i < NLocBuffer; i++)
+	{
+		BufferDesc *bufHdr = GetLocalBufferDescriptor(i);
+		uint32		buf_state;
+
+		buf_state = pg_atomic_read_u32(&bufHdr->state);
+
+		if ((buf_state & BM_TAG_VALID) &&
+			BufTagMatchesRelFileLocator(&bufHdr->tag, &rlocator) &&
+			BufTagGetForkNum(&bufHdr->tag) == forkNum &&
+			bufHdr->tag.blockNum >= firstBlock &&
+			bufHdr->tag.blockNum < lastBlock)
+		{
+			InvalidateLocalBuffer(bufHdr, true);
+		}
+	}
+}
+#endif
+
 /*
  * DropRelationAllLocalBuffers
  *		This function removes from the buffer pool all pages of all forks

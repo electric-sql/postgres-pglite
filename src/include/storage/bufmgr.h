@@ -276,6 +276,12 @@ extern void FlushDatabaseBuffers(Oid dbid);
 extern void DropRelationBuffers(struct SMgrRelationData *smgr_reln,
 								ForkNumber *forkNum,
 								int nforks, BlockNumber *firstDelBlock);
+#ifdef __PGLITE__
+extern void PgliteDropRelationBuffersRange(struct SMgrRelationData *smgr_reln,
+										   ForkNumber forkNum,
+										   BlockNumber firstBlock,
+										   BlockNumber blockCount);
+#endif
 extern void DropRelationLocalBuffers(RelFileLocator rlocator,
 									 ForkNumber forkNum,
 									 BlockNumber firstDelBlock);

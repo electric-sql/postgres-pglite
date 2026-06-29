@@ -488,6 +488,12 @@ extern void InvalidateLocalBuffer(BufferDesc *bufHdr, bool check_unreferenced);
 extern void DropRelationLocalBuffers(RelFileLocator rlocator,
 									 ForkNumber forkNum,
 									 BlockNumber firstDelBlock);
+#ifdef __PGLITE__
+extern void PgliteDropRelationLocalBuffersRange(RelFileLocator rlocator,
+												ForkNumber forkNum,
+												BlockNumber firstBlock,
+												BlockNumber blockCount);
+#endif
 extern void DropRelationAllLocalBuffers(RelFileLocator rlocator);
 extern void AtEOXact_LocalBuffers(bool isCommit);
 

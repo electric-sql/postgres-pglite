@@ -121,6 +121,7 @@
 #include "access/subtrans.h"
 #include "access/transam.h"
 #include "access/xact.h"
+#include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_constraint.h"
@@ -136,6 +137,7 @@
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "utils/relfilenumbermap.h"
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
@@ -1988,6 +1990,54 @@ LogLogicalInvalidations(void)
 static void pgl_advance_remote_xid_horizon(uint32 remote_next_xid_low,
 										   uint32 remote_next_xid_high);
 static void pgl_invalidate_remote_xact_caches(void);
+static void pgl_release_remote_relation_smgr(RelFileLocator locator);
+
+uint32 EMSCRIPTEN_KEEPALIVE
+pgl_current_wal_insert_lsn_low(void)
+{
+	XLogRecPtr	current_recptr = GetXLogInsertRecPtr();
+
+	return (uint32) current_recptr;
+}
+
+uint32 EMSCRIPTEN_KEEPALIVE
+pgl_current_wal_insert_lsn_high(void)
+{
+	XLogRecPtr	current_recptr = GetXLogInsertRecPtr();
+
+	return (uint32) (current_recptr >> 32);
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_release_remote_relation(uint32 spc_oid, uint32 db_oid, uint32 rel_number)
+{
+	RelFileLocator locator;
+
+	locator.spcOid = (Oid) spc_oid;
+	locator.dbOid = (Oid) db_oid;
+	locator.relNumber = (RelFileNumber) rel_number;
+	pgl_release_remote_relation_smgr(locator);
+	return 1;
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_invalidate_remote_relation_cache(uint32 spc_oid, uint32 db_oid,
+									 uint32 rel_number)
+{
+	Oid			relid;
+
+	if (db_oid != InvalidOid && db_oid != MyDatabaseId)
+		return 0;
+
+	relid = RelidByRelfilenumber((Oid) spc_oid,
+								 (RelFileNumber) rel_number);
+	if (!OidIsValid(relid))
+		return 0;
+
+	InvalidateCatalogSnapshot();
+	RelationCacheInvalidateEntry(relid);
+	return 1;
+}
 
 /*
  * pgl_invalidate_remote_pages
@@ -1999,9 +2049,8 @@ static void pgl_invalidate_remote_xact_caches(void);
  *
  * ranges_ptr points at a packed uint32 array with seven fields per entry:
  * spcOid, dbOid, relNumber, forkNumber, firstBlock, blockCount,
- * relationSizeChanged. blockCount is accepted for API shape but the first
- * implementation deliberately drops buffers from firstBlock through end of
- * fork, matching the conservative demo plan.
+ * relationSizeChanged. blockCount = 0 means firstBlock through end of fork;
+ * otherwise only the bounded block interval is invalidated.
  */
 int EMSCRIPTEN_KEEPALIVE
 pgl_invalidate_remote_pages(uintptr_t ranges_ptr, int ranges_len,
@@ -2033,9 +2082,9 @@ pgl_invalidate_remote_pages(uintptr_t ranges_ptr, int ranges_len,
 	{
 		uint32	   *range = ranges + (i * PGLITE_REMOTE_INVAL_FIELDS);
 		RelFileLocator locator;
-		RelFileLocatorBackend locator_backend;
 		ForkNumber	forknum;
 		BlockNumber first_del_block;
+		BlockNumber block_count;
 		SMgrRelation smgr;
 		bool		relation_size_changed;
 
@@ -2047,24 +2096,31 @@ pgl_invalidate_remote_pages(uintptr_t ranges_ptr, int ranges_len,
 		locator.relNumber = (RelFileNumber) range[2];
 		forknum = (ForkNumber) range[3];
 		first_del_block = (BlockNumber) range[4];
+		block_count = (BlockNumber) range[5];
 		relation_size_changed = range[6] != 0;
 
 		smgr = smgropen(locator, INVALID_PROC_NUMBER);
-		DropRelationBuffers(smgr, &forknum, 1, &first_del_block);
-		DropRelationLocalBuffers(locator, forknum, first_del_block);
+		PgliteDropRelationBuffersRange(smgr, forknum, first_del_block,
+										block_count);
 
 		if (relation_size_changed)
-		{
-			locator_backend.locator = locator;
-			locator_backend.backend = INVALID_PROC_NUMBER;
-			smgrreleaserellocator(locator_backend);
-		}
+			pgl_release_remote_relation_smgr(locator);
 	}
 
 	if (invalidate_smgr)
 		smgrdestroyall();
 
 	return ranges_len;
+}
+
+static void
+pgl_release_remote_relation_smgr(RelFileLocator locator)
+{
+	RelFileLocatorBackend locator_backend;
+
+	locator_backend.locator = locator;
+	locator_backend.backend = INVALID_PROC_NUMBER;
+	smgrreleaserellocator(locator_backend);
 }
 
 static void
