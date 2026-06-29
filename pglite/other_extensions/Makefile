@@ -8,7 +8,8 @@ SUBDIRS = \
 		age \
 		pg_uuidv7 \
 		pg_hashids \
-		pg_textsearch
+		pg_textsearch \
+		pgmq/pgmq-extension
 
 prefix ?= /pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build
@@ -30,7 +31,7 @@ dist: $(addsuffix .tar.gz,$(EXTENSIONS))
 	mkdir -p $(ARCHIVE_DIR)
 	cd $(EXTENSIONS_BUILD_ROOT)/$*/$(prefix) && \
 	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
-	tar -czf $(ARCHIVE_DIR)/$*.tar.gz $$files
+	tar -czf $(ARCHIVE_DIR)/$$(basename $*)\.tar.gz $$files
 
 # AGE requires SIZEOF_DATUM=4 for 32-bit WASM compatibility (strips PASSEDBYVALUE from graphid)
 age.tar.gz:
