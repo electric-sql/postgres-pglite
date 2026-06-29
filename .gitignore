@@ -4,6 +4,7 @@
 
 # Global excludes across all subdirectories
 *.o
+*.o.tmp
 *.obj
 *.bc
 *.so
@@ -37,6 +38,7 @@ lib*.pc
 /config.cache
 /config.log
 /config.status
+/.pglite-build-mode
 /pgsql.sln
 /pgsql.sln.cache
 /Debug/

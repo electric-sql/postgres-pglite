@@ -8,6 +8,10 @@ docker run $@ \
   --rm \
   -e DEBUG=${DEBUG:-false} \
   -e PGLITE_VERSION=${PGLITE_VERSION} \
+  -e PGLITE_BUILD_SHARED_MEMORY=${PGLITE_BUILD_SHARED_MEMORY:-false} \
+  -e PGLITE_SHARED_MEMORY_SIZE=${PGLITE_SHARED_MEMORY_SIZE:-128MB} \
+  -e PGLITE_FORCE_CLEAN=${PGLITE_FORCE_CLEAN:-false} \
+  -e PGLITE_MAKE_JOBS=${PGLITE_MAKE_JOBS:-} \
   --workdir=${DOCKER_WORKSPACE} \
   -v .:${DOCKER_WORKSPACE}:rw \
   -v ./dist:/pglite:rw \
