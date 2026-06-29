@@ -282,6 +282,10 @@ extern TransactionId TransactionIdLatest(TransactionId mainxid,
 										 int nxids, const TransactionId *xids);
 extern XLogRecPtr TransactionIdGetCommitLSN(TransactionId xid);
 
+#ifdef __PGLITE__
+extern void PgliteInvalidateTransactionLogCache(void);
+#endif
+
 /* in transam/varsup.c */
 extern Size VarsupShmemSize(void);
 extern void VarsupShmemInit(void);

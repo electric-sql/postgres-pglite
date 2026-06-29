@@ -152,6 +152,10 @@ extern void multixact_twophase_postcommit(TransactionId xid, uint16 info,
 extern void multixact_twophase_postabort(TransactionId xid, uint16 info,
 										 void *recdata, uint32 len);
 
+#ifdef __PGLITE__
+extern void PgliteInvalidateMultiXactCache(void);
+#endif
+
 extern void multixact_redo(XLogReaderState *record);
 extern void multixact_desc(StringInfo buf, XLogReaderState *record);
 extern const char *multixact_identify(uint8 info);

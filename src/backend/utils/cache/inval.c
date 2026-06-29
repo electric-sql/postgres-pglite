@@ -113,13 +113,20 @@
 #include "postgres.h"
 
 #include <limits.h>
+#include <stdint.h>
 
+#include "access/clog.h"
 #include "access/htup_details.h"
+#include "access/multixact.h"
+#include "access/subtrans.h"
+#include "access/transam.h"
 #include "access/xact.h"
 #include "access/xloginsert.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_constraint.h"
 #include "miscadmin.h"
+#include "storage/bufmgr.h"
+#include "storage/lwlock.h"
 #include "storage/procnumber.h"
 #include "storage/sinval.h"
 #include "storage/smgr.h"
@@ -132,6 +139,12 @@
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
+#else
+#define EMSCRIPTEN_KEEPALIVE
+#endif
 
 
 /*
@@ -1967,3 +1980,134 @@ LogLogicalInvalidations(void)
 		XLogInsert(RM_XACT_ID, XLOG_XACT_INVALIDATIONS);
 	}
 }
+
+#ifdef __PGLITE__
+
+#define PGLITE_REMOTE_INVAL_FIELDS 7
+
+static void pgl_advance_remote_xid_horizon(uint32 remote_next_xid_low,
+										   uint32 remote_next_xid_high);
+static void pgl_invalidate_remote_xact_caches(void);
+
+/*
+ * pgl_invalidate_remote_pages
+ *
+ * PGlite's durable VFS can advance a read replica by swapping the visible page
+ * versions underneath PostgreSQL. This hook gives the TypeScript VFS a small
+ * synchronous bridge for evicting stale PostgreSQL state before it exposes the
+ * new LSN to queries.
+ *
+ * ranges_ptr points at a packed uint32 array with seven fields per entry:
+ * spcOid, dbOid, relNumber, forkNumber, firstBlock, blockCount,
+ * relationSizeChanged. blockCount is accepted for API shape but the first
+ * implementation deliberately drops buffers from firstBlock through end of
+ * fork, matching the conservative demo plan.
+ */
+int EMSCRIPTEN_KEEPALIVE
+pgl_invalidate_remote_pages(uintptr_t ranges_ptr, int ranges_len,
+							bool invalidate_system_caches,
+							bool invalidate_smgr,
+							uint32 remote_next_xid_low,
+							uint32 remote_next_xid_high)
+{
+	uint32	   *ranges;
+
+	if (ranges_len < 0)
+		return -1;
+	if (ranges_len > 0 && ranges_ptr == 0)
+		return -2;
+
+	ranges = (uint32 *) ranges_ptr;
+	pgl_advance_remote_xid_horizon(remote_next_xid_low,
+								   remote_next_xid_high);
+	pgl_invalidate_remote_xact_caches();
+
+	if (invalidate_system_caches)
+	{
+		InvalidateSystemCaches();
+		RelationCacheInvalidate(false);
+		RelationMapInvalidateAll();
+	}
+
+	for (int i = 0; i < ranges_len; i++)
+	{
+		uint32	   *range = ranges + (i * PGLITE_REMOTE_INVAL_FIELDS);
+		RelFileLocator locator;
+		RelFileLocatorBackend locator_backend;
+		ForkNumber	forknum;
+		BlockNumber first_del_block;
+		SMgrRelation smgr;
+		bool		relation_size_changed;
+
+		if (range[3] > MAX_FORKNUM)
+			return -3;
+
+		locator.spcOid = (Oid) range[0];
+		locator.dbOid = (Oid) range[1];
+		locator.relNumber = (RelFileNumber) range[2];
+		forknum = (ForkNumber) range[3];
+		first_del_block = (BlockNumber) range[4];
+		relation_size_changed = range[6] != 0;
+
+		smgr = smgropen(locator, INVALID_PROC_NUMBER);
+		DropRelationBuffers(smgr, &forknum, 1, &first_del_block);
+		DropRelationLocalBuffers(locator, forknum, first_del_block);
+
+		if (relation_size_changed)
+		{
+			locator_backend.locator = locator;
+			locator_backend.backend = INVALID_PROC_NUMBER;
+			smgrreleaserellocator(locator_backend);
+		}
+	}
+
+	if (invalidate_smgr)
+		smgrdestroyall();
+
+	return ranges_len;
+}
+
+static void
+pgl_invalidate_remote_xact_caches(void)
+{
+	PgliteInvalidateTransactionLogCache();
+	PgliteInvalidateCLOGCache();
+	PgliteInvalidateSUBTRANSCache();
+	PgliteInvalidateMultiXactCache();
+}
+
+static void
+pgl_advance_remote_xid_horizon(uint32 remote_next_xid_low,
+							   uint32 remote_next_xid_high)
+{
+	FullTransactionId remote_next_xid;
+	FullTransactionId remote_latest_completed_xid;
+
+	if (remote_next_xid_low == 0 && remote_next_xid_high == 0)
+		return;
+
+	remote_next_xid = FullTransactionIdFromU64(
+		((uint64) remote_next_xid_high << 32) | remote_next_xid_low);
+	if (!FullTransactionIdIsNormal(remote_next_xid))
+		return;
+
+	LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
+	if (FullTransactionIdPrecedes(TransamVariables->nextXid, remote_next_xid))
+		TransamVariables->nextXid = remote_next_xid;
+	LWLockRelease(XidGenLock);
+
+	remote_latest_completed_xid = remote_next_xid;
+	FullTransactionIdRetreat(&remote_latest_completed_xid);
+
+	LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+	if (!FullTransactionIdIsValid(TransamVariables->latestCompletedXid) ||
+		FullTransactionIdPrecedes(TransamVariables->latestCompletedXid,
+								  remote_latest_completed_xid))
+	{
+		TransamVariables->latestCompletedXid = remote_latest_completed_xid;
+		TransamVariables->xactCompletionCount++;
+	}
+	LWLockRelease(ProcArrayLock);
+}
+
+#endif

@@ -51,6 +51,10 @@ extern void TruncateCLOG(TransactionId oldestXact, Oid oldestxid_datoid);
 
 extern int	clogsyncfiletag(const FileTag *ftag, char *path);
 
+#ifdef __PGLITE__
+extern void PgliteInvalidateCLOGCache(void);
+#endif
+
 /* XLOG stuff */
 #define CLOG_ZEROPAGE		0x00
 #define CLOG_TRUNCATE		0x10

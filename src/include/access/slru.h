@@ -217,4 +217,8 @@ extern bool SlruScanDirCbDeleteAll(SlruCtl ctl, char *filename, int64 segpage,
 								   void *data);
 extern bool check_slru_buffers(const char *name, int *newval);
 
+#ifdef __PGLITE__
+extern void SimpleLruInvalidateAll(SlruCtl ctl);
+#endif
+
 #endif							/* SLRU_H */

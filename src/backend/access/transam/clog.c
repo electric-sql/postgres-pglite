@@ -946,6 +946,14 @@ CheckPointCLOG(void)
 	TRACE_POSTGRESQL_CLOG_CHECKPOINT_DONE(true);
 }
 
+#ifdef __PGLITE__
+void
+PgliteInvalidateCLOGCache(void)
+{
+	SimpleLruInvalidateAll(XactCtl);
+}
+#endif
+
 
 /*
  * Make sure that CLOG has room for a newly-allocated XID.

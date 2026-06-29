@@ -366,6 +366,14 @@ CheckPointSUBTRANS(void)
 	TRACE_POSTGRESQL_SUBTRANS_CHECKPOINT_DONE(true);
 }
 
+#ifdef __PGLITE__
+void
+PgliteInvalidateSUBTRANSCache(void)
+{
+	SimpleLruInvalidateAll(SubTransCtl);
+}
+#endif
+
 
 /*
  * Make sure that SUBTRANS has room for a newly-allocated XID.

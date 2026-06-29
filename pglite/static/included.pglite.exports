@@ -459,6 +459,7 @@ pg_strcasecmp
 pg_strong_random
 pg_vsnprintf
 pgl_getMyProcPort
+pgl_invalidate_remote_pages
 pgl_pq_flush
 pgl_sendConnData
 pgl_setPGliteActive

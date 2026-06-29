@@ -37,6 +37,16 @@ static XLogRecPtr cachedCommitLSN;
 /* Local functions */
 static XidStatus TransactionLogFetch(TransactionId transactionId);
 
+#ifdef __PGLITE__
+void
+PgliteInvalidateTransactionLogCache(void)
+{
+	cachedFetchXid = InvalidTransactionId;
+	cachedFetchXidStatus = TRANSACTION_STATUS_IN_PROGRESS;
+	cachedCommitLSN = InvalidXLogRecPtr;
+}
+#endif
+
 
 /* ----------------------------------------------------------------
  *		Postgres log access method interface

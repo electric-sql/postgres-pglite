@@ -736,6 +736,43 @@ SimpleLruWritePage(SlruCtl ctl, int slotno)
 	SlruInternalWritePage(ctl, slotno, NULL);
 }
 
+#ifdef __PGLITE__
+/*
+ * Drop all cached pages for a SLRU.
+ *
+ * PGlite's durable VFS can replace pg_xact and related files underneath a
+ * running read replica.  Those files are not relation buffers, so the generic
+ * relation invalidation path cannot evict them.
+ */
+void
+SimpleLruInvalidateAll(SlruCtl ctl)
+{
+	SlruShared	shared = ctl->shared;
+
+	for (int bankno = 0; bankno < ctl->nbanks; bankno++)
+		LWLockAcquire(&(shared->bank_locks[bankno].lock), LW_EXCLUSIVE);
+
+	for (int slotno = 0; slotno < shared->num_slots; slotno++)
+	{
+		if (shared->page_status[slotno] == SLRU_PAGE_READ_IN_PROGRESS ||
+			shared->page_status[slotno] == SLRU_PAGE_WRITE_IN_PROGRESS)
+			continue;
+
+		shared->page_status[slotno] = SLRU_PAGE_EMPTY;
+		shared->page_dirty[slotno] = false;
+		shared->page_number[slotno] = 0;
+		shared->page_lru_count[slotno] = 0;
+		if (shared->group_lsn != NULL)
+			MemSet(&shared->group_lsn[slotno * shared->lsn_groups_per_page],
+				   0,
+				   shared->lsn_groups_per_page * sizeof(XLogRecPtr));
+	}
+
+	for (int bankno = ctl->nbanks - 1; bankno >= 0; bankno--)
+		LWLockRelease(&(shared->bank_locks[bankno].lock));
+}
+#endif
+
 /*
  * Return whether the given page exists on disk.
  *

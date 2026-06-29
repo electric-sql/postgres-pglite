@@ -2386,6 +2386,15 @@ CheckPointMultiXact(void)
 	TRACE_POSTGRESQL_MULTIXACT_CHECKPOINT_DONE(true);
 }
 
+#ifdef __PGLITE__
+void
+PgliteInvalidateMultiXactCache(void)
+{
+	SimpleLruInvalidateAll(MultiXactOffsetCtl);
+	SimpleLruInvalidateAll(MultiXactMemberCtl);
+}
+#endif
+
 /*
  * Set the next-to-be-assigned MultiXactId and offset
  *
