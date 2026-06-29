@@ -188,6 +188,12 @@ if [ "$RUN_CLEAN" = true ]; then
     emmake make PORTNAME=emscripten clean || { echo 'error: emmake make PORTNAME=emscripten clean' ; exit 20; }
 fi
 emmake make PORTNAME=emscripten $PGLITE_MAKE_JOBS_FLAG || { echo "error: emmake make PORTNAME=emscripten $PGLITE_MAKE_JOBS_FLAG" ; exit 21; }
+if [ "$PGLITE_BUILD_SHARED_MEMORY" = true ]; then
+    echo "pglite: clearing stale optional extension install artifacts for shared-memory core build."
+    rm -rf "$INSTALL_FOLDER/include/postgresql/emscripten/extension/imports" \
+           "$INSTALL_FOLDER/lib/postgresql" \
+           "$INSTALL_FOLDER/share/postgresql/extension"
+fi
 emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 23; }
 
 if [ "$PGLITE_BUILD_SHARED_MEMORY" = true ]; then
