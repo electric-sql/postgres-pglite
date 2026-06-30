@@ -25,6 +25,10 @@
 #include <sys/time.h>
 #include <setjmp.h>
 #include <string.h>
+#include <stdlib.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -478,4 +482,181 @@ struct pollfd {
 int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout) {
     // dummy
 	return nfds;
+}
+
+/* ========== addrinfo ==========
+*
+* Emscripten's JS getaddrinfo shim currently hits a MEMORY64 issue when
+* ai_canonname is populated with IPv6 text (e.g. "::1"). We provide a
+* compact libc replacement for the subset PGlite needs.
+*/
+
+static int
+pgl_parse_service_port(const char *service, uint16_t *out_port)
+{
+    char *endptr = NULL;
+    long parsed = 0;
+
+    if (out_port == NULL)
+        return EAI_FAIL;
+
+    if (service == NULL || *service == '\0') {
+        *out_port = 0;
+        return 0;
+    }
+
+    parsed = strtol(service, &endptr, 10);
+    if (endptr == service || *endptr != '\0' || parsed < 0 || parsed > 65535)
+        return EAI_SERVICE;
+
+    *out_port = (uint16_t) parsed;
+    return 0;
+}
+
+static int
+pgl_make_addrinfo(
+    int family,
+    int socktype,
+    int protocol,
+    const void *addr_bytes,
+    uint16_t port,
+    struct addrinfo **res)
+{
+    struct addrinfo *ai = NULL;
+    void *sa = NULL;
+
+    if (res == NULL || addr_bytes == NULL)
+        return EAI_FAIL;
+
+    ai = (struct addrinfo *) calloc(1, sizeof(struct addrinfo));
+    if (ai == NULL)
+        return EAI_MEMORY;
+
+    if (family == AF_INET6) {
+        struct sockaddr_in6 *sin6 =
+            (struct sockaddr_in6 *) calloc(1, sizeof(struct sockaddr_in6));
+        if (sin6 == NULL) {
+            free(ai);
+            return EAI_MEMORY;
+        }
+        sin6->sin6_family = AF_INET6;
+        sin6->sin6_port = htons(port);
+        memcpy(&sin6->sin6_addr, addr_bytes, sizeof(sin6->sin6_addr));
+        sa = sin6;
+        ai->ai_addrlen = sizeof(struct sockaddr_in6);
+    } else {
+        struct sockaddr_in *sin =
+            (struct sockaddr_in *) calloc(1, sizeof(struct sockaddr_in));
+        if (sin == NULL) {
+            free(ai);
+            return EAI_MEMORY;
+        }
+        sin->sin_family = AF_INET;
+        sin->sin_port = htons(port);
+        memcpy(&sin->sin_addr, addr_bytes, sizeof(sin->sin_addr));
+        sa = sin;
+        ai->ai_addrlen = sizeof(struct sockaddr_in);
+    }
+
+    ai->ai_family = family;
+    ai->ai_socktype = socktype;
+    ai->ai_protocol = protocol;
+    ai->ai_addr = (struct sockaddr *) sa;
+    ai->ai_canonname = NULL;
+    ai->ai_next = NULL;
+    *res = ai;
+    return 0;
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_getaddrinfo(
+    const char *node,
+    const char *service,
+    const struct addrinfo *hints,
+    struct addrinfo **res)
+{
+    int family = AF_UNSPEC;
+    int socktype = 0;
+    int protocol = 0;
+    int flags = 0;
+    uint16_t port = 0;
+    int rc = 0;
+
+    struct in_addr v4;
+    struct in6_addr v6;
+
+    if (res == NULL)
+        return EAI_FAIL;
+    *res = NULL;
+
+    if (hints != NULL) {
+        family = hints->ai_family;
+        socktype = hints->ai_socktype;
+        protocol = hints->ai_protocol;
+        flags = hints->ai_flags;
+    }
+
+    rc = pgl_parse_service_port(service, &port);
+    if (rc != 0)
+        return rc;
+
+    if (socktype == 0 && protocol == 0) {
+        socktype = SOCK_STREAM;
+        protocol = IPPROTO_TCP;
+    } else if (socktype == 0) {
+        socktype = (protocol == IPPROTO_UDP) ? SOCK_DGRAM : SOCK_STREAM;
+    } else if (protocol == 0) {
+        protocol = (socktype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
+    }
+
+    if (node == NULL || *node == '\0') {
+        if (family == AF_INET6) {
+            memset(&v6, 0, sizeof(v6));
+            if ((flags & AI_PASSIVE) == 0)
+                v6.s6_addr[15] = 1; /* ::1 */
+            return pgl_make_addrinfo(AF_INET6, socktype, protocol, &v6, port, res);
+        }
+        /* default to IPv4 for AF_UNSPEC and AF_INET */
+        if ((flags & AI_PASSIVE) != 0)
+            v4.s_addr = htonl(INADDR_ANY);
+        else
+            v4.s_addr = htonl(INADDR_LOOPBACK);
+        return pgl_make_addrinfo(AF_INET, socktype, protocol, &v4, port, res);
+    }
+
+    if (strcmp(node, "localhost") == 0) {
+        if (family == AF_INET6) {
+            memset(&v6, 0, sizeof(v6));
+            v6.s6_addr[15] = 1; /* ::1 */
+            return pgl_make_addrinfo(AF_INET6, socktype, protocol, &v6, port, res);
+        }
+        v4.s_addr = htonl(INADDR_LOOPBACK);
+        return pgl_make_addrinfo(AF_INET, socktype, protocol, &v4, port, res);
+    }
+
+    if ((family == AF_UNSPEC || family == AF_INET) &&
+        inet_pton(AF_INET, node, &v4) == 1) {
+        return pgl_make_addrinfo(AF_INET, socktype, protocol, &v4, port, res);
+    }
+
+    if ((family == AF_UNSPEC || family == AF_INET6) &&
+        inet_pton(AF_INET6, node, &v6) == 1) {
+        return pgl_make_addrinfo(AF_INET6, socktype, protocol, &v6, port, res);
+    }
+
+    if ((flags & AI_NUMERICHOST) != 0)
+        return EAI_NONAME;
+    return EAI_NONAME;
+}
+
+void EMSCRIPTEN_KEEPALIVE
+pgl_freeaddrinfo(struct addrinfo *res)
+{
+    while (res != NULL) {
+        struct addrinfo *next = res->ai_next;
+        free(res->ai_addr);
+        free(res->ai_canonname);
+        free(res);
+        res = next;
+    }
 }
