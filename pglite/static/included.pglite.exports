@@ -283,7 +283,6 @@ fileno
 find_coercion_pathway
 find_option
 fiprintf
-Float8GetDatum
 fmax
 fmin
 fmod
@@ -356,7 +355,6 @@ index_close
 index_open
 init_MultiFuncCall
 initStringInfo
-Int64GetDatum
 InterruptPending
 ioctl
 iprintf

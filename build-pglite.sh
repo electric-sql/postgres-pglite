@@ -10,7 +10,7 @@ emcc --clear-cache
 INSTALL_FOLDER=${INSTALL_FOLDER:-"/pglite"}
 
 # build with optimizations by default aka release
-PGLITE_CFLAGS="-m32 -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types"
+PGLITE_CFLAGS="-sMEMORY64=1 -m64 -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types"
 if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
@@ -65,13 +65,14 @@ else
     echo "$CONFIG_STATUS exists and is newer than $REF_FILE. ./configure will NOT be run."
 fi
 
-PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0"
-PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
+PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0 -sMEMORY64=1 -m64"
+PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sMEMORY64=1 -m64 "
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
 EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=64MB \
+-sMEMORY64=1 -m64 \
 -sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
@@ -92,7 +93,7 @@ $(pwd)/pglite/src/pglitec/pglitec.o \
 
 CONFIGURE_PARAMS="\
 ac_cv_exeext=.js \
---host wasm32-unknown-linux-gnu \
+--host wasm64-unknown-emscripten \
 --disable-spinlocks \
 --without-llvm  \
 --without-pam \
@@ -136,14 +137,14 @@ PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist || { ech
 # the above will also create a file with the imports that each extension needs - we pass these as input in the next step for emscripten to keep alive
 
 # Step 4: make and dist other extensions
-SAVE_PATH=$PATH
-PATH=$PATH:$INSTALL_FOLDER/bin
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions -j || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite/other_extensions' ; exit 41; }
+# SAVE_PATH=$PATH
+# PATH=$PATH:$INSTALL_FOLDER/bin
+# emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions -j || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite/other_extensions' ; exit 41; }
 # Step 4.1: special case: make PostGIS
-cd ./pglite/ && ./build-postgis.sh && cd ../
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist' ; exit 42; }
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist-postgis' ; exit 43; }
-PATH=$SAVE_PATH
+# cd ./pglite/ && ./build-postgis.sh && cd ../
+# emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist' ; exit 42; }
+# emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist-postgis' ; exit 43; }
+# PATH=$SAVE_PATH
 
 # Step 5: get exported functions
 emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
