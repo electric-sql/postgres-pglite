@@ -25,15 +25,29 @@
 #include <sys/time.h>
 #include <setjmp.h>
 #include <string.h>
+#include <stdint.h>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
+extern unsigned char __heap_base;
 #else
 #define EMSCRIPTEN_KEEPALIVE
 // TODO: an include for libpglite
 #endif
 
 volatile int is_pglite_active = 0;
+
+uintptr_t EMSCRIPTEN_KEEPALIVE pgl_get_heap_base(void) {
+#if defined(__EMSCRIPTEN__)
+    return (uintptr_t)&__heap_base;
+#else
+    return 0;
+#endif
+}
+
+uintptr_t EMSCRIPTEN_KEEPALIVE pgl_get_heap_top(void) {
+    return (uintptr_t)sbrk(0);
+}
 
 void EMSCRIPTEN_KEEPALIVE clear_setitimer(void) {
     struct itimerval zero = {{0, 0}, {0, 0}};

@@ -460,6 +460,8 @@ pg_strong_random
 pg_vsnprintf
 pgl_current_wal_insert_lsn_high
 pgl_current_wal_insert_lsn_low
+pgl_get_heap_base
+pgl_get_heap_top
 pgl_getMyProcPort
 pgl_invalidate_remote_relation_cache
 pgl_invalidate_remote_pages

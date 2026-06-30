@@ -242,7 +242,8 @@ PGPRELOAD="\
 PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
-PGLITE_FINAL_MEMORY_FLAGS="-sINITIAL_MEMORY=128MB"
+PGLITE_INITIAL_MEMORY_SIZE="${PGLITE_INITIAL_MEMORY_SIZE:-128MB}"
+PGLITE_FINAL_MEMORY_FLAGS="-sINITIAL_MEMORY=$PGLITE_INITIAL_MEMORY_SIZE"
 if [ "$PGLITE_BUILD_SHARED_MEMORY" = true ]; then
     PGLITE_FINAL_MEMORY_FLAGS="\
 -sINITIAL_MEMORY=$PGLITE_SHARED_MEMORY_SIZE \
