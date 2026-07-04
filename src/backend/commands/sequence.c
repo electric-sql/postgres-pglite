@@ -39,6 +39,9 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "parser/parse_type.h"
+#ifdef __PGLITE__
+#include "pglite.h"
+#endif
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/smgr.h"
@@ -686,6 +689,11 @@ nextval_internal(Oid relid, bool check_permissions)
 	cycle = pgsform->seqcycle;
 	ReleaseSysCache(pgstuple);
 
+#ifdef __PGLITE__
+	/* clamp allocation to any host-registered lease (§5.3 rule 1) */
+	PgliteSequenceLeaseClamp(relid, incby, &maxv, &cycle);
+#endif
+
 	/* lock page buffer and read tuple */
 	seq = read_seq_tuple(seqrel, &buf, &seqdatatuple);
 	page = BufferGetPage(buf);
@@ -747,7 +755,12 @@ nextval_internal(Oid relid, bool check_permissions)
 							(errcode(ERRCODE_SEQUENCE_GENERATOR_LIMIT_EXCEEDED),
 							 errmsg("nextval: reached maximum value of sequence \"%s\" (%" PRId64 ")",
 									RelationGetRelationName(seqrel),
-									maxv)));
+									maxv),
+#ifdef __PGLITE__
+							 PgliteSequenceLeaseWasClamped(relid) ?
+							 errdetail("sequence lease exhausted") :
+#endif
+							 0));
 				next = minv;
 			}
 			else

@@ -458,10 +458,13 @@ pg_sprintf
 pg_strcasecmp
 pg_strong_random
 pg_vsnprintf
+pgl_clear_sequence_leases
 pgl_getMyProcPort
 pgl_pq_flush
+pgl_reset_sequence_caches
 pgl_sendConnData
 pgl_setPGliteActive
+pgl_set_sequence_lease
 pgl_startPGlite
 post_parse_analyze_hook
 PostgresMainLongJmp
