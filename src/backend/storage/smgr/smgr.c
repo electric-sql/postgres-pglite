@@ -658,6 +658,12 @@ smgrzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 			   int nblocks, bool skipFsync)
 {
 	HOLD_INTERRUPTS();
+#ifdef __PGLITE__
+	/* In-place reset gate (M5c/M5d): bulk extension grows the datadir on
+	 * disk exactly like smgrextend — without this the reset gate passed
+	 * while extended (zeroed) file space survived the reset. */
+	pgl_storage_writes++;
+#endif
 
 	smgrsw[reln->smgr_which].smgr_zeroextend(reln, forknum, blocknum,
 											 nblocks, skipFsync);

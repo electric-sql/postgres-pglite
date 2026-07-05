@@ -4450,6 +4450,13 @@ RelationGetNumberOfBlocksInFork(Relation relation, ForkNumber forkNum)
 
 		szbytes = table_relation_size(relation, forkNum);
 
+#ifdef __PGLITE__
+		/* Read-set capture (design §4.1): the TABLE branch is the seqscan
+		 * page-set freeze — the M5d relation-extension rule's source. */
+		if (pgl_readset_enabled && !RelationUsesLocalBuffers(relation))
+			PgliteReadSetRecordNblocks(&relation->rd_locator, forkNum,
+									   (BlockNumber) ((szbytes + (BLCKSZ - 1)) / BLCKSZ));
+#endif
 		return (szbytes + (BLCKSZ - 1)) / BLCKSZ;
 	}
 	else if (RELKIND_HAS_STORAGE(relation->rd_rel->relkind))
