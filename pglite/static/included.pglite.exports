@@ -479,6 +479,8 @@ pgl_multixact_zero_mem_page
 pgl_multixact_zero_off_page
 pgl_pq_flush
 pgl_process_invals
+pgl_page_lsn
+pgl_relation_nblocks
 pgl_redo_whitelisted
 pgl_reset_to_base
 pgl_readset_count

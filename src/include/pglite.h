@@ -148,6 +148,18 @@ extern uint32 pgl_readset_count(void);
 extern int	pgl_readset_overflowed(void);
 extern uintptr_t pgl_readset_snapshot(void);
 
+/*
+ * Rebase validation reads (design doc §4.2, M5d;
+ * src/backend/pglite/pgl_apply.c): pinned-buffer page-LSN peek (never an
+ * executor path) and fresh smgr nblocks.  pgl_page_lsn returns 0 when
+ * the page is missing/truncated; pgl_relation_nblocks returns UINT32_MAX
+ * for a missing fork.
+ */
+extern uint64 pgl_page_lsn(Oid spc_oid, Oid db_oid, RelFileNumber rel_number,
+						   int32 fork_num, BlockNumber block_num);
+extern uint32 pgl_relation_nblocks(Oid spc_oid, Oid db_oid,
+								   RelFileNumber rel_number, int32 fork_num);
+
 /* Internal hook entry points (called from storage/buffer/bufmgr.c) */
 extern PGDLLIMPORT bool pgl_readset_enabled;
 extern void PgliteReadSetRecordPin(const RelFileLocator *rlocator,

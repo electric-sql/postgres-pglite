@@ -54,6 +54,7 @@
 #include "storage/procnumber.h"
 #include "storage/sinval.h"
 #include "storage/smgr.h"
+#include "utils/resowner.h"
 
 /*
  * WAL insert position (salvage: 5b02971e0b).  Split into two uint32s so
@@ -339,4 +340,122 @@ void
 pgl_smgr_destroy_all(void)
 {
 	smgrdestroyall();
+}
+
+/*
+ * ---- M5d rebase validation reads (design doc §4.2) ----
+ *
+ * Validation must not perturb the evidence: page LSNs are read via
+ * BufferGetLSNAtomic on a pinned buffer (never through executor access
+ * paths, which would opportunistically prune / set hint bits and
+ * interleave stray WAL into the fresh slice), and nblocks comes from the
+ * same smgr lseek the capture-side hook records
+ * (RelationGetNumberOfBlocksInFork -> smgrnblocks).
+ */
+
+/*
+ * pgl_page_lsn
+ *		Return the page LSN of one block at the CURRENT local state (K
+ *		during rebase validation), or UINT64_MAX when the fork/block no
+ *		longer exists (§4.2 "missing / truncated page" — the caller
+ *		40001s; 0 is a LEGITIMATE LSN on never-WAL-logged initdb pages).
+ *		Pin + BufferGetLSNAtomic + unpin under a private resource owner;
+ *		runs between transactions.
+ */
+uint64
+pgl_page_lsn(Oid spc_oid, Oid db_oid, RelFileNumber rel_number,
+			 int32 fork_num, BlockNumber block_num)
+{
+	RelFileLocator locator;
+	SMgrRelation smgr;
+	ResourceOwner owner;
+	ResourceOwner old_owner;
+	uint64		lsn = PG_UINT64_MAX;
+
+	if (fork_num < 0 || fork_num > MAX_FORKNUM)
+		return PG_UINT64_MAX;
+
+	locator.spcOid = spc_oid;
+	locator.dbOid = db_oid;
+	locator.relNumber = rel_number;
+
+	smgr = smgropen(locator, INVALID_PROC_NUMBER);
+	/* Fresh lseek below (cached sizes may predate a live advance). */
+	smgrrelease(smgr);
+	if (!smgrexists(smgr, (ForkNumber) fork_num))
+		return PG_UINT64_MAX;
+	if (block_num >= smgrnblocks(smgr, (ForkNumber) fork_num))
+		return PG_UINT64_MAX;
+
+	owner = ResourceOwnerCreate(NULL, "pgl_validate");
+	old_owner = CurrentResourceOwner;
+	CurrentResourceOwner = owner;
+
+	PG_TRY();
+	{
+		Buffer		buf;
+
+		buf = ReadBufferWithoutRelcache(locator, (ForkNumber) fork_num,
+										block_num, RBM_NORMAL, NULL, true);
+		lsn = (uint64) BufferGetLSNAtomic(buf);
+		ReleaseBuffer(buf);
+	}
+	PG_CATCH();
+	{
+		FlushErrorState();
+		LWLockReleaseAll();
+		UnlockBuffers();
+		lsn = PG_UINT64_MAX;
+	}
+	PG_END_TRY();
+
+	CurrentResourceOwner = owner;
+	ResourceOwnerRelease(owner, RESOURCE_RELEASE_BEFORE_LOCKS, false, false);
+	ResourceOwnerRelease(owner, RESOURCE_RELEASE_LOCKS, false, false);
+	ResourceOwnerRelease(owner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
+	CurrentResourceOwner = old_owner;
+	ResourceOwnerDelete(owner);
+
+	return lsn;
+}
+
+/*
+ * pgl_relation_nblocks
+ *		Current nblocks of one relation fork straight from smgr (the same
+ *		source the §4.1 capture hook records), with cached sizes dropped
+ *		first so the lseek is fresh.  Returns UINT32_MAX when the fork
+ *		does not exist (caller treats any mismatch as 40001).
+ */
+uint32
+pgl_relation_nblocks(Oid spc_oid, Oid db_oid, RelFileNumber rel_number,
+					 int32 fork_num)
+{
+	RelFileLocator locator;
+	SMgrRelation smgr;
+	uint32		result = PG_UINT32_MAX;
+
+	if (fork_num < 0 || fork_num > MAX_FORKNUM)
+		return PG_UINT32_MAX;
+
+	locator.spcOid = spc_oid;
+	locator.dbOid = db_oid;
+	locator.relNumber = rel_number;
+
+	PG_TRY();
+	{
+		smgr = smgropen(locator, INVALID_PROC_NUMBER);
+		smgrrelease(smgr);
+		if (smgrexists(smgr, (ForkNumber) fork_num))
+			result = (uint32) smgrnblocks(smgr, (ForkNumber) fork_num);
+	}
+	PG_CATCH();
+	{
+		FlushErrorState();
+		LWLockReleaseAll();
+		UnlockBuffers();
+		result = PG_UINT32_MAX;
+	}
+	PG_END_TRY();
+
+	return result;
 }

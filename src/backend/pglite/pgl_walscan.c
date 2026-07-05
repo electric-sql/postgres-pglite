@@ -284,7 +284,37 @@ pglws_decode_eager(StringInfo b, XLogReaderState *r)
 			break;
 
 		case RM_HEAP_ID:
-			if ((info & XLOG_HEAP_OPMASK) == XLOG_HEAP_INPLACE)
+			/*
+			 * M5d harvest enumeration (design §4.4): heap DML records carry
+			 * their tuple offsets so the JS harvester can address net-effect
+			 * rows by ctid.  Block mapping (walscan blocks[]): insert/delete
+			 * target block 0; update's NEW tuple is block 0, OLD tuple is
+			 * block 1 when present, else block 0 (same-page update).
+			 */
+			if ((info & XLOG_HEAP_OPMASK) == XLOG_HEAP_INSERT)
+			{
+				xl_heap_insert *xlrec = (xl_heap_insert *) XLogRecGetData(r);
+
+				appendStringInfo(b, ",\"kind\":\"heap_insert\",\"offnum\":%u",
+								 xlrec->offnum);
+			}
+			else if ((info & XLOG_HEAP_OPMASK) == XLOG_HEAP_DELETE)
+			{
+				xl_heap_delete *xlrec = (xl_heap_delete *) XLogRecGetData(r);
+
+				appendStringInfo(b, ",\"kind\":\"heap_delete\",\"offnum\":%u",
+								 xlrec->offnum);
+			}
+			else if ((info & XLOG_HEAP_OPMASK) == XLOG_HEAP_UPDATE ||
+					 (info & XLOG_HEAP_OPMASK) == XLOG_HEAP_HOT_UPDATE)
+			{
+				xl_heap_update *xlrec = (xl_heap_update *) XLogRecGetData(r);
+
+				appendStringInfo(b,
+								 ",\"kind\":\"heap_update\",\"newOffnum\":%u,\"oldOffnum\":%u",
+								 xlrec->new_offnum, xlrec->old_offnum);
+			}
+			else if ((info & XLOG_HEAP_OPMASK) == XLOG_HEAP_INPLACE)
 			{
 				xl_heap_inplace *xlrec =
 					(xl_heap_inplace *) XLogRecGetData(r);
@@ -299,6 +329,29 @@ pglws_decode_eager(StringInfo b, XLogReaderState *r)
 				if (xlrec->nmsgs > 0)
 					pglws_json_hex(b, "invals", xlrec->msgs,
 								   xlrec->nmsgs * sizeof(SharedInvalidationMessage));
+			}
+			break;
+
+		case RM_HEAP2_ID:
+			if ((info & XLOG_HEAP_OPMASK) == XLOG_HEAP2_MULTI_INSERT)
+			{
+				xl_heap_multi_insert *xlrec =
+					(xl_heap_multi_insert *) XLogRecGetData(r);
+				bool		init = (XLogRecGetInfo(r) & XLOG_HEAP_INIT_PAGE) != 0;
+
+				/*
+				 * Offsets are omitted from the record when the page is
+				 * (re)initialized: tuples land at 1..ntuples (heapam.c).
+				 */
+				appendStringInfo(b,
+								 ",\"kind\":\"heap_multi_insert\",\"ntuples\":%u",
+								 (unsigned) xlrec->ntuples);
+				appendStringInfoString(b, ",\"offsets\":[");
+				for (int i = 0; i < xlrec->ntuples; i++)
+					appendStringInfo(b, "%s%u", i ? "," : "",
+									 init ? (unsigned) (i + 1)
+									 : (unsigned) xlrec->offsets[i]);
+				appendStringInfoChar(b, ']');
 			}
 			break;
 
