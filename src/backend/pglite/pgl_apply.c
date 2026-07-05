@@ -253,12 +253,30 @@ pgl_multixact_record(MultiXactId mid, MultiXactOffset moff,
 
 /*
  * pgl_invalidate_xact_caches
- *		Drop backend-cached transaction status state (one-entry clog
- *		caches + all SLRU buffers) so post-apply lookups hit the updated
- *		pages.  Used after a batch of foreign clog/multixact applies.
+ *		Drop the backend's one-entry transaction status caches after a
+ *		batch of foreign clog/multixact applies.  The SLRU buffers are
+ *		deliberately NOT dropped here: semantic applies write THROUGH the
+ *		live SLRUs, so their pages are already coherent — and
+ *		SimpleLruInvalidateAll discards dirty pages, which would throw
+ *		away the very bits just applied.  Wholesale SLRU drops
+ *		(pgl_invalidate_slru_caches) exist for the durable-VFS case where
+ *		the files were replaced underneath the running instance.
  */
 void
 pgl_invalidate_xact_caches(void)
+{
+	PgliteInvalidateTransactionLogCache();
+}
+
+/*
+ * pgl_invalidate_slru_caches
+ *		Wholesale SLRU buffer drop (salvage: 9b2914017d) — ONLY valid when
+ *		pg_xact/pg_multixact/pg_subtrans files were replaced externally
+ *		and no unwritten local SLRU state must survive: dirty pages are
+ *		discarded, not written back.
+ */
+void
+pgl_invalidate_slru_caches(void)
 {
 	PgliteInvalidateTransactionLogCache();
 	PgliteInvalidateCLOGCache();

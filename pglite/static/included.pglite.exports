@@ -468,6 +468,7 @@ pgl_current_wal_insert_lsn_high
 pgl_current_wal_insert_lsn_low
 pgl_drop_relation_buffers_range
 pgl_getMyProcPort
+pgl_invalidate_slru_caches
 pgl_invalidate_xact_caches
 pgl_multixact_record
 pgl_multixact_zero_mem_page

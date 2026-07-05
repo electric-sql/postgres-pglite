@@ -79,6 +79,7 @@ extern void pgl_multixact_zero_mem_page(int64 pageno);
 extern void pgl_multixact_record(MultiXactId mid, MultiXactOffset moff,
 								 int nmembers, uintptr_t members_ptr);
 extern void pgl_invalidate_xact_caches(void);
+extern void pgl_invalidate_slru_caches(void);
 extern void pgl_drop_relation_buffers_range(Oid spc_oid, Oid db_oid,
 											RelFileNumber rel_number,
 											int32 fork_num,
