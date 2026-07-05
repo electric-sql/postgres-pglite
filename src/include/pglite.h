@@ -87,4 +87,23 @@ extern void pgl_smgr_release(Oid spc_oid, Oid db_oid,
 							 RelFileNumber rel_number);
 extern void pgl_smgr_destroy_all(void);
 
+/*
+ * Read-set capture (design doc §4.1, src/backend/pglite/pgl_readset.c)
+ *
+ * Entries are packed uint32 x5: spc, db, rel, kind<<24|fork, block —
+ * kind 0 = page pin (PinBufferForBlock), kind 1 = nblocks probe.
+ */
+extern void pgl_readset_enable(int on);
+extern void pgl_readset_reset(void);
+extern uint32 pgl_readset_count(void);
+extern int	pgl_readset_overflowed(void);
+extern uintptr_t pgl_readset_snapshot(void);
+
+/* Internal hook entry points (called from storage/buffer/bufmgr.c) */
+extern PGDLLIMPORT bool pgl_readset_enabled;
+extern void PgliteReadSetRecordPin(const RelFileLocator *rlocator,
+								   int fork_num, BlockNumber block_num);
+extern void PgliteReadSetRecordNblocks(const RelFileLocator *rlocator,
+									   int fork_num, BlockNumber nblocks);
+
 #endif							/* PGLITE_H */

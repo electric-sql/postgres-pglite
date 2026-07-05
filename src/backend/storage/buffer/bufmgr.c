@@ -49,6 +49,9 @@
 #include "lib/binaryheap.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
+#ifdef __PGLITE__
+#include "pglite.h"
+#endif
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
 #include "storage/aio.h"
@@ -1131,6 +1134,12 @@ PinBufferForBlock(Relation rel,
 	Assert((persistence == RELPERSISTENCE_TEMP ||
 			persistence == RELPERSISTENCE_PERMANENT ||
 			persistence == RELPERSISTENCE_UNLOGGED));
+
+#ifdef __PGLITE__
+	/* Read-set capture (design §4.1): shared-buffer page reads only. */
+	if (pgl_readset_enabled && persistence != RELPERSISTENCE_TEMP)
+		PgliteReadSetRecordPin(&smgr->smgr_rlocator.locator, forkNum, blockNum);
+#endif
 
 	if (persistence == RELPERSISTENCE_TEMP)
 	{
@@ -4445,7 +4454,14 @@ RelationGetNumberOfBlocksInFork(Relation relation, ForkNumber forkNum)
 	}
 	else if (RELKIND_HAS_STORAGE(relation->rd_rel->relkind))
 	{
-		return smgrnblocks(RelationGetSmgr(relation), forkNum);
+		BlockNumber nblocks = smgrnblocks(RelationGetSmgr(relation), forkNum);
+
+#ifdef __PGLITE__
+		/* Read-set capture (design §4.1): nblocks probes for scan freezes. */
+		if (pgl_readset_enabled && !RelationUsesLocalBuffers(relation))
+			PgliteReadSetRecordNblocks(&relation->rd_locator, forkNum, nblocks);
+#endif
+		return nblocks;
 	}
 	else
 		Assert(false);

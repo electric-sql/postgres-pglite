@@ -474,6 +474,11 @@ pgl_multixact_zero_mem_page
 pgl_multixact_zero_off_page
 pgl_pq_flush
 pgl_process_invals
+pgl_readset_count
+pgl_readset_enable
+pgl_readset_overflowed
+pgl_readset_reset
+pgl_readset_snapshot
 pgl_reset_sequence_caches
 pgl_sendConnData
 pgl_set_sequence_lease
