@@ -191,4 +191,14 @@ extern void PgliteReadSetRecordPin(const RelFileLocator *rlocator,
 extern void PgliteReadSetRecordNblocks(const RelFileLocator *rlocator,
 									   int fork_num, BlockNumber nblocks);
 
+/*
+ * Read-cell WAL suppression (hardening H2, design doc §14.8;
+ * src/backend/pglite/pgl_read_wal.c).  When enabled, a __PGLITE__ hunk at
+ * the top of heap_page_prune_opt() returns early so a read-attached cell
+ * never opportunistically prunes and therefore never writes WAL.  Default
+ * off = vanilla pruning.
+ */
+extern PGDLLIMPORT bool pgl_suppress_read_wal;
+extern void pgl_set_suppress_read_wal(int on);
+
 #endif							/* PGLITE_H */

@@ -28,6 +28,9 @@
 #include "storage/bufmgr.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
+#ifdef __PGLITE__
+#include "pglite.h"
+#endif
 
 /* Working data for heap_page_prune_and_freeze() and subroutines */
 typedef struct
@@ -196,6 +199,17 @@ heap_page_prune_opt(Relation relation, Buffer buffer)
 	TransactionId prune_xid;
 	GlobalVisState *vistest;
 	Size		minfree;
+
+#ifdef __PGLITE__
+	/*
+	 * Read-attached PGlite cells (hardening H2, design doc §14.8) must never
+	 * emit WAL of their own; opportunistic pruning is the last remaining
+	 * source, so fall out before it can log an XLOG_HEAP2_PRUNE record.
+	 * Default off ⇒ vanilla.
+	 */
+	if (pgl_suppress_read_wal)
+		return;
+#endif
 
 	/*
 	 * We can't write WAL in recovery mode, so there's no point trying to
