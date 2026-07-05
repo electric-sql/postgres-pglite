@@ -14,6 +14,7 @@ include $(top_builddir)/src/Makefile.global
 
 OBJS = \
 	pgl_apply.o \
-	pgl_sequence_lease.o
+	pgl_sequence_lease.o \
+	pgl_walscan.o
 
 include $(top_srcdir)/src/backend/common.mk

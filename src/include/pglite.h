@@ -45,6 +45,18 @@ extern void PgliteSequenceLeaseClamp(Oid seqrelid, int64 incby,
 extern bool PgliteSequenceLeaseWasClamped(Oid seqrelid);
 
 /*
+ * WAL-range scanner (design doc §14.2, src/backend/pglite/pgl_walscan.c)
+ *
+ * pgl_walscan_begin([start, end), tli) then pgl_walscan_next() per
+ * record: returns a pointer to a NUL-terminated JSON classification of
+ * the record (valid until the next call), 0 when exhausted.  The eager
+ * special-record set (§6.3) carries decoded payloads.
+ */
+extern int	pgl_walscan_begin(uint64 start, uint64 end, uint32 tli);
+extern uintptr_t pgl_walscan_next(void);
+extern void pgl_walscan_end_scan(void);
+
+/*
  * Live tail-apply primitives (design doc §6.3/§5.1,
  * src/backend/pglite/pgl_apply.c).  Salvage provenance:
  * codex/durable-vfs-postgres 9b2914017d + 5b02971e0b.
