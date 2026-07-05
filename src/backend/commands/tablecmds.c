@@ -19362,7 +19362,20 @@ PreCommit_on_commit_actions(void)
 	 * exists at truncation time.
 	 */
 	if (oids_to_truncate != NIL)
-		heap_truncate(oids_to_truncate);
+	{
+#ifdef __PGLITE__
+		extern bool PgliteDeferOnCommitTruncates(List *relids);
+
+		/*
+		 * M5e commit gate (design §3.6): when armed, the physical
+		 * truncate is deferred past the host's CAS verdict — the one
+		 * pre-commit step an in-place reset cannot reverse.  Vanilla
+		 * behavior when the gate is off (the default).
+		 */
+		if (!PgliteDeferOnCommitTruncates(oids_to_truncate))
+#endif
+			heap_truncate(oids_to_truncate);
+	}
 
 	if (oids_to_drop != NIL)
 	{

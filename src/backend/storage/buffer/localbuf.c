@@ -740,6 +740,46 @@ PgliteDiscardAllLocalBuffers(void)
 			InvalidateLocalBuffer(bufHdr, true);
 	}
 }
+
+/*
+ * PgliteFlushAllLocalBuffers
+ *		Write out every dirty local buffer (M5e).  Part of
+ *		pgl_flush_base's local-durability-point contract: with temp
+ *		pages flushed at base, PgliteDiscardAllLocalBuffers' wholesale
+ *		discard during an in-place reset re-reads exactly the
+ *		pre-attempt temp-table content — a tainted session's temp state
+ *		survives a CAS loss (§3.3 taint lift).
+ *
+ *		Called between transactions in a single-backend process: no
+ *		concurrent IO, and any still-pinned buffer would indicate a
+ *		leak — mirror GetLocalVictimBuffer's flush, taking the short
+ *		pin FlushLocalBuffer's assertion expects.
+ */
+void
+PgliteFlushAllLocalBuffers(void)
+{
+	for (int i = 0; i < NLocBuffer; i++)
+	{
+		BufferDesc *bufHdr = GetLocalBufferDescriptor(i);
+		uint32		buf_state = pg_atomic_read_u32(&bufHdr->state);
+
+		if ((buf_state & (BM_VALID | BM_DIRTY)) != (BM_VALID | BM_DIRTY))
+			continue;
+		if (LocalRefCount[i] > 0)
+			continue;			/* pinned between txns: leave it alone */
+
+		LocalRefCount[i]++;
+		PG_TRY();
+		{
+			FlushLocalBuffer(bufHdr, NULL);
+		}
+		PG_FINALLY();
+		{
+			LocalRefCount[i]--;
+		}
+		PG_END_TRY();
+	}
+}
 #endif
 
 /*

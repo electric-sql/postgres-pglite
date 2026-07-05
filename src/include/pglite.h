@@ -137,6 +137,30 @@ extern void PgliteGetMultiXactIdentity(MultiXactId *next_multi,
 extern PGDLLIMPORT uint64 pgl_storage_writes;
 
 /*
+ * M5e commit gate (design doc §3.6/§14.2,
+ * src/backend/pglite/pgl_commit_gate.c): defers the ON COMMIT DELETE
+ * ROWS truncate — the ONE irreversible pre-commit step under reset-based
+ * verdict handling — past the host's CAS verdict.  pgl_commit_gate_run
+ * executes pendings post-verdict in their own transaction;
+ * pgl_commit_gate_discard drops them on loss (also called from
+ * pgl_reset_to_base as belt and braces).  Default off = vanilla.
+ */
+struct List;					/* avoid dragging nodes/pg_list.h here */
+extern void pgl_commit_gate_set(int on);
+extern int	pgl_commit_gate_pending(void);
+extern int	pgl_commit_gate_run(void);
+extern void pgl_commit_gate_discard(void);
+extern bool PgliteDeferOnCommitTruncates(struct List *relids);
+
+/*
+ * Flush every dirty local buffer (localbuf.c): part of pgl_flush_base's
+ * local-durability-point contract, so an in-place reset's wholesale
+ * local-buffer discard re-reads a tainted session's PRE-ATTEMPT
+ * temp-table content exactly (M5e taint lift).
+ */
+extern void PgliteFlushAllLocalBuffers(void);
+
+/*
  * Read-set capture (design doc §4.1, src/backend/pglite/pgl_readset.c)
  *
  * Entries are packed uint32 x5: spc, db, rel, kind<<24|fork, block —

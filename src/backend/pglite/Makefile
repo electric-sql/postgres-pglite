@@ -14,6 +14,7 @@ include $(top_builddir)/src/Makefile.global
 
 OBJS = \
 	pgl_apply.o \
+	pgl_commit_gate.o \
 	pgl_readset.o \
 	pgl_reset.o \
 	pgl_sequence_lease.o \

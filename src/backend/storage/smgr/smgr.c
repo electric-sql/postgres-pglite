@@ -661,8 +661,18 @@ smgrzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 #ifdef __PGLITE__
 	/* In-place reset gate (M5c/M5d): bulk extension grows the datadir on
 	 * disk exactly like smgrextend — without this the reset gate passed
-	 * while extended (zeroed) file space survived the reset. */
-	pgl_storage_writes++;
+	 * while extended (zeroed) file space survived the reset.
+	 *
+	 * M5e exception: TEMP-relation zero-extension is excluded.  The
+	 * bytes written are guaranteed zeros (never tuple content — dirty
+	 * local pages reach disk only via smgrwrite, which stays counted),
+	 * temp pages sit outside the WAL/read-set/validation machinery, and
+	 * trailing zero pages read back as empty after the reset's local-
+	 * buffer discard.  Without this, a tainted session's first insert
+	 * into its own temp table would disqualify the very in-place reset
+	 * the §3.3 taint lift depends on. */
+	if (!SmgrIsTemp(reln))
+		pgl_storage_writes++;
 #endif
 
 	smgrsw[reln->smgr_which].smgr_zeroextend(reln, forknum, blocknum,

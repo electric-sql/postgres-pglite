@@ -45,10 +45,17 @@
  *   base, the on-disk state may hold speculative bytes an in-place
  *   reset cannot undo, and the host falls back to recycle.
  *
- * - Temp storage: local buffers are discarded wholesale.  The reset path
- *   only runs for untainted sessions today (temp-tabled sessions keep
- *   the fatal-reset contract on loss), so this is forward mechanism for
- *   the M5d rebase, not a behavior change.
+ * - Temp storage: local buffers are discarded wholesale.  Since M5e,
+ *   pgl_flush_base also flushes dirty LOCAL buffers, so disk == base
+ *   covers temp relations too: the wholesale discard re-reads exactly
+ *   the pre-attempt temp content.  That is the §3.3 taint lift — a
+ *   temp-tabled session survives a CAS loss through this reset (its
+ *   losing attempt's temp writes vanish with the discarded local
+ *   buffers, exactly matching abort semantics; any attempt-time local
+ *   buffer EVICTION bumps the storage-write counter and the JS gate
+ *   falls back to recycle + fatal reset).  The reset also discards any
+ *   pending commit-gate truncates (pgl_commit_gate.c): a reversed
+ *   commit must never run its deferred ON COMMIT DELETE ROWS truncate.
  *
  * Copyright (c) 2026, ElectricSQL
  *
@@ -163,6 +170,7 @@ pgl_flush_base(void)
 	PG_TRY();
 	{
 		CheckPointBuffers(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE);
+		PgliteFlushAllLocalBuffers();	/* temp pages too (M5e taint lift) */
 		CheckPointCLOG();
 		CheckPointSUBTRANS();
 		CheckPointMultiXact();
@@ -258,8 +266,14 @@ pgl_reset_to_base(uint64 base_lsn, uint64 prev_rec_lsn,
 
 		if (rc == 0)
 		{
-			/* 2. Temp storage of the losing attempt (all local buffers). */
+			/* 2. Temp storage of the losing attempt (all local buffers).
+			 * Disk == base for temp relations too (pgl_flush_base), so
+			 * the discard+reread restores pre-attempt temp content. */
 			PgliteDiscardAllLocalBuffers();
+
+			/* 2b. A reversed commit's deferred ON COMMIT DELETE ROWS
+			 * truncates must never run (M5e commit gate). */
+			pgl_commit_gate_discard();
 
 			/* 3. SLRU speculative ranges + identity rewind (§5.1 scope). */
 			LWLockAcquire(XidGenLock, LW_SHARED);
