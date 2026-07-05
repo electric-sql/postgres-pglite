@@ -946,6 +946,30 @@ CheckPointCLOG(void)
 	TRACE_POSTGRESQL_CLOG_CHECKPOINT_DONE(true);
 }
 
+#ifdef __PGLITE__
+void
+PgliteInvalidateCLOGCache(void)
+{
+	SimpleLruInvalidateAll(XactCtl);
+}
+
+/*
+ * Apply a CLOG_ZEROPAGE record to the live clog, exactly as clog_redo
+ * does (PGlite live tail apply, design doc §6.3).
+ */
+void
+PgliteZeroCLOGPage(int64 pageno)
+{
+	int			slotno;
+	LWLock	   *lock = SimpleLruGetBankLock(XactCtl, pageno);
+
+	LWLockAcquire(lock, LW_EXCLUSIVE);
+	slotno = ZeroCLOGPage(pageno, false);
+	SimpleLruWritePage(XactCtl, slotno);
+	LWLockRelease(lock);
+}
+#endif
+
 
 /*
  * Make sure that CLOG has room for a newly-allocated XID.

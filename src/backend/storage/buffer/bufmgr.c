@@ -539,6 +539,12 @@ static void FindAndDropRelationBuffers(RelFileLocator rlocator,
 									   ForkNumber forkNum,
 									   BlockNumber nForkBlock,
 									   BlockNumber firstDelBlock);
+#ifdef __PGLITE__
+static void PgliteFindAndDropRelationBuffersRange(RelFileLocator rlocator,
+												  ForkNumber forkNum,
+												  BlockNumber firstBlock,
+												  BlockNumber lastBlock);
+#endif
 static void RelationCopyStorageUsingBuffer(RelFileLocator srclocator,
 										   RelFileLocator dstlocator,
 										   ForkNumber forkNum, bool permanent);
@@ -4644,6 +4650,39 @@ DropRelationBuffers(SMgrRelation smgr_reln, ForkNumber *forkNum,
 	}
 }
 
+#ifdef __PGLITE__
+void
+PgliteDropRelationBuffersRange(SMgrRelation smgr_reln, ForkNumber forkNum,
+							   BlockNumber firstBlock,
+							   BlockNumber blockCount)
+{
+	RelFileLocatorBackend rlocator;
+	BlockNumber lastBlock;
+
+	if (blockCount == 0)
+	{
+		DropRelationBuffers(smgr_reln, &forkNum, 1, &firstBlock);
+		return;
+	}
+
+	rlocator = smgr_reln->smgr_rlocator;
+	lastBlock = firstBlock + blockCount;
+	if (lastBlock < firstBlock)
+		lastBlock = InvalidBlockNumber;
+
+	if (RelFileLocatorBackendIsTemp(rlocator))
+	{
+		if (rlocator.backend == MyProcNumber)
+			PgliteDropRelationLocalBuffersRange(rlocator.locator, forkNum,
+												firstBlock, blockCount);
+		return;
+	}
+
+	PgliteFindAndDropRelationBuffersRange(rlocator.locator, forkNum,
+										  firstBlock, lastBlock);
+}
+#endif
+
 /* ---------------------------------------------------------------------
  *		DropRelationsAllBuffers
  *
@@ -4872,6 +4911,49 @@ FindAndDropRelationBuffers(RelFileLocator rlocator, ForkNumber forkNum,
 			UnlockBufHdr(bufHdr, buf_state);
 	}
 }
+
+#ifdef __PGLITE__
+static void
+PgliteFindAndDropRelationBuffersRange(RelFileLocator rlocator,
+									  ForkNumber forkNum,
+									  BlockNumber firstBlock,
+									  BlockNumber lastBlock)
+{
+	BlockNumber curBlock;
+
+	for (curBlock = firstBlock; curBlock < lastBlock; curBlock++)
+	{
+		uint32		bufHash;
+		BufferTag	bufTag;
+		LWLock	   *bufPartitionLock;
+		int			buf_id;
+		BufferDesc *bufHdr;
+		uint32		buf_state;
+
+		InitBufferTag(&bufTag, &rlocator, forkNum, curBlock);
+
+		bufHash = BufTableHashCode(&bufTag);
+		bufPartitionLock = BufMappingPartitionLock(bufHash);
+
+		LWLockAcquire(bufPartitionLock, LW_SHARED);
+		buf_id = BufTableLookup(&bufTag, bufHash);
+		LWLockRelease(bufPartitionLock);
+
+		if (buf_id < 0)
+			continue;
+
+		bufHdr = GetBufferDescriptor(buf_id);
+		buf_state = LockBufHdr(bufHdr);
+
+		if (BufTagMatchesRelFileLocator(&bufHdr->tag, &rlocator) &&
+			BufTagGetForkNum(&bufHdr->tag) == forkNum &&
+			bufHdr->tag.blockNum == curBlock)
+			InvalidateBuffer(bufHdr);
+		else
+			UnlockBufHdr(bufHdr, buf_state);
+	}
+}
+#endif
 
 /* ---------------------------------------------------------------------
  *		DropDatabaseBuffers

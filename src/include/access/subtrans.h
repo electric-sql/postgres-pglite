@@ -23,4 +23,8 @@ extern void CheckPointSUBTRANS(void);
 extern void ExtendSUBTRANS(TransactionId newestXact);
 extern void TruncateSUBTRANS(TransactionId oldestXact);
 
+#ifdef __PGLITE__
+extern void PgliteInvalidateSUBTRANSCache(void);
+#endif
+
 #endif							/* SUBTRANS_H */

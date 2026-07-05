@@ -2386,6 +2386,56 @@ CheckPointMultiXact(void)
 	TRACE_POSTGRESQL_MULTIXACT_CHECKPOINT_DONE(true);
 }
 
+#ifdef __PGLITE__
+void
+PgliteInvalidateMultiXactCache(void)
+{
+	SimpleLruInvalidateAll(MultiXactOffsetCtl);
+	SimpleLruInvalidateAll(MultiXactMemberCtl);
+}
+
+/*
+ * PGlite live tail apply (design doc §6.3): apply the multixact SLRU
+ * record set to a live cell exactly as multixact_redo does.  These
+ * wrappers exist because the underlying routines are static.
+ */
+void
+PgliteZeroMultiXactOffsetsPage(int64 pageno)
+{
+	/* Same skip as multixact_redo: RecordNewMultiXact pre-initialized it. */
+	if (pre_initialized_offsets_page != pageno)
+	{
+		int			slotno;
+		LWLock	   *lock = SimpleLruGetBankLock(MultiXactOffsetCtl, pageno);
+
+		LWLockAcquire(lock, LW_EXCLUSIVE);
+		slotno = ZeroMultiXactOffsetPage(pageno, false);
+		SimpleLruWritePage(MultiXactOffsetCtl, slotno);
+		LWLockRelease(lock);
+	}
+	pre_initialized_offsets_page = -1;
+}
+
+void
+PgliteZeroMultiXactMembersPage(int64 pageno)
+{
+	int			slotno;
+	LWLock	   *lock = SimpleLruGetBankLock(MultiXactMemberCtl, pageno);
+
+	LWLockAcquire(lock, LW_EXCLUSIVE);
+	slotno = ZeroMultiXactMemberPage(pageno, false);
+	SimpleLruWritePage(MultiXactMemberCtl, slotno);
+	LWLockRelease(lock);
+}
+
+void
+PgliteRecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
+						 int nmembers, MultiXactMember *members)
+{
+	RecordNewMultiXact(multi, offset, nmembers, members);
+}
+#endif
+
 /*
  * Set the next-to-be-assigned MultiXactId and offset
  *
