@@ -487,6 +487,7 @@ pgl_smgr_destroy_all
 pgl_smgr_release
 pgl_startPGlite
 pgl_walscan_begin
+pgl_walscan_block_image
 pgl_walscan_end_scan
 pgl_walscan_next
 post_parse_analyze_hook

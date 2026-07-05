@@ -492,6 +492,32 @@ pgl_walscan_next(void)
 }
 
 /*
+ * pgl_walscan_block_image
+ *		Restore the full-page image carried by block_id of the CURRENT
+ *		record (the one last returned by pgl_walscan_next) into dst
+ *		(BLCKSZ bytes) — decompression and hole re-expansion included
+ *		(RestoreBlockImage).  Returns 1 on success, 0 if there is no
+ *		image or no current record.  This is what makes has_image blocks
+ *		live-appliable: the host writes the restored page to the datadir
+ *		and drops the buffer, so on-demand re-read serves post-apply
+ *		bytes (design §6.2 follower invariant, M5b live apply v1).
+ */
+int
+pgl_walscan_block_image(int block_id, uintptr_t dst)
+{
+	if (pglws_reader == NULL || pglws_reader->record == NULL ||
+		dst == 0 ||
+		block_id < 0 || block_id > XLogRecMaxBlockId(pglws_reader))
+		return 0;
+	if (!XLogRecHasBlockRef(pglws_reader, block_id) ||
+		!XLogRecHasBlockImage(pglws_reader, block_id))
+		return 0;
+	if (!RestoreBlockImage(pglws_reader, block_id, (char *) dst))
+		return 0;
+	return 1;
+}
+
+/*
  * pgl_walscan_end_scan
  *		Release scan resources.  Idempotent.
  */

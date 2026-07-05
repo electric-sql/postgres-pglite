@@ -54,6 +54,7 @@ extern bool PgliteSequenceLeaseWasClamped(Oid seqrelid);
  */
 extern int	pgl_walscan_begin(uint64 start, uint64 end, uint32 tli);
 extern uintptr_t pgl_walscan_next(void);
+extern int	pgl_walscan_block_image(int block_id, uintptr_t dst);
 extern void pgl_walscan_end_scan(void);
 
 /*
