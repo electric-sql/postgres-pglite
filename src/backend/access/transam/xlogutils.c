@@ -24,6 +24,9 @@
 #include "access/xlog_internal.h"
 #include "access/xlogutils.h"
 #include "miscadmin.h"
+#ifdef __PGLITE__
+#include "pglite.h"
+#endif
 #include "storage/fd.h"
 #include "storage/smgr.h"
 #include "utils/hsearch.h"
@@ -104,6 +107,21 @@ log_invalid_page(RelFileLocator locator, ForkNumber forkno, BlockNumber blkno,
 	xl_invalid_page_key key;
 	xl_invalid_page *hentry;
 	bool		found;
+
+#ifdef __PGLITE__
+
+	/*
+	 * Under the PGlite single-record redo harness a missing page means the
+	 * record is not appliable to this cell's base: raise an ordinary ERROR
+	 * so the harness catches it and the host falls back to recycle, instead
+	 * of poisoning the recovery invalid-page table (or PANICking below).
+	 */
+	if (pgl_redo_active)
+	{
+		report_invalid_page(WARNING, locator, forkno, blkno, present);
+		elog(ERROR, "pgl redo: record references a page missing at base");
+	}
+#endif
 
 	/*
 	 * Once recovery has reached a consistent state, the invalid-page table
@@ -509,7 +527,11 @@ XLogReadBufferExtended(RelFileLocator rlocator, ForkNumber forknum,
 			return InvalidBuffer;
 		/* OK to extend the file */
 		/* we do this in recovery only - no rel-extension lock needed */
+#ifdef __PGLITE__
+		Assert(InRecovery || pgl_redo_active);
+#else
 		Assert(InRecovery);
+#endif
 		buffer = ExtendBufferedRelTo(BMR_SMGR(smgr, RELPERSISTENCE_PERMANENT),
 									 forknum,
 									 NULL,

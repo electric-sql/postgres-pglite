@@ -51,8 +51,12 @@
 #include "commands/sequence.h"
 #include "lib/stringinfo.h"
 #include "pglite.h"
+#include "storage/bufmgr.h"
 #include "storage/fd.h"
+#include "storage/lmgr.h"
+#include "storage/lwlock.h"
 #include "utils/builtins.h"
+#include "utils/resowner.h"
 #include "utils/json.h"
 #include "utils/memutils.h"
 
@@ -518,12 +522,173 @@ pgl_walscan_block_image(int block_id, uintptr_t dst)
 }
 
 /*
+ * Single-record redo harness (M5c, design §14.2 "page materialization at
+ * LSN").
+ *
+ * REALITY CHECK RESULT (documented per plan): a fully generic private-page
+ * walredo (Neon-style) needs a coaxed buffer manager and deep surgery.  In
+ * the PGlite single-backend build the pragmatic variant IS sound: rm_redo
+ * runs against the LIVE shared buffers via XLogReadBufferForRedo, which
+ * works outside recovery — the buffer read path has no InRecovery gate
+ * (only the beyond-EOF extension path asserts, relaxed under
+ * pgl_redo_active), hot-standby conflict handling is skipped because
+ * standbyState stays STANDBY_DISABLED, and single-session cells have no
+ * snapshot to conflict with between transactions.  The one real hazard is
+ * FlushBuffer → XLogFlush(pageLSN) PANICking on LSNs ahead of the local
+ * flush state, which is why the host MUST advance the WAL insert position
+ * (pgl_set_wal_position) past the applied range BEFORE redoing records.
+ *
+ * The whitelist is the buffer-only rmgrs: their redo routines touch shared
+ * buffers / FSM / VM only.  Everything with file, SLRU, or shared-state
+ * side effects (xact, smgr, dbase, clog, multixact, relmap, tblspc,
+ * sequence — lease-governed, §5.3) stays on the semantic JS pipeline or
+ * falls back to recycle.
+ */
+bool		pgl_redo_active = false;
+
+/*
+ * Redo-harness state: some rmgrs (btree, gin, gist, spgist) allocate a
+ * private memory context in rm_startup() and switch into it inside
+ * rm_redo — without the startup call they dereference NULL.  We start an
+ * rmgr lazily on first use (its context parented to TopMemoryContext)
+ * and run rm_cleanup for every started rmgr at scan end.  rm_redo itself
+ * runs under a dedicated reset-per-record context so stray pallocs never
+ * accumulate or land in a caller context.
+ */
+static bool pglws_rm_started[RM_MAX_ID + 1];
+static MemoryContext pglws_redo_ctx = NULL;
+
+static bool
+pglws_redo_whitelisted(RmgrId rmid, uint8 info)
+{
+	switch (rmid)
+	{
+		case RM_XLOG_ID:
+			/* FPI restore only; other xlog records carry no page changes
+			 * we should apply this way. */
+			return (info == XLOG_FPI || info == XLOG_FPI_FOR_HINT);
+		case RM_HEAP2_ID:
+			/* Logical-rewrite records write mapping files: not buffer-only. */
+			return (info & XLOG_HEAP_OPMASK) != XLOG_HEAP2_REWRITE;
+		case RM_SEQ_ID:
+			/*
+			 * seq_redo is buffer-only (page reinit from the logged tuple).
+			 * Applying it does not move allocation AUTHORITY, which stays
+			 * with the host's leases/floors (§5.3) — the host re-floors and
+			 * re-clamps after an advance.  NOT applying it would leave
+			 * sequences created after base as zero-length files.
+			 */
+			return (info == XLOG_SEQ_LOG);
+		case RM_HEAP_ID:
+		case RM_BTREE_ID:
+		case RM_HASH_ID:
+		case RM_GIN_ID:
+		case RM_GIST_ID:
+		case RM_SPGIST_ID:
+		case RM_BRIN_ID:
+		case RM_GENERIC_ID:
+			return true;
+		default:
+			return false;
+	}
+}
+
+/* JS-visible probe: would redo_current handle this rmid/info? */
+int
+pgl_redo_whitelisted(int rmid, int info)
+{
+	return pglws_redo_whitelisted((RmgrId) rmid, (uint8) info) ? 1 : 0;
+}
+
+int
+pgl_walscan_redo_current(void)
+{
+	RmgrId		rmid;
+	uint8		info;
+	ResourceOwner owner;
+	ResourceOwner oldOwner;
+	MemoryContext oldCtx;
+	int			rc = 1;
+
+	if (pglws_reader == NULL || pglws_reader->record == NULL)
+		return -1;
+
+	rmid = XLogRecGetRmid(pglws_reader);
+	info = XLogRecGetInfo(pglws_reader) & ~XLR_INFO_MASK;
+	if (!pglws_redo_whitelisted(rmid, info))
+		return 0;
+
+	if (pglws_redo_ctx == NULL)
+		pglws_redo_ctx = AllocSetContextCreate(TopMemoryContext,
+											   "pgl_redo",
+											   ALLOCSET_DEFAULT_SIZES);
+
+	/* Lazy rm_startup (its private context parents to TopMemoryContext). */
+	if (!pglws_rm_started[rmid])
+	{
+		oldCtx = MemoryContextSwitchTo(TopMemoryContext);
+		if (GetRmgr(rmid).rm_startup != NULL)
+			GetRmgr(rmid).rm_startup();
+		MemoryContextSwitchTo(oldCtx);
+		pglws_rm_started[rmid] = true;
+	}
+
+	/*
+	 * Run the redo under a private resource owner so buffer pins are
+	 * releasable on error (the export runs between transactions, with no
+	 * transaction resource owner to clean up after us).
+	 */
+	owner = ResourceOwnerCreate(NULL, "pgl_redo");
+	oldOwner = CurrentResourceOwner;
+	CurrentResourceOwner = owner;
+	oldCtx = MemoryContextSwitchTo(pglws_redo_ctx);
+	pgl_redo_active = true;
+
+	PG_TRY();
+	{
+		GetRmgr(rmid).rm_redo(pglws_reader);
+	}
+	PG_CATCH();
+	{
+		pgl_redo_active = false;
+		FlushErrorState();
+		LWLockReleaseAll();
+		UnlockBuffers();
+		rc = -2;
+	}
+	PG_END_TRY();
+
+	pgl_redo_active = false;
+	MemoryContextSwitchTo(oldCtx);
+	MemoryContextReset(pglws_redo_ctx);
+	CurrentResourceOwner = owner;
+	ResourceOwnerRelease(owner, RESOURCE_RELEASE_BEFORE_LOCKS, false, false);
+	ResourceOwnerRelease(owner, RESOURCE_RELEASE_LOCKS, false, false);
+	ResourceOwnerRelease(owner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
+	CurrentResourceOwner = oldOwner;
+	ResourceOwnerDelete(owner);
+
+	return rc;
+}
+
+/*
  * pgl_walscan_end_scan
  *		Release scan resources.  Idempotent.
  */
 void
 pgl_walscan_end_scan(void)
 {
+	/* Tear down any rmgrs the redo harness started for this scan. */
+	for (int rmid = 0; rmid <= RM_MAX_ID; rmid++)
+	{
+		if (pglws_rm_started[rmid])
+		{
+			if (GetRmgr(rmid).rm_cleanup != NULL)
+				GetRmgr(rmid).rm_cleanup();
+			pglws_rm_started[rmid] = false;
+		}
+	}
+
 	if (pglws_reader != NULL)
 	{
 		XLogReaderFree(pglws_reader);

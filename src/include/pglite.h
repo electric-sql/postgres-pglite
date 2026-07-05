@@ -18,6 +18,7 @@
 #ifndef PGLITE_H
 #define PGLITE_H
 
+#include "access/xlogdefs.h"
 #include "common/relpath.h"
 #include "storage/block.h"
 #include "storage/relfilelocator.h"
@@ -88,6 +89,22 @@ extern void pgl_drop_relation_buffers_range(Oid spc_oid, Oid db_oid,
 extern void pgl_smgr_release(Oid spc_oid, Oid db_oid,
 							 RelFileNumber rel_number);
 extern void pgl_smgr_destroy_all(void);
+
+/*
+ * Single-record redo harness (design doc §14.2 "page materialization",
+ * M5c; src/backend/pglite/pgl_walscan.c).  Applies the CURRENT walscan
+ * record's block changes to the LIVE cell through the resident rmgr's
+ * rm_redo, for a whitelist of buffer-only rmgrs.  Returns 1 = applied,
+ * 0 = record not whitelisted, negative = error (caller must fall back
+ * to recycle).  Only sound between transactions with the local WAL
+ * insert position already advanced to cover the record (page LSNs set
+ * by redo must be flushable).
+ */
+extern int	pgl_walscan_redo_current(void);
+extern int	pgl_redo_whitelisted(int rmid, int info);
+
+/* True while pgl_walscan_redo_current drives an rm_redo call. */
+extern PGDLLIMPORT bool pgl_redo_active;
 
 /*
  * Read-set capture (design doc §4.1, src/backend/pglite/pgl_readset.c)
