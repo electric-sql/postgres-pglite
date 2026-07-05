@@ -107,6 +107,36 @@ extern int	pgl_redo_whitelisted(int rmid, int info);
 extern PGDLLIMPORT bool pgl_redo_active;
 
 /*
+ * In-place reset + WAL position control (design doc §3.4/§5.1, M5c;
+ * src/backend/pglite/pgl_reset.c + __PGLITE__ hunks in xlog.c etc.)
+ */
+extern uintptr_t pgl_get_identity(void);
+extern uint64 pgl_get_prev_record_lsn(void);
+extern uint64 pgl_storage_write_count(void);
+extern int	pgl_flush_base(void);
+extern int	pgl_flush_wal(void);
+extern int	pgl_set_wal_position(uint64 end_of_log, uint64 last_rec);
+extern int	pgl_reset_to_base(uint64 base_lsn, uint64 prev_rec_lsn,
+							  uint64 base_next_full_xid, Oid base_next_oid,
+							  MultiXactId base_next_multi,
+							  MultiXactOffset base_next_offset);
+
+/* Internal hook entry points backing the reset (various files). */
+extern bool PgliteSetWalPosition(XLogRecPtr endOfLog, XLogRecPtr lastRec);
+extern XLogRecPtr PgliteGetPrevRecPtr(void);
+extern int	PgliteDiscardBuffersAboveLsn(XLogRecPtr cutoff);
+extern void PgliteDiscardAllLocalBuffers(void);
+extern void PgliteClogClearRange(TransactionId from, TransactionId to);
+extern void PgliteSubTransClearRange(TransactionId from, TransactionId to);
+extern void PgliteResetNextMultiXact(MultiXactId multi,
+									 MultiXactOffset offset);
+extern void PgliteGetMultiXactIdentity(MultiXactId *next_multi,
+									   MultiXactOffset *next_offset);
+
+/* Storage write counter (bumped in smgr.c / slru.c write paths). */
+extern PGDLLIMPORT uint64 pgl_storage_writes;
+
+/*
  * Read-set capture (design doc §4.1, src/backend/pglite/pgl_readset.c)
  *
  * Entries are packed uint32 x5: spc, db, rel, kind<<24|fork, block —

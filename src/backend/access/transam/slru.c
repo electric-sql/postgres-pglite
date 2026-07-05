@@ -67,6 +67,9 @@
 #include "access/xlog.h"
 #include "access/xlogutils.h"
 #include "miscadmin.h"
+#ifdef __PGLITE__
+#include "pglite.h"
+#endif
 #include "pgstat.h"
 #include "storage/fd.h"
 #include "storage/shmem.h"
@@ -921,6 +924,11 @@ SlruPhysicalWritePage(SlruCtl ctl, int64 pageno, int slotno, SlruWriteAll fdata)
 
 	/* update the stats counter of written pages */
 	pgstat_count_slru_page_written(shared->slru_stats_idx);
+
+#ifdef __PGLITE__
+	/* In-place reset gate (M5c): SLRU content escaped shared memory. */
+	pgl_storage_writes++;
+#endif
 
 	/*
 	 * Honor the write-WAL-before-data rule, if appropriate, so that we do not

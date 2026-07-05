@@ -70,6 +70,9 @@
 #include "storage/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/md.h"
+#ifdef __PGLITE__
+#include "pglite.h"
+#endif
 #include "storage/smgr.h"
 #include "utils/hsearch.h"
 #include "utils/inval.h"
@@ -622,6 +625,11 @@ smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 {
 	HOLD_INTERRUPTS();
 
+#ifdef __PGLITE__
+	/* In-place reset gate (M5c): datadir content escaped shared memory. */
+	pgl_storage_writes++;
+#endif
+
 	smgrsw[reln->smgr_which].smgr_extend(reln, forknum, blocknum,
 										 buffer, skipFsync);
 
@@ -792,6 +800,10 @@ smgrwritev(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		   const void **buffers, BlockNumber nblocks, bool skipFsync)
 {
 	HOLD_INTERRUPTS();
+#ifdef __PGLITE__
+	/* In-place reset gate (M5c): datadir content escaped shared memory. */
+	pgl_storage_writes++;
+#endif
 	smgrsw[reln->smgr_which].smgr_writev(reln, forknum, blocknum,
 										 buffers, nblocks, skipFsync);
 	RESUME_INTERRUPTS();

@@ -372,6 +372,42 @@ PgliteInvalidateSUBTRANSCache(void)
 {
 	SimpleLruInvalidateAll(SubTransCtl);
 }
+
+/*
+ * PgliteSubTransClearRange
+ *		In-place reset (design §3.4, M5c): zero the parent entries of
+ *		[from, to) — the xids a speculative losing attempt burned.  The
+ *		rewound nextXid will hand these xids out again within the same
+ *		subtrans page, where ExtendSUBTRANS's page-boundary zeroing does
+ *		not reach; stale parents must not survive.
+ */
+void
+PgliteSubTransClearRange(TransactionId from, TransactionId to)
+{
+	TransactionId xid = from;
+
+	while (TransactionIdPrecedes(xid, to))
+	{
+		int64		pageno = TransactionIdToPage(xid);
+		LWLock	   *lock = SimpleLruGetBankLock(SubTransCtl, pageno);
+		int			slotno;
+
+		LWLockAcquire(lock, LW_EXCLUSIVE);
+		slotno = SimpleLruReadPage(SubTransCtl, pageno, true, xid);
+		while (TransactionIdPrecedes(xid, to) &&
+			   TransactionIdToPage(xid) == pageno)
+		{
+			TransactionId *ptr = (TransactionId *)
+				SubTransCtl->shared->page_buffer[slotno];
+
+			ptr += TransactionIdToEntry(xid);
+			*ptr = InvalidTransactionId;
+			TransactionIdAdvance(xid);
+		}
+		SubTransCtl->shared->page_dirty[slotno] = true;
+		LWLockRelease(lock);
+	}
+}
 #endif
 
 

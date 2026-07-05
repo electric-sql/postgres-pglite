@@ -4969,6 +4969,59 @@ PgliteFindAndDropRelationBuffersRange(RelFileLocator rlocator,
 			UnlockBufHdr(bufHdr, buf_state);
 	}
 }
+
+/*
+ * PgliteDiscardBuffersAboveLsn
+ *		In-place reset (design §3.4, M5c): discard every shared buffer —
+ *		dirty ones WITHOUT writing them — whose page LSN is past the base
+ *		the cell is rewinding to.  Pages at or below the cutoff are kept:
+ *		they hold landed-but-unflushed changes that the on-disk pages do
+ *		not have (a wholesale discard would lose them — crash recovery
+ *		re-derives such state by replaying WAL; an in-place reset must
+ *		keep it resident instead).
+ *
+ * Returns the number of buffers discarded, or -1 if a pinned buffer with
+ * a page LSN above the cutoff exists (caller must fall back to recycle).
+ * Only sound between transactions in the single-backend build.
+ */
+int
+PgliteDiscardBuffersAboveLsn(XLogRecPtr cutoff)
+{
+	int			ndiscarded = 0;
+
+	for (int i = 0; i < NBuffers; i++)
+	{
+		BufferDesc *bufHdr = GetBufferDescriptor(i);
+		uint32		buf_state;
+		XLogRecPtr	lsn;
+
+		/* unlocked peek first, as the standard drop loops do */
+		if ((pg_atomic_read_u32(&bufHdr->state) & BM_VALID) == 0)
+			continue;
+
+		buf_state = LockBufHdr(bufHdr);
+		if ((buf_state & BM_VALID) == 0)
+		{
+			UnlockBufHdr(bufHdr, buf_state);
+			continue;
+		}
+		lsn = BufferGetLSN(bufHdr);
+		if (lsn <= cutoff)
+		{
+			UnlockBufHdr(bufHdr, buf_state);
+			continue;
+		}
+		if (BUF_STATE_GET_REFCOUNT(buf_state) > 0)
+		{
+			UnlockBufHdr(bufHdr, buf_state);
+			return -1;
+		}
+		InvalidateBuffer(bufHdr);	/* releases the header lock */
+		ndiscarded++;
+	}
+
+	return ndiscarded;
+}
 #endif
 
 /* ---------------------------------------------------------------------

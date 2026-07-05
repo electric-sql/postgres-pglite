@@ -718,6 +718,28 @@ PgliteDropRelationLocalBuffersRange(RelFileLocator rlocator, ForkNumber forkNum,
 		}
 	}
 }
+
+/*
+ * PgliteDiscardAllLocalBuffers
+ *		In-place reset (design §3.4, M5c): drop every local buffer,
+ *		discarding dirty pages without writing.  The reset path only runs
+ *		for untainted sessions (no live temp-table state), so this is
+ *		belt-and-braces cleanup of the losing attempt's temp storage.
+ */
+void
+PgliteDiscardAllLocalBuffers(void)
+{
+	for (int i = 0; i < NLocBuffer; i++)
+	{
+		BufferDesc *bufHdr = GetLocalBufferDescriptor(i);
+		uint32		buf_state;
+
+		buf_state = pg_atomic_read_u32(&bufHdr->state);
+
+		if (buf_state & BM_TAG_VALID)
+			InvalidateLocalBuffer(bufHdr, true);
+	}
+}
 #endif
 
 /*

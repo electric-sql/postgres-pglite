@@ -71,6 +71,9 @@
 #include "executor/instrument.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
+#ifdef __PGLITE__
+#include "pglite.h"
+#endif
 #include "pgstat.h"
 #include "port/atomics.h"
 #include "postmaster/bgwriter.h"
@@ -9495,6 +9498,116 @@ GetXLogInsertRecPtr(void)
 
 	return XLogBytePosToRecPtr(current_bytepos);
 }
+
+#ifdef __PGLITE__
+/*
+ * PGlite in-place reset / live advance (design §3.4, M5c).
+ *
+ * PgliteGetPrevRecPtr returns the start LSN of the last inserted record
+ * (the xl_prev the next insert will carry) — the host snapshots it at
+ * base so a later reset can restore the chain.
+ */
+XLogRecPtr
+PgliteGetPrevRecPtr(void)
+{
+	XLogCtlInsert *Insert = &XLogCtl->Insert;
+	uint64		prev_bytepos;
+
+	SpinLockAcquire(&Insert->insertpos_lck);
+	prev_bytepos = Insert->PrevBytePos;
+	SpinLockRelease(&Insert->insertpos_lck);
+
+	return XLogBytePosToRecPtr(prev_bytepos);
+}
+
+/*
+ * PgliteSetWalPosition
+ *		Re-point the single-backend WAL insert machinery so the next
+ *		record lands at exactly endOfLog, with xl_prev = lastRec.  Both
+ *		rewind (in-place reset to base) and advance (live tail apply on
+ *		a cell whose pg_wal already holds the bytes) use this.
+ *
+ * This replicates the end-of-recovery initialization in StartupXLOG:
+ * byte positions, WAL buffer page for a partial tail block (re-read from
+ * the segment file — the caller guarantees pg_wal holds valid bytes up
+ * to endOfLog), InitializedUpTo, and the write/flush result state.  Only
+ * sound between transactions in the single-backend PGlite build: no
+ * concurrent inserters, no walwriter, no walsenders.
+ */
+bool
+PgliteSetWalPosition(XLogRecPtr endOfLog, XLogRecPtr lastRec)
+{
+	XLogCtlInsert *Insert = &XLogCtl->Insert;
+	Size		blkoff = endOfLog % XLOG_BLCKSZ;
+
+	if (XLogRecPtrIsInvalid(endOfLog) || XLogRecPtrIsInvalid(lastRec) ||
+		lastRec >= endOfLog)
+		return false;
+
+	/*
+	 * Invalidate every initialized WAL buffer page: stale pages on either
+	 * side of the new position must never satisfy a GetXLogBuffer lookup.
+	 */
+	for (int i = 0; i < XLOGbuffers; i++)
+		pg_atomic_write_u64(&XLogCtl->xlblocks[i], InvalidXLogRecPtr);
+
+	if (blkoff != 0)
+	{
+		XLogRecPtr	pageBegin = endOfLog - blkoff;
+		int			firstIdx = XLogRecPtrToBufIdx(endOfLog);
+		char	   *page = &XLogCtl->pages[firstIdx * (Size) XLOG_BLCKSZ];
+		char		path[MAXPGPATH];
+		XLogSegNo	segno;
+		uint32		offset;
+		int			fd;
+		ssize_t		nread;
+
+		XLByteToSeg(pageBegin, segno, wal_segment_size);
+		XLogFilePath(path, XLogCtl->InsertTimeLineID, segno,
+					 wal_segment_size);
+		fd = BasicOpenFile(path, O_RDONLY | PG_BINARY);
+		if (fd < 0)
+			return false;
+		offset = XLogSegmentOffset(pageBegin, wal_segment_size);
+		nread = pg_pread(fd, page, XLOG_BLCKSZ, (off_t) offset);
+		close(fd);
+		if (nread != XLOG_BLCKSZ)
+			return false;
+
+		/* Zero the tail so stale record bytes never resurface. */
+		memset(page + blkoff, 0, XLOG_BLCKSZ - blkoff);
+
+		pg_atomic_write_u64(&XLogCtl->xlblocks[firstIdx],
+							pageBegin + XLOG_BLCKSZ);
+		XLogCtl->InitializedUpTo = pageBegin + XLOG_BLCKSZ;
+	}
+	else
+		XLogCtl->InitializedUpTo = endOfLog;
+
+	SpinLockAcquire(&Insert->insertpos_lck);
+	Insert->CurrBytePos = XLogRecPtrToBytePos(endOfLog);
+	Insert->PrevBytePos = XLogRecPtrToBytePos(lastRec);
+	SpinLockRelease(&Insert->insertpos_lck);
+
+	LogwrtResult.Write = LogwrtResult.Flush = endOfLog;
+	pg_atomic_write_u64(&XLogCtl->logInsertResult, endOfLog);
+	pg_atomic_write_u64(&XLogCtl->logWriteResult, endOfLog);
+	pg_atomic_write_u64(&XLogCtl->logFlushResult, endOfLog);
+	XLogCtl->LogwrtRqst.Write = endOfLog;
+	XLogCtl->LogwrtRqst.Flush = endOfLog;
+
+	/* The open write segment may no longer be the right one. */
+	if (openLogFile >= 0)
+		XLogFileClose();
+
+	/* Backend-local record pointers follow the new tail. */
+	ProcLastRecPtr = lastRec;
+	XactLastRecEnd = InvalidXLogRecPtr;
+	XactLastCommitEnd = InvalidXLogRecPtr;
+
+	return true;
+}
+#endif							/* __PGLITE__ */
 
 /*
  * Get latest WAL write pointer

@@ -2434,6 +2434,67 @@ PgliteRecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 {
 	RecordNewMultiXact(multi, offset, nmembers, members);
 }
+
+/* Snapshot the multixact identity (for the host's base capture, M5c). */
+void
+PgliteGetMultiXactIdentity(MultiXactId *next_multi, MultiXactOffset *next_offset)
+{
+	LWLockAcquire(MultiXactGenLock, LW_SHARED);
+	*next_multi = MultiXactState->nextMXact;
+	*next_offset = MultiXactState->nextOffset;
+	LWLockRelease(MultiXactGenLock);
+}
+
+/*
+ * PgliteResetNextMultiXact
+ *		In-place reset (design §3.4/§5.1, M5c): force-set the multixact
+ *		identity back to the base values and zero the offsets entries of
+ *		the speculative range [multi, old nextMXact).  Zeroing matters:
+ *		GetMultiXactIdMembers computes the last landed multixact's length
+ *		from nextOffset only when reading offsets[multi+1] finds the
+ *		"unset" marker (or the nextMXact == multi+1 corner case); stale
+ *		speculative offsets would corrupt that length.  Member-space
+ *		entries past the rewound nextOffset are unreachable once the
+ *		offsets are cleared, so they are left as garbage (same as vanilla
+ *		after a crash mid-creation).
+ */
+void
+PgliteResetNextMultiXact(MultiXactId multi, MultiXactOffset offset)
+{
+	MultiXactId oldNext;
+	MultiXactId mxid;
+
+	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
+	oldNext = MultiXactState->nextMXact;
+	MultiXactState->nextMXact = multi;
+	MultiXactState->nextOffset = offset;
+	LWLockRelease(MultiXactGenLock);
+
+	mxid = multi;
+	while (MultiXactIdPrecedes(mxid, oldNext))
+	{
+		int64		pageno = MultiXactIdToOffsetPage(mxid);
+		LWLock	   *lock = SimpleLruGetBankLock(MultiXactOffsetCtl, pageno);
+		int			slotno;
+
+		LWLockAcquire(lock, LW_EXCLUSIVE);
+		slotno = SimpleLruReadPage(MultiXactOffsetCtl, pageno, true, mxid);
+		while (MultiXactIdPrecedes(mxid, oldNext) &&
+			   MultiXactIdToOffsetPage(mxid) == pageno)
+		{
+			MultiXactOffset *offptr = (MultiXactOffset *)
+				MultiXactOffsetCtl->shared->page_buffer[slotno];
+
+			offptr += MultiXactIdToOffsetEntry(mxid);
+			*offptr = 0;
+			mxid++;
+			if (mxid < FirstMultiXactId)
+				mxid = FirstMultiXactId;
+		}
+		MultiXactOffsetCtl->shared->page_dirty[slotno] = true;
+		LWLockRelease(lock);
+	}
+}
 #endif
 
 /*

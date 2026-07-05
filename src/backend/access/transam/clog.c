@@ -968,6 +968,47 @@ PgliteZeroCLOGPage(int64 pageno)
 	SimpleLruWritePage(XactCtl, slotno);
 	LWLockRelease(lock);
 }
+
+/*
+ * PgliteClogClearRange
+ *		In-place reset (design §3.4/§5.1, M5c): clear the clog status of
+ *		[from, to) back to IN_PROGRESS (00), i.e. exactly the bits a
+ *		speculative losing attempt set past its base.  This deliberately
+ *		does NOT discard SLRU buffers: dirty clog pages also carry
+ *		landed-but-unflushed bits below the base which a zero-and-reread
+ *		would lose.  Page-boundary hazard (§5.1) note: a speculatively
+ *		created clog page stays resident (zeroed range); the rewound
+ *		nextXid re-crosses the boundary later and ExtendCLOG re-logs the
+ *		ZEROPAGE deterministically in the new slice.
+ */
+void
+PgliteClogClearRange(TransactionId from, TransactionId to)
+{
+	TransactionId xid = from;
+
+	while (TransactionIdPrecedes(xid, to))
+	{
+		int64		pageno = TransactionIdToPage(xid);
+		LWLock	   *lock = SimpleLruGetBankLock(XactCtl, pageno);
+		int			slotno;
+
+		LWLockAcquire(lock, LW_EXCLUSIVE);
+		slotno = SimpleLruReadPage(XactCtl, pageno, true, xid);
+		while (TransactionIdPrecedes(xid, to) &&
+			   TransactionIdToPage(xid) == pageno)
+		{
+			char	   *byteptr = XactCtl->shared->page_buffer[slotno] +
+				TransactionIdToByte(xid);
+			int			bshift = TransactionIdToBIndex(xid) *
+				CLOG_BITS_PER_XACT;
+
+			*byteptr &= ~(((char) CLOG_XACT_BITMASK) << bshift);
+			TransactionIdAdvance(xid);
+		}
+		XactCtl->shared->page_dirty[slotno] = true;
+		LWLockRelease(lock);
+	}
+}
 #endif
 
 
