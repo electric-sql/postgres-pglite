@@ -201,4 +201,13 @@ extern void PgliteReadSetRecordNblocks(const RelFileLocator *rlocator,
 extern PGDLLIMPORT bool pgl_suppress_read_wal;
 extern void pgl_set_suppress_read_wal(int on);
 
+/*
+ * Fast session-state probe (pgl_session_state; implementation lives next to
+ * portal state so it can enumerate holdable cursors without going through
+ * pg_cursors).  Returns NUL-terminated JSON valid until the next call:
+ * {"temp":bool,"cur":[names...],"adv":bool}.
+ */
+extern uintptr_t pgl_session_state(void);
+extern bool PgliteHasLocalAdvisoryLocks(void);
+
 #endif							/* PGLITE_H */

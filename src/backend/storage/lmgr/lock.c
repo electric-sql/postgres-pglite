@@ -38,6 +38,7 @@
 #include "access/xlog.h"
 #include "access/xlogutils.h"
 #include "miscadmin.h"
+#include "pglite.h"
 #include "pg_trace.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
@@ -684,6 +685,34 @@ HTAB *
 GetLockMethodLocalHash(void)
 {
 	return LockMethodLocalHash;
+}
+#endif
+
+#ifdef __PGLITE__
+bool
+PgliteHasLocalAdvisoryLocks(void)
+{
+	HASH_SEQ_STATUS status;
+	LOCALLOCK  *locallock;
+
+	if (LockMethodLocalHash == NULL)
+		return false;
+
+	hash_seq_init(&status, LockMethodLocalHash);
+	while ((locallock = (LOCALLOCK *) hash_seq_search(&status)) != NULL)
+	{
+		if (LOCALLOCK_LOCKMETHOD(*locallock) != USER_LOCKMETHOD)
+			continue;
+		if (LOCALLOCK_LOCKTAG(*locallock) != LOCKTAG_ADVISORY)
+			continue;
+		if (locallock->nLocks > 0)
+		{
+			hash_seq_term(&status);
+			return true;
+		}
+	}
+
+	return false;
 }
 #endif
 

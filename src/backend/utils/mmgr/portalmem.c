@@ -19,11 +19,15 @@
 #include "postgres.h"
 
 #include "access/xact.h"
+#include "catalog/namespace.h"
 #include "commands/portalcmds.h"
 #include "funcapi.h"
+#include "lib/stringinfo.h"
 #include "miscadmin.h"
+#include "pglite.h"
 #include "storage/ipc.h"
 #include "utils/builtins.h"
+#include "utils/json.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
@@ -1166,6 +1170,70 @@ pg_cursor(PG_FUNCTION_ARGS)
 
 	return (Datum) 0;
 }
+
+#ifdef __PGLITE__
+/*
+ * pgl_session_state
+ *		Fast backend-local state probe for the PGlite host.
+ *
+ * Mirrors the session taint SQL formerly used by pglite-cell:
+ *   pg_my_temp_schema() <> 0,
+ *   pg_cursors where is_holdable,
+ *   pg_locks where locktype = 'advisory'.
+ *
+ * Returns a NUL-terminated JSON string valid until the next call.
+ */
+uintptr_t
+pgl_session_state(void)
+{
+	static StringInfoData buf;
+	static bool init = false;
+	Oid			tempNamespace;
+	Oid			tempToastNamespace;
+	bool		first = true;
+	HASH_SEQ_STATUS hash_seq;
+	PortalHashEnt *hentry;
+	MemoryContext oldcxt;
+
+	if (!init)
+	{
+		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+		initStringInfo(&buf);
+		MemoryContextSwitchTo(oldcxt);
+		init = true;
+	}
+	resetStringInfo(&buf);
+
+	GetTempNamespaceState(&tempNamespace, &tempToastNamespace);
+	appendStringInfo(&buf, "{\"temp\":%s,\"cur\":[",
+					 OidIsValid(tempNamespace) ? "true" : "false");
+
+	if (PortalHashTable != NULL)
+	{
+		hash_seq_init(&hash_seq, PortalHashTable);
+		while ((hentry = (PortalHashEnt *) hash_seq_search(&hash_seq)) != NULL)
+		{
+			Portal		portal = hentry->portal;
+
+			if (!portal->visible)
+				continue;
+			if (!portal->sourceText)
+				continue;
+			if ((portal->cursorOptions & CURSOR_OPT_HOLD) == 0)
+				continue;
+
+			if (!first)
+				appendStringInfoChar(&buf, ',');
+			escape_json(&buf, portal->name);
+			first = false;
+		}
+	}
+
+	appendStringInfo(&buf, "],\"adv\":%s}",
+					 PgliteHasLocalAdvisoryLocks() ? "true" : "false");
+	return (uintptr_t) buf.data;
+}
+#endif
 
 bool
 ThereAreNoReadyPortals(void)

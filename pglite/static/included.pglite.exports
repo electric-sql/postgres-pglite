@@ -494,6 +494,7 @@ pgl_readset_reset
 pgl_readset_snapshot
 pgl_reset_sequence_caches
 pgl_sendConnData
+pgl_session_state
 pgl_set_sequence_lease
 pgl_set_suppress_read_wal
 pgl_set_wal_position
