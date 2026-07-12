@@ -176,6 +176,14 @@ POSTGRES_PGLITE_FLAGS="\
 $PGPRELOAD \
 -lnodefs.js -lidbfs.js"
 
+if [ "${PGLITE_PROFILING_FUNCS:-false}" = true ]; then
+    echo "pglite: preserving optimized Wasm function names for profiling."
+    POSTGRES_PGLITE_FLAGS="$POSTGRES_PGLITE_FLAGS --profiling-funcs"
+    # Make does not track command-line flag changes. Force only the final main
+    # module to relink; all PostgreSQL and dependency objects remain reusable.
+    rm -f src/backend/pglite.js src/backend/pglite.wasm src/backend/pglite.data
+fi
+
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" emmake make PORTNAME=emscripten -C src/backend/ -j pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
 emmake make PORTNAME=emscripten -C src/backend/ install-pglite || { echo 'emmake make PORTNAME=emscripten -C src/backend/ install-pglite' ; exit 62; }

@@ -82,6 +82,38 @@ artifact-size, compile, and startup ratios. The runner continues only when the
 oracle is no worse than 1.15x on every agreed steady-state workload; generic
 profiles remain diagnostic correctness and cost references.
 
+After Phase 2A has produced its oracle, run the dynamic continuation from the
+parent checkout:
+
+```sh
+pnpm wasm:multi-memory:phase2a-profile
+```
+
+This instruments entries to every memory-using function, takes a 100 us V8 CPU
+profile, preserves optimized function names in a separate profiling link, and
+matches the stripped release functions to those names using a conservative
+structural fingerprint. It then sweeps diagnostic whole-function direct access
+sets selected by the CPU profile. The profiling link and all analysis run in
+the derived builder container. Set `PGLITE_PHASE2A_REBUILD_NAMED=true` to force
+the relatively expensive named link to be rebuilt.
+
+The 13 July 2026 profile observed 6,431,434 entries across 1,379
+memory-using functions and attributed 753 of 760 samples in the main Wasm
+module. Exact unique structural matches named 1,555 of the 1,725 functions
+seen by either profile; ambiguous names remain explicitly ambiguous.
+
+The diagnostic sweep found its first Phase 2 exit-threshold result with the
+top 512 CPU-ranked functions direct: 1.314x worst-case throughput, with
+1.197x recursive, 1.179x indexed-aggregate, and 1.314x pgbench-style ratios.
+Making every workload-observed function direct reached 1.044x worst-case.
+These artifacts are deliberately marked `profile-guided-private-oracle`: they
+assume all pointers in selected functions are private and are therefore
+unsound for tagged postmaster pointers. They prove that the 1.35x target is
+reachable and quantify the amount of dispatch that must be removed; they do
+not pass Phase 2 or authorize production use. The sound provenance candidate
+must reproduce the improvement while retaining generic access at every
+unproved site.
+
 The native `pglite-wasm-multi-memory` tool accepts a conventional wasm32
 module with one imported memory. It preserves that private memory as index 0,
 adds `pglite.global_memory` as index 1 and the reserved

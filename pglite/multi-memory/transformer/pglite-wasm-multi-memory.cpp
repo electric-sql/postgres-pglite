@@ -38,7 +38,7 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.3.0";
+constexpr const char* ToolVersion = "0.4.0";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
@@ -57,10 +57,12 @@ struct Options {
   std::string globalImportBase = "global_memory";
   std::string scopedImportBase = "scoped_memory";
   std::vector<std::string> inputFeatures;
+  std::vector<uint64_t> directPrivateFunctionIndices;
   uint64_t globalInitialPages = UINT64_MAX;
   uint64_t globalMaximumPages = UINT64_MAX;
   bool inlinePrivateFastPath = false;
   bool privateOnlyOracle = false;
+  bool profileFunctionEntries = false;
   bool emitText = false;
 };
 
@@ -201,6 +203,8 @@ void usage(std::ostream& out) {
       << "      --global-maximum-pages N      default: private memory maximum\n"
       << "      --inline-private-fast-path    direct memory-0 arm at each site\n"
       << "      --private-only-oracle         retain direct memory-0 operations\n"
+      << "      --profile-function-entries    import a profiling entry hook\n"
+      << "      --direct-private-function-index N  diagnostic direct function\n"
       << "  -S, --emit-text                   emit WAT instead of binary\n"
       << "  -h, --help                        show this help\n"
       << "      --version                     show tool version\n";
@@ -251,6 +255,11 @@ Options parseOptions(int argc, const char** argv) {
       options.inlinePrivateFastPath = true;
     } else if (arg == "--private-only-oracle") {
       options.privateOnlyOracle = true;
+    } else if (arg == "--profile-function-entries") {
+      options.profileFunctionEntries = true;
+    } else if (arg == "--direct-private-function-index") {
+      options.directPrivateFunctionIndices.push_back(
+        parseUnsigned(take(arg.c_str()), arg.c_str()));
     } else if (arg == "-S" || arg == "--emit-text") {
       options.emitText = true;
     } else if (!arg.empty() && arg[0] == '-') {
@@ -270,6 +279,15 @@ Options parseOptions(int argc, const char** argv) {
   if (options.inlinePrivateFastPath && options.privateOnlyOracle) {
     throw std::runtime_error(
       "--inline-private-fast-path and --private-only-oracle are exclusive");
+  }
+  if (options.profileFunctionEntries && !options.privateOnlyOracle) {
+    throw std::runtime_error(
+      "--profile-function-entries requires --private-only-oracle");
+  }
+  if (options.privateOnlyOracle &&
+      !options.directPrivateFunctionIndices.empty()) {
+    throw std::runtime_error(
+      "--private-only-oracle and --direct-private-function-index are exclusive");
   }
   return options;
 }
@@ -309,6 +327,13 @@ public:
 };
 
 class Transformer {
+  struct FunctionStat {
+    uint64_t wasmFunctionIndex = 0;
+    uint64_t expressionCount = 0;
+    uint64_t expressionShapeHash = 1469598103934665603ULL;
+    std::map<std::string, uint64_t> operations;
+  };
+
   Module& module;
   const Options& options;
   Name privateMemory;
@@ -319,6 +344,8 @@ class Transformer {
   std::map<std::string, uint64_t> rewritten;
   std::map<std::string, uint64_t> directPrivate;
   std::map<std::string, uint64_t> allowlisted;
+  std::map<std::string, FunctionStat> functionStats;
+  Name currentFunction;
   std::unordered_set<Expression*> generatedDirectOperations;
 
   Expression* local(Builder& builder, Index index, Type type) {
@@ -826,8 +853,12 @@ class Transformer {
         << "\"binaryenCommit\":\"52bc45fc34ec6868400216074744147e9d922685\","
         << "\"pointerABI\":\"" << PointerABI << "\","
         << "\"profile\":\""
-        << (options.privateOnlyOracle
-              ? "private-only-oracle"
+        << (!options.directPrivateFunctionIndices.empty()
+              ? "profile-guided-private-oracle"
+              : options.privateOnlyOracle
+              ? (options.profileFunctionEntries
+                   ? "private-only-oracle-function-profile"
+                   : "private-only-oracle")
               : options.inlinePrivateFastPath
                   ? "two-domain-generic-private-fast-path"
                   : "two-domain-generic")
@@ -878,6 +909,16 @@ public:
 
   bool usePrivateOnlyOracle() const { return options.privateOnlyOracle; }
 
+  bool useCurrentFunctionDirectPrivate() const {
+    if (options.directPrivateFunctionIndices.empty()) {
+      return false;
+    }
+    auto index = functionStats.at(currentFunction.toString()).wasmFunctionIndex;
+    return std::find(options.directPrivateFunctionIndices.begin(),
+                     options.directPrivateFunctionIndices.end(),
+                     index) != options.directPrivateFunctionIndices.end();
+  }
+
   void keepPrivateOracleOperation(Expression* operation) {
     generatedDirectOperations.insert(operation);
   }
@@ -916,7 +957,8 @@ public:
   }
 
   void countRewrite(const std::string& name) {
-    if (options.privateOnlyOracle) {
+    ++functionStats[currentFunction.toString()].operations[name];
+    if (options.privateOnlyOracle || useCurrentFunctionDirectPrivate()) {
       ++directPrivate[name];
     } else {
       ++rewritten[name];
@@ -924,8 +966,91 @@ public:
   }
   void countAllowlist(const std::string& name) { ++allowlisted[name]; }
 
+  void initializeFunctionStats() {
+    uint64_t importedFunctions = 0;
+    for (const auto& function : module.functions) {
+      if (function->imported()) {
+        ++importedFunctions;
+      }
+    }
+    uint64_t definedOrdinal = 0;
+    for (const auto& function : module.functions) {
+      if (!function->imported()) {
+        auto& stat = functionStats[function->name.toString()];
+        stat.wasmFunctionIndex = importedFunctions + definedOrdinal++;
+        struct ShapeCounter
+          : public PostWalker<ShapeCounter,
+                              UnifiedExpressionVisitor<ShapeCounter>> {
+          std::map<std::string, uint64_t> kinds;
+          void visitExpression(Expression* curr) {
+            ++kinds[getExpressionName(curr)];
+          }
+        } counter;
+        counter.walkFunctionInModule(function.get(), &module);
+        auto addHash = [&](const std::string& value) {
+          for (unsigned char byte : value) {
+            stat.expressionShapeHash ^= byte;
+            stat.expressionShapeHash *= 1099511628211ULL;
+          }
+        };
+        addHash(function->getParams().toString());
+        addHash("->");
+        addHash(function->getResults().toString());
+        addHash(":" + std::to_string(function->vars.size()));
+        for (const auto& [kind, count] : counter.kinds) {
+          stat.expressionCount += count;
+          addHash(";" + kind + "=" + std::to_string(count));
+        }
+      }
+    }
+    for (auto requested : options.directPrivateFunctionIndices) {
+      bool found = false;
+      for (const auto& [_, stat] : functionStats) {
+        found |= stat.wasmFunctionIndex == requested;
+      }
+      if (!found) {
+        throw std::runtime_error("unknown direct-private function index: " +
+                                 std::to_string(requested));
+      }
+    }
+  }
+
+  void addFunctionEntryProfiling(const std::vector<Function*>& originals) {
+    if (!options.profileFunctionEntries) {
+      return;
+    }
+    Name hook("__pglite_profile_function_entry");
+    if (module.getFunctionOrNull(hook)) {
+      throw std::runtime_error("reserved profile hook name already exists");
+    }
+    auto import =
+      Builder::makeFunction(hook, Signature(Type::i32, Type::none), {});
+    import->module = Name("pglite");
+    import->base = Name("profile_function_entry");
+    module.addFunction(std::move(import));
+
+    Builder builder(module);
+    for (auto* function : originals) {
+      const auto& stat = functionStats.at(function->name.toString());
+      uint64_t total = 0;
+      for (const auto& [_, count] : stat.operations) {
+        total += count;
+      }
+      if (!total) {
+        continue;
+      }
+      auto* hit = builder.makeCall(
+        hook,
+        {builder.makeConst(int32_t(stat.wasmFunctionIndex))},
+        Type::none);
+      function->body =
+        builder.makeBlock({hit, function->body}, function->body->type);
+    }
+  }
+
   void run() {
     rejectAlreadyTransformed();
+    initializeFunctionStats();
     addGlobalMemory();
 
     std::vector<Function*> originals;
@@ -935,9 +1060,11 @@ public:
       }
     }
     for (auto* function : originals) {
+      currentFunction = function->name;
       Rewriter rewriter(*this);
       rewriter.walkFunctionInModule(function, &module);
     }
+    addFunctionEntryProfiling(originals);
     addHelpers();
     audit();
     replaceSourceMapURL();
@@ -970,6 +1097,40 @@ public:
     writeMap(out, directPrivate);
     out << ",\"allowlisted\":";
     writeMap(out, allowlisted);
+    out << ",\"functions\":[";
+    bool firstFunction = true;
+    for (const auto& [name, stat] : functionStats) {
+      if (stat.operations.empty()) {
+        continue;
+      }
+      if (!firstFunction) {
+        out << ',';
+      }
+      firstFunction = false;
+      uint64_t total = 0;
+      for (const auto& [_, count] : stat.operations) {
+        total += count;
+      }
+      out << "{\"name\":\"" << jsonEscape(name)
+          << "\",\"wasmFunctionIndex\":" << stat.wasmFunctionIndex
+          << ",\"accessClassification\":\""
+          << (options.privateOnlyOracle ||
+                  std::find(options.directPrivateFunctionIndices.begin(),
+                            options.directPrivateFunctionIndices.end(),
+                            stat.wasmFunctionIndex) !=
+                    options.directPrivateFunctionIndices.end()
+                ? "diagnostic-direct-private"
+                : "generic")
+          << "\""
+          << ",\"expressionCount\":" << stat.expressionCount
+          << ",\"expressionShapeHash\":\"" << std::hex
+          << stat.expressionShapeHash << std::dec << "\""
+          << ",\"staticMemoryOperations\":" << total
+          << ",\"operations\":";
+      writeMap(out, stat.operations);
+      out << '}';
+    }
+    out << ']';
     out << ",\"helpers\":[";
     for (size_t i = 0; i < helperSpecs.size(); ++i) {
       if (i) {
@@ -1028,7 +1189,8 @@ void Rewriter::replaceWithHelper(Expression* original,
                                  const HelperSpec& spec,
                                  std::vector<Expression*> operands,
                                  Type result) {
-  if (transformer.usePrivateOnlyOracle()) {
+  if (transformer.usePrivateOnlyOracle() ||
+      transformer.useCurrentFunctionDirectPrivate()) {
     transformer.keepPrivateOracleOperation(original);
     return;
   }
