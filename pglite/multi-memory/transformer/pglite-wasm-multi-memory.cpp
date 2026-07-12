@@ -22,6 +22,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -37,7 +38,7 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.1.0";
+constexpr const char* ToolVersion = "0.2.0";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
@@ -54,8 +55,11 @@ struct Options {
   std::string inputSHA256;
   std::string globalImportModule = "pglite";
   std::string globalImportBase = "global_memory";
+  std::string scopedImportBase = "scoped_memory";
+  std::vector<std::string> inputFeatures;
   uint64_t globalInitialPages = UINT64_MAX;
   uint64_t globalMaximumPages = UINT64_MAX;
+  bool inlinePrivateFastPath = false;
   bool emitText = false;
 };
 
@@ -190,8 +194,11 @@ void usage(std::ostream& out) {
       << "      --input-sha256 HEX            record input hash in ABI metadata\n"
       << "      --global-import-module NAME   import module (default pglite)\n"
       << "      --global-import-base NAME     import name (default global_memory)\n"
+      << "      --scoped-import-base NAME     reserved import (default scoped_memory)\n"
+      << "      --enable-feature NAME         enable a missing input target feature\n"
       << "      --global-initial-pages N      default: private memory initial\n"
       << "      --global-maximum-pages N      default: private memory maximum\n"
+      << "      --inline-private-fast-path    direct memory-0 arm at each site\n"
       << "  -S, --emit-text                   emit WAT instead of binary\n"
       << "  -h, --help                        show this help\n"
       << "      --version                     show tool version\n";
@@ -230,10 +237,16 @@ Options parseOptions(int argc, const char** argv) {
       options.globalImportModule = take(arg.c_str());
     } else if (arg == "--global-import-base") {
       options.globalImportBase = take(arg.c_str());
+    } else if (arg == "--scoped-import-base") {
+      options.scopedImportBase = take(arg.c_str());
+    } else if (arg == "--enable-feature") {
+      options.inputFeatures.push_back(take(arg.c_str()));
     } else if (arg == "--global-initial-pages") {
       options.globalInitialPages = parseUnsigned(take(arg.c_str()), arg.c_str());
     } else if (arg == "--global-maximum-pages") {
       options.globalMaximumPages = parseUnsigned(take(arg.c_str()), arg.c_str());
+    } else if (arg == "--inline-private-fast-path") {
+      options.inlinePrivateFastPath = true;
     } else if (arg == "-S" || arg == "--emit-text") {
       options.emitText = true;
     } else if (!arg.empty() && arg[0] == '-') {
@@ -255,10 +268,13 @@ Options parseOptions(int argc, const char** argv) {
 
 class Transformer;
 
-class Rewriter : public PostWalker<Rewriter> {
+class Rewriter : public ExpressionStackWalker<Rewriter> {
   Transformer& transformer;
+  std::map<std::string, Index> operandTemps;
 
   void requirePrivate(Name memory, const char* operation);
+  Index memoryNestingDepth();
+  Index getOperandTemp(Index depth, Index position, Type type);
   void replaceWithHelper(const HelperSpec& spec,
                          std::vector<Expression*> operands,
                          Type result);
@@ -288,10 +304,12 @@ class Transformer {
   const Options& options;
   Name privateMemory;
   Name globalMemory;
+  Name scopedMemory;
   std::map<std::string, Name> helperNames;
   std::vector<std::pair<Name, HelperSpec>> helperSpecs;
   std::map<std::string, uint64_t> rewritten;
   std::map<std::string, uint64_t> allowlisted;
+  std::unordered_set<Expression*> generatedDirectOperations;
 
   Expression* local(Builder& builder, Index index, Type type) {
     return builder.makeLocalGet(index, type);
@@ -381,8 +399,10 @@ class Transformer {
   Expression* makeDirectOperation(const HelperSpec& spec,
                                   Builder& builder,
                                   Name memory,
-                                  Expression* address,
-                                  uint64_t aperture) {
+                                  std::vector<Expression*> operands,
+                                  uint64_t aperture,
+                                  bool enforceAperture) {
+    Expression* address = operands[0];
     Expression* operation = nullptr;
     Type result = spec.type;
     switch (spec.kind) {
@@ -408,7 +428,7 @@ class Transformer {
                           spec.bytes,
                           spec.offset,
                           address,
-                          local(builder, 1, spec.valueType),
+                          operands[1],
                           spec.valueType,
                           memory))
                       : static_cast<Expression*>(builder.makeStore(
@@ -416,7 +436,7 @@ class Transformer {
                           spec.offset,
                           spec.align,
                           address,
-                          local(builder, 1, spec.valueType),
+                          operands[1],
                           spec.valueType,
                           memory));
         result = Type::none;
@@ -426,7 +446,7 @@ class Transformer {
                                           spec.bytes,
                                           spec.offset,
                                           address,
-                                          local(builder, 1, spec.type),
+                                          operands[1],
                                           spec.type,
                                           memory);
         break;
@@ -435,15 +455,15 @@ class Transformer {
           spec.bytes,
           spec.offset,
           address,
-          local(builder, 1, spec.type),
-          local(builder, 2, spec.type),
+          operands[1],
+          operands[2],
           spec.type,
           memory);
         break;
       case HelperKind::AtomicWait:
         operation = builder.makeAtomicWait(address,
-                                           local(builder, 1, spec.valueType),
-                                           local(builder, 2, Type::i64),
+                                           operands[1],
+                                           operands[2],
                                            spec.valueType,
                                            spec.offset,
                                            memory);
@@ -451,7 +471,7 @@ class Transformer {
         break;
       case HelperKind::AtomicNotify:
         operation = builder.makeAtomicNotify(address,
-                                             local(builder, 1, Type::i32),
+                                             operands[1],
                                              spec.offset,
                                              memory);
         result = Type::i32;
@@ -468,7 +488,7 @@ class Transformer {
           spec.align,
           spec.lane,
           address,
-          local(builder, 1, Type::v128),
+          operands[1],
           memory);
         result = spec.laneStore ? Type::none : Type::v128;
         break;
@@ -476,21 +496,36 @@ class Transformer {
       case HelperKind::MemoryFill:
         throw std::runtime_error("bulk helper reached scalar builder");
     }
+    if (!enforceAperture) {
+      return operation;
+    }
     return withFixedRange(
       builder, address, aperture, spec.offset, spec.bytes, operation, result);
   }
 
   Expression* makeSinglePointerBody(const HelperSpec& spec, Builder& builder) {
-    auto* privateOp = makeDirectOperation(spec,
-                                          builder,
-                                          privateMemory,
-                                          rawPointer(builder, 0),
-                                          PrivateAperture);
-    auto* globalOp = makeDirectOperation(spec,
-                                         builder,
-                                         globalMemory,
-                                         maskedGlobalPointer(builder, 0),
-                                         GlobalAperture);
+    auto makeOperands = [&](Expression* address) {
+      std::vector<Expression*> operands{address};
+      auto params = helperParams(spec);
+      for (Index i = 1; i < params.size(); ++i) {
+        operands.push_back(local(builder, i, params[i]));
+      }
+      return operands;
+    };
+    auto* privateOp = makeDirectOperation(
+      spec,
+      builder,
+      privateMemory,
+      makeOperands(rawPointer(builder, 0)),
+      PrivateAperture,
+      false);
+    auto* globalOp = makeDirectOperation(
+      spec,
+      builder,
+      globalMemory,
+      makeOperands(maskedGlobalPointer(builder, 0)),
+      GlobalAperture,
+      true);
     auto* dispatch = builder.makeIf(
       isGlobal(builder, 0), globalOp, privateOp, spec.type);
     return builder.makeBlock(
@@ -654,8 +689,10 @@ class Transformer {
 
     privateMemory = privateMem->name;
     globalMemory = Name("__pglite_global_memory");
-    if (module.getMemoryOrNull(globalMemory)) {
-      throw std::runtime_error("reserved global memory name already exists");
+    scopedMemory = Name("__pglite_scoped_memory");
+    if (module.getMemoryOrNull(globalMemory) ||
+        module.getMemoryOrNull(scopedMemory)) {
+      throw std::runtime_error("reserved memory name already exists");
     }
 
     uint64_t initial = options.globalInitialPages == UINT64_MAX
@@ -669,15 +706,19 @@ class Transformer {
       throw std::runtime_error("invalid global memory limits");
     }
 
-    auto memory = std::make_unique<Memory>();
-    memory->setExplicitName(globalMemory);
-    memory->module = Name(options.globalImportModule);
-    memory->base = Name(options.globalImportBase);
-    memory->initial = initial;
-    memory->max = maximum;
-    memory->shared = privateMem->shared;
-    memory->addressType = Type::i32;
-    module.addMemory(std::move(memory));
+    auto addMemoryImport = [&](Name name, const std::string& base) {
+      auto memory = std::make_unique<Memory>();
+      memory->setExplicitName(name);
+      memory->module = Name(options.globalImportModule);
+      memory->base = Name(base);
+      memory->initial = initial;
+      memory->max = maximum;
+      memory->shared = privateMem->shared;
+      memory->addressType = Type::i32;
+      module.addMemory(std::move(memory));
+    };
+    addMemoryImport(globalMemory, options.globalImportBase);
+    addMemoryImport(scopedMemory, options.scopedImportBase);
     module.features.setMultiMemory();
     if (privateMem->shared) {
       module.features.setAtomics();
@@ -697,9 +738,13 @@ class Transformer {
     struct Auditor
       : public PostWalker<Auditor, UnifiedExpressionVisitor<Auditor>> {
       Name privateMemory;
+      const std::unordered_set<Expression*>& generatedDirectOperations;
       std::vector<std::string> errors;
 
-      explicit Auditor(Name privateMemory) : privateMemory(privateMemory) {}
+      Auditor(Name privateMemory,
+              const std::unordered_set<Expression*>& generatedDirectOperations)
+        : privateMemory(privateMemory),
+          generatedDirectOperations(generatedDirectOperations) {}
 
       void visitExpression(Expression* curr) {
         switch (curr->_id) {
@@ -713,6 +758,9 @@ class Transformer {
           case Expression::SIMDLoadStoreLaneId:
           case Expression::MemoryCopyId:
           case Expression::MemoryFillId:
+            if (generatedDirectOperations.count(curr)) {
+              break;
+            }
             errors.push_back(std::string("untransformed operation: ") +
                              getExpressionName(curr));
             break;
@@ -745,7 +793,7 @@ class Transformer {
           function->name.toString().rfind(HelperPrefix, 0) == 0) {
         continue;
       }
-      Auditor auditor(privateMemory);
+      Auditor auditor(privateMemory, generatedDirectOperations);
       auditor.walkFunctionInModule(function.get(), &module);
       if (!auditor.errors.empty()) {
         std::ostringstream message;
@@ -767,12 +815,18 @@ class Transformer {
         << "\"toolVersion\":\"" << ToolVersion << "\","
         << "\"binaryenCommit\":\"52bc45fc34ec6868400216074744147e9d922685\","
         << "\"pointerABI\":\"" << PointerABI << "\","
-        << "\"profile\":\"two-domain-generic\","
+        << "\"profile\":\""
+        << (options.inlinePrivateFastPath
+              ? "two-domain-generic-private-fast-path"
+              : "two-domain-generic")
+        << "\","
         << "\"features\":\"" << jsonEscape(module.features.toString()) << "\","
         << "\"featureBits\":" << uint32_t(module.features) << ','
         << "\"privateMemory\":\"" << jsonEscape(privateMemory.toString())
         << "\","
         << "\"globalMemory\":\"" << jsonEscape(globalMemory.toString())
+        << "\","
+        << "\"scopedMemory\":\"" << jsonEscape(scopedMemory.toString())
         << "\","
         << "\"privateTag\":0,\"globalTag\":2,\"reservedTag\":3,"
         << "\"privateApertureBytes\":" << PrivateAperture << ','
@@ -805,6 +859,27 @@ public:
     : module(module), options(options) {}
 
   Name getPrivateMemory() const { return privateMemory; }
+
+  bool useInlinePrivateFastPath() const {
+    return options.inlinePrivateFastPath;
+  }
+
+  std::vector<Type> getHelperParams(const HelperSpec& spec) {
+    return helperParams(spec);
+  }
+
+  Expression* makeInlinePrivateOperation(const HelperSpec& spec,
+                                         Builder& builder,
+                                         std::vector<Expression*> operands) {
+    auto* operation = makeDirectOperation(spec,
+                                          builder,
+                                          privateMemory,
+                                          std::move(operands),
+                                          PrivateAperture,
+                                          false);
+    generatedDirectOperations.insert(operation);
+    return operation;
+  }
 
   Name helperFor(const HelperSpec& spec) {
     auto key = helperKey(spec);
@@ -890,11 +965,94 @@ void Rewriter::requirePrivate(Name memory, const char* operation) {
   }
 }
 
+Index Rewriter::memoryNestingDepth() {
+  Index depth = 0;
+  for (Index i = 0; i + 1 < expressionStack.size(); ++i) {
+    switch (expressionStack[i]->_id) {
+      case Expression::LoadId:
+      case Expression::StoreId:
+      case Expression::AtomicRMWId:
+      case Expression::AtomicCmpxchgId:
+      case Expression::AtomicWaitId:
+      case Expression::AtomicNotifyId:
+      case Expression::SIMDLoadId:
+      case Expression::SIMDLoadStoreLaneId:
+        ++depth;
+        break;
+      default:
+        break;
+    }
+  }
+  return depth;
+}
+
+Index Rewriter::getOperandTemp(Index depth, Index position, Type type) {
+  std::ostringstream key;
+  key << depth << ':' << position << ':' << type;
+  auto found = operandTemps.find(key.str());
+  if (found != operandTemps.end()) {
+    return found->second;
+  }
+  Index temp = Builder::addVar(getFunction(), type);
+  operandTemps.emplace(key.str(), temp);
+  return temp;
+}
+
 void Rewriter::replaceWithHelper(const HelperSpec& spec,
                                  std::vector<Expression*> operands,
                                  Type result) {
   Builder builder(*getModule());
-  replaceCurrent(builder.makeCall(transformer.helperFor(spec), operands, result));
+  auto helper = transformer.helperFor(spec);
+  if (!transformer.useInlinePrivateFastPath() ||
+      spec.kind == HelperKind::MemoryCopy ||
+      spec.kind == HelperKind::MemoryFill) {
+    replaceCurrent(builder.makeCall(helper, operands, result));
+    return;
+  }
+
+  Index depth = memoryNestingDepth();
+  auto params = transformer.getHelperParams(spec);
+  std::vector<Expression*> prefix;
+  std::vector<Expression*> privateOperands;
+  std::vector<Expression*> sharedOperands;
+  Index pointerTemp = 0;
+  Expression* pointerForCondition = nullptr;
+  for (Index i = 0; i < operands.size(); ++i) {
+    Index temp = getOperandTemp(depth, i, params[i]);
+    if (i == 0) {
+      pointerTemp = temp;
+    }
+    if (i == 0 && operands.size() == 1) {
+      // Loads dominate the real artifact. A tee evaluates their address once
+      // while avoiding the set/get pair otherwise needed before dispatch.
+      pointerForCondition =
+        builder.makeLocalTee(temp, operands[i], params[i]);
+    } else {
+      prefix.push_back(builder.makeLocalSet(temp, operands[i]));
+    }
+    privateOperands.push_back(builder.makeLocalGet(temp, params[i]));
+    sharedOperands.push_back(builder.makeLocalGet(temp, params[i]));
+  }
+  if (!pointerForCondition) {
+    pointerForCondition = builder.makeLocalGet(pointerTemp, Type::i32);
+  }
+  auto* sharedCall = builder.makeCall(helper, sharedOperands, result);
+  auto* privateOperation = transformer.makeInlinePrivateOperation(
+    spec, builder, std::move(privateOperands));
+  // A signed-positive test recognizes exactly the valid private-pointer
+  // interval [1, 0x7fffffff]. Zero and both tagged domains are non-positive
+  // and take the generic helper, retaining canonical null/tag/aperture traps.
+  auto* privateCondition = builder.makeBinary(
+    GtSInt32,
+    pointerForCondition,
+    builder.makeConst(int32_t(0)));
+  auto* dispatch = builder.makeIf(
+    privateCondition,
+    privateOperation,
+    sharedCall,
+    result);
+  prefix.push_back(dispatch);
+  replaceCurrent(builder.makeBlock(prefix, result));
 }
 
 void Rewriter::visitLoad(Load* curr) {
@@ -1048,6 +1206,26 @@ void Rewriter::visitDataDrop(DataDrop*) {
   transformer.countAllowlist("data-drop");
 }
 
+void enableInputFeatures(Module& module, const Options& options) {
+  for (const auto& requested : options.inputFeatures) {
+    bool found = false;
+    for (uint32_t bit = 1; bit <= FeatureSet::CallIndirectOverlong; bit <<= 1) {
+      auto feature = FeatureSet::Feature(bit);
+      if (FeatureSet::toString(feature) == requested) {
+        module.features.set(feature);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      throw std::runtime_error("unknown input feature: " + requested);
+    }
+  }
+  if (!options.inputFeatures.empty()) {
+    module.hasFeaturesSection = true;
+  }
+}
+
 } // namespace
 
 int main(int argc, const char** argv) {
@@ -1057,6 +1235,7 @@ int main(int argc, const char** argv) {
     ModuleReader reader;
     reader.setDWARF(false);
     reader.read(options.input, module, options.inputSourceMap);
+    enableInputFeatures(module, options);
     if (!WasmValidator().validate(module)) {
       throw std::runtime_error("Binaryen validation failed for input module");
     }

@@ -67,7 +67,9 @@ const waitAsync = (expected, timeout) => {
   return result.async ? result.value : Promise.resolve(result.value)
 }
 assert.equal(await waitAsync(99, 100), 'not-equal')
+const timeoutKeepAlive = setTimeout(() => {}, 100)
 assert.equal(await waitAsync(0, 1), 'timed-out')
+clearTimeout(timeoutKeepAlive)
 
 const notify = async (value) => {
   const result = Atomics.waitAsync(waitView, 0, 0, 2000)

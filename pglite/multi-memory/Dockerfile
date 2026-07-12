@@ -3,6 +3,7 @@ FROM electricsql/pglite-builder:3.1.74-7
 ARG BINARYEN_COMMIT=52bc45fc34ec6868400216074744147e9d922685
 ARG NODE22_VERSION=22.13.0
 ARG NODE24_VERSION=24.15.0
+ARG PNPM_VERSION=9.7.0
 ARG TARGETARCH
 
 RUN apt-get update \
@@ -53,10 +54,13 @@ RUN case "${TARGETARCH}" in \
     && tar -xJf /tmp/node24.tar.xz --strip-components=1 -C /opt/node24 \
     && rm /tmp/node22.tar.xz /tmp/node24.tar.xz \
     && ln -s /opt/node22/bin/node /usr/local/bin/node22 \
-    && ln -s /opt/node24/bin/node /usr/local/bin/node24
+    && ln -s /opt/node24/bin/node /usr/local/bin/node24 \
+    && /opt/node22/bin/npm install --global --prefix /opt/node22 \
+      "pnpm@${PNPM_VERSION}"
 
-LABEL org.opencontainers.image.title="PGlite multi-memory Phase 0 tools" \
+LABEL org.opencontainers.image.title="PGlite multi-memory build and test tools" \
       org.opencontainers.image.binaryen-revision="${BINARYEN_COMMIT}" \
       org.opencontainers.image.emscripten-version="3.1.74" \
       org.opencontainers.image.node22-version="${NODE22_VERSION}" \
-      org.opencontainers.image.node24-version="${NODE24_VERSION}"
+      org.opencontainers.image.node24-version="${NODE24_VERSION}" \
+      org.opencontainers.image.pnpm-version="${PNPM_VERSION}"

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-OUT=${ROOT}/.out
+OUT=${ROOT}/.out/phase0
 
 rm -rf "${OUT}"
 mkdir -p "${OUT}"

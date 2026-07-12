@@ -44,6 +44,7 @@ assert.equal(new Set(report.helpers.map(({ name }) => name)).size, report.helper
 assert.match(report.abi.inputSHA256, /^[0-9a-f]{64}$/)
 assert.equal(report.abi.privateApertureBytes, 0x80000000)
 assert.equal(report.abi.globalApertureBytes, 0x40000000)
+assert.equal(report.abi.scopedMemory, '__pglite_scoped_memory')
 assert.match(report.abi.features, /multimemory/)
 assert.ok(report.abi.featureBits > 0)
 assert.deepEqual(buildManifest.abi, report.abi)
@@ -66,6 +67,7 @@ assert.deepEqual(WebAssembly.Module.imports(output)
   .map(({ module, name }) => [module, name]), [
     ['env', 'memory'],
     ['pglite', 'global_memory'],
+    ['pglite', 'scoped_memory'],
   ])
 
 assert.deepEqual(outputMap.sources, inputMap.sources)

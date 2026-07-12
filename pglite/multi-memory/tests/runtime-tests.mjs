@@ -14,7 +14,7 @@ const instantiateOriginal = async (memory) => WebAssembly.instantiate(originalBy
 const instantiateTransformed = async (privateMemory, globalMemory = makeMemory()) =>
   WebAssembly.instantiate(transformedBytes, {
     env: { memory: privateMemory },
-    pglite: { global_memory: globalMemory },
+    pglite: { global_memory: globalMemory, scoped_memory: privateMemory },
   })
 const tagGlobal = (address) => (0x80000000 | address) | 0
 
