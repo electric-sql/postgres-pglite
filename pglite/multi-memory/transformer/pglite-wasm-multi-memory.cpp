@@ -1,0 +1,1092 @@
+/*
+ * Copyright 2026 Electric DB Limited
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Correctness-first two-domain WebAssembly memory transformer for PGlite.
+ *
+ * This tool is intentionally built against the exact Binaryen revision in the
+ * pinned Emscripten SDK. It accepts a conventional, imported-memory wasm32
+ * module and adds a second imported memory for cluster-global pointers. Every
+ * dereferencing instruction in defined input functions is replaced by a call
+ * to a deduplicated per-shape helper. The helper validates pointer tags and
+ * aperture bounds before selecting private memory 0 or global memory 1.
+ */
+
+#include <algorithm>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "pass.h"
+#include "wasm-builder.h"
+#include "wasm-features.h"
+#include "wasm-io.h"
+#include "wasm-traversal.h"
+#include "wasm-validator.h"
+#include "wasm.h"
+
+using namespace wasm;
+
+namespace {
+
+constexpr const char* ToolVersion = "0.1.0";
+constexpr const char* PointerABI = "pglite-tagged-i32-v1";
+constexpr const char* ABISectionName = "pglite.multi-memory.abi";
+constexpr const char* HelperPrefix = "__pglite_mm_";
+constexpr uint64_t PrivateAperture = uint64_t(1) << 31;
+constexpr uint64_t GlobalAperture = uint64_t(1) << 30;
+
+struct Options {
+  std::string input;
+  std::string output;
+  std::string report;
+  std::string inputSourceMap;
+  std::string outputSourceMap;
+  std::string outputSourceMapURL;
+  std::string inputSHA256;
+  std::string globalImportModule = "pglite";
+  std::string globalImportBase = "global_memory";
+  uint64_t globalInitialPages = UINT64_MAX;
+  uint64_t globalMaximumPages = UINT64_MAX;
+  bool emitText = false;
+};
+
+enum class HelperKind {
+  Load,
+  Store,
+  AtomicRMW,
+  AtomicCmpxchg,
+  AtomicWait,
+  AtomicNotify,
+  SIMDLoad,
+  SIMDLoadStoreLane,
+  MemoryCopy,
+  MemoryFill,
+};
+
+struct HelperSpec {
+  HelperKind kind = HelperKind::Load;
+  uint8_t bytes = 0;
+  bool signed_ = false;
+  bool atomic = false;
+  uint64_t offset = 0;
+  uint64_t align = 0;
+  Type type = Type::none;
+  Type valueType = Type::none;
+  AtomicRMWOp rmwOp = RMWAdd;
+  SIMDLoadOp simdLoadOp = Load8SplatVec128;
+  SIMDLoadStoreLaneOp simdLaneOp = Load8LaneVec128;
+  uint8_t lane = 0;
+  bool laneStore = false;
+};
+
+std::string kindName(HelperKind kind) {
+  switch (kind) {
+    case HelperKind::Load:
+      return "load";
+    case HelperKind::Store:
+      return "store";
+    case HelperKind::AtomicRMW:
+      return "atomic-rmw";
+    case HelperKind::AtomicCmpxchg:
+      return "atomic-cmpxchg";
+    case HelperKind::AtomicWait:
+      return "atomic-wait";
+    case HelperKind::AtomicNotify:
+      return "atomic-notify";
+    case HelperKind::SIMDLoad:
+      return "simd-load";
+    case HelperKind::SIMDLoadStoreLane:
+      return "simd-lane";
+    case HelperKind::MemoryCopy:
+      return "memory-copy";
+    case HelperKind::MemoryFill:
+      return "memory-fill";
+  }
+  throw std::runtime_error("unknown helper kind");
+}
+
+std::string typeName(Type type) {
+  std::ostringstream out;
+  out << type;
+  return out.str();
+}
+
+std::string helperKey(const HelperSpec& spec) {
+  std::ostringstream out;
+  out << int(spec.kind) << ':' << int(spec.bytes) << ':' << spec.signed_ << ':'
+      << spec.atomic << ':' << spec.offset << ':' << spec.align << ':'
+      << typeName(spec.type) << ':' << typeName(spec.valueType) << ':'
+      << int(spec.rmwOp) << ':' << int(spec.simdLoadOp) << ':'
+      << int(spec.simdLaneOp) << ':' << int(spec.lane) << ':' << spec.laneStore;
+  return out.str();
+}
+
+std::string jsonEscape(const std::string& input) {
+  std::ostringstream out;
+  for (unsigned char c : input) {
+    switch (c) {
+      case '\\':
+        out << "\\\\";
+        break;
+      case '"':
+        out << "\\\"";
+        break;
+      case '\n':
+        out << "\\n";
+        break;
+      case '\r':
+        out << "\\r";
+        break;
+      case '\t':
+        out << "\\t";
+        break;
+      default:
+        if (c < 0x20) {
+          out << "\\u";
+          const char* hex = "0123456789abcdef";
+          out << '0' << '0' << hex[c >> 4] << hex[c & 15];
+        } else {
+          out << c;
+        }
+    }
+  }
+  return out.str();
+}
+
+uint64_t parseUnsigned(const std::string& value, const char* option) {
+  size_t used = 0;
+  uint64_t result = 0;
+  try {
+    result = std::stoull(value, &used, 0);
+  } catch (...) {
+    throw std::runtime_error(std::string("invalid value for ") + option +
+                             ": " + value);
+  }
+  if (used != value.size()) {
+    throw std::runtime_error(std::string("invalid value for ") + option +
+                             ": " + value);
+  }
+  return result;
+}
+
+void usage(std::ostream& out) {
+  out << "Usage: pglite-wasm-multi-memory [options] INPUT\n"
+      << "\n"
+      << "Options:\n"
+      << "  -o, --output FILE                 output wasm (required)\n"
+      << "      --report FILE                 write JSON transformation report\n"
+      << "      --input-source-map FILE       consume input source map\n"
+      << "      --output-source-map FILE      emit output source map\n"
+      << "      --output-source-map-url URL   sourceMappingURL custom section\n"
+      << "      --input-sha256 HEX            record input hash in ABI metadata\n"
+      << "      --global-import-module NAME   import module (default pglite)\n"
+      << "      --global-import-base NAME     import name (default global_memory)\n"
+      << "      --global-initial-pages N      default: private memory initial\n"
+      << "      --global-maximum-pages N      default: private memory maximum\n"
+      << "  -S, --emit-text                   emit WAT instead of binary\n"
+      << "  -h, --help                        show this help\n"
+      << "      --version                     show tool version\n";
+}
+
+Options parseOptions(int argc, const char** argv) {
+  Options options;
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+    auto take = [&](const char* option) -> std::string {
+      if (++i >= argc) {
+        throw std::runtime_error(std::string("missing value for ") + option);
+      }
+      return argv[i];
+    };
+
+    if (arg == "-h" || arg == "--help") {
+      usage(std::cout);
+      std::exit(0);
+    } else if (arg == "--version") {
+      std::cout << "pglite-wasm-multi-memory " << ToolVersion << '\n';
+      std::exit(0);
+    } else if (arg == "-o" || arg == "--output") {
+      options.output = take(arg.c_str());
+    } else if (arg == "--report") {
+      options.report = take(arg.c_str());
+    } else if (arg == "--input-source-map") {
+      options.inputSourceMap = take(arg.c_str());
+    } else if (arg == "--output-source-map") {
+      options.outputSourceMap = take(arg.c_str());
+    } else if (arg == "--output-source-map-url") {
+      options.outputSourceMapURL = take(arg.c_str());
+    } else if (arg == "--input-sha256") {
+      options.inputSHA256 = take(arg.c_str());
+    } else if (arg == "--global-import-module") {
+      options.globalImportModule = take(arg.c_str());
+    } else if (arg == "--global-import-base") {
+      options.globalImportBase = take(arg.c_str());
+    } else if (arg == "--global-initial-pages") {
+      options.globalInitialPages = parseUnsigned(take(arg.c_str()), arg.c_str());
+    } else if (arg == "--global-maximum-pages") {
+      options.globalMaximumPages = parseUnsigned(take(arg.c_str()), arg.c_str());
+    } else if (arg == "-S" || arg == "--emit-text") {
+      options.emitText = true;
+    } else if (!arg.empty() && arg[0] == '-') {
+      throw std::runtime_error("unknown option: " + arg);
+    } else if (options.input.empty()) {
+      options.input = arg;
+    } else {
+      throw std::runtime_error("unexpected positional argument: " + arg);
+    }
+  }
+  if (options.input.empty()) {
+    throw std::runtime_error("input file is required");
+  }
+  if (options.output.empty()) {
+    throw std::runtime_error("--output is required");
+  }
+  return options;
+}
+
+class Transformer;
+
+class Rewriter : public PostWalker<Rewriter> {
+  Transformer& transformer;
+
+  void requirePrivate(Name memory, const char* operation);
+  void replaceWithHelper(const HelperSpec& spec,
+                         std::vector<Expression*> operands,
+                         Type result);
+
+public:
+  explicit Rewriter(Transformer& transformer) : transformer(transformer) {}
+
+  void visitLoad(Load* curr);
+  void visitStore(Store* curr);
+  void visitAtomicRMW(AtomicRMW* curr);
+  void visitAtomicCmpxchg(AtomicCmpxchg* curr);
+  void visitAtomicWait(AtomicWait* curr);
+  void visitAtomicNotify(AtomicNotify* curr);
+  void visitAtomicFence(AtomicFence* curr);
+  void visitSIMDLoad(SIMDLoad* curr);
+  void visitSIMDLoadStoreLane(SIMDLoadStoreLane* curr);
+  void visitMemoryCopy(MemoryCopy* curr);
+  void visitMemoryFill(MemoryFill* curr);
+  void visitMemoryInit(MemoryInit* curr);
+  void visitMemorySize(MemorySize* curr);
+  void visitMemoryGrow(MemoryGrow* curr);
+  void visitDataDrop(DataDrop* curr);
+};
+
+class Transformer {
+  Module& module;
+  const Options& options;
+  Name privateMemory;
+  Name globalMemory;
+  std::map<std::string, Name> helperNames;
+  std::vector<std::pair<Name, HelperSpec>> helperSpecs;
+  std::map<std::string, uint64_t> rewritten;
+  std::map<std::string, uint64_t> allowlisted;
+
+  Expression* local(Builder& builder, Index index, Type type) {
+    return builder.makeLocalGet(index, type);
+  }
+
+  Expression* isGlobal(Builder& builder, Index ptrIndex) {
+    return builder.makeBinary(LtSInt32,
+                              local(builder, ptrIndex, Type::i32),
+                              builder.makeConst(int32_t(0)));
+  }
+
+  Expression* maskedGlobalPointer(Builder& builder, Index ptrIndex) {
+    return builder.makeBinary(AndInt32,
+                              local(builder, ptrIndex, Type::i32),
+                              builder.makeConst(uint32_t(0x3fffffff)));
+  }
+
+  Expression* rawPointer(Builder& builder, Index ptrIndex) {
+    return local(builder, ptrIndex, Type::i32);
+  }
+
+  Expression* nullTrap(Builder& builder, Index ptrIndex) {
+    return builder.makeIf(
+      builder.makeUnary(EqZInt32, local(builder, ptrIndex, Type::i32)),
+      builder.makeUnreachable());
+  }
+
+  Expression* reservedTagTrap(Builder& builder, Index ptrIndex) {
+    auto* tag = builder.makeBinary(
+      AndInt32,
+      local(builder, ptrIndex, Type::i32),
+      builder.makeConst(uint32_t(0xc0000000)));
+    return builder.makeIf(
+      builder.makeBinary(EqInt32, tag, builder.makeConst(uint32_t(0xc0000000))),
+      builder.makeUnreachable());
+  }
+
+  Expression* fixedRangeTrap(Builder& builder,
+                             Expression* address,
+                             uint64_t aperture,
+                             uint64_t offset,
+                             uint64_t bytes) {
+    if (offset > aperture || bytes > aperture || offset + bytes > aperture) {
+      return builder.makeUnreachable();
+    }
+    uint64_t lastStart = aperture - offset - bytes;
+    return builder.makeIf(
+      builder.makeBinary(GtUInt32,
+                         address,
+                         builder.makeConst(uint32_t(lastStart))),
+      builder.makeUnreachable());
+  }
+
+  Expression* dynamicRangeTrap(Builder& builder,
+                               Expression* address,
+                               Expression* size,
+                               uint64_t aperture) {
+    auto* sizeTooLarge = builder.makeBinary(
+      GtUInt32, size, builder.makeConst(uint32_t(aperture)));
+    auto* startTooLarge = builder.makeBinary(
+      GtUInt32,
+      address,
+      builder.makeBinary(SubInt32,
+                         builder.makeConst(uint32_t(aperture)),
+                         ExpressionManipulator::copy(size, module)));
+    return builder.makeIf(builder.makeBinary(OrInt32, sizeTooLarge, startTooLarge),
+                          builder.makeUnreachable());
+  }
+
+  Expression* withFixedRange(Builder& builder,
+                             Expression* address,
+                             uint64_t aperture,
+                             uint64_t offset,
+                             uint64_t bytes,
+                             Expression* operation,
+                             Type result) {
+    return builder.makeBlock(
+      {fixedRangeTrap(builder,
+                      ExpressionManipulator::copy(address, module),
+                      aperture,
+                      offset,
+                      bytes),
+       operation},
+      result);
+  }
+
+  Expression* makeDirectOperation(const HelperSpec& spec,
+                                  Builder& builder,
+                                  Name memory,
+                                  Expression* address,
+                                  uint64_t aperture) {
+    Expression* operation = nullptr;
+    Type result = spec.type;
+    switch (spec.kind) {
+      case HelperKind::Load:
+        operation = spec.atomic
+                      ? static_cast<Expression*>(builder.makeAtomicLoad(
+                          spec.bytes,
+                          spec.offset,
+                          address,
+                          spec.type,
+                          memory))
+                      : static_cast<Expression*>(builder.makeLoad(spec.bytes,
+                                                                  spec.signed_,
+                                                                  spec.offset,
+                                                                  spec.align,
+                                                                  address,
+                                                                  spec.type,
+                                                                  memory));
+        break;
+      case HelperKind::Store:
+        operation = spec.atomic
+                      ? static_cast<Expression*>(builder.makeAtomicStore(
+                          spec.bytes,
+                          spec.offset,
+                          address,
+                          local(builder, 1, spec.valueType),
+                          spec.valueType,
+                          memory))
+                      : static_cast<Expression*>(builder.makeStore(
+                          spec.bytes,
+                          spec.offset,
+                          spec.align,
+                          address,
+                          local(builder, 1, spec.valueType),
+                          spec.valueType,
+                          memory));
+        result = Type::none;
+        break;
+      case HelperKind::AtomicRMW:
+        operation = builder.makeAtomicRMW(spec.rmwOp,
+                                          spec.bytes,
+                                          spec.offset,
+                                          address,
+                                          local(builder, 1, spec.type),
+                                          spec.type,
+                                          memory);
+        break;
+      case HelperKind::AtomicCmpxchg:
+        operation = builder.makeAtomicCmpxchg(
+          spec.bytes,
+          spec.offset,
+          address,
+          local(builder, 1, spec.type),
+          local(builder, 2, spec.type),
+          spec.type,
+          memory);
+        break;
+      case HelperKind::AtomicWait:
+        operation = builder.makeAtomicWait(address,
+                                           local(builder, 1, spec.valueType),
+                                           local(builder, 2, Type::i64),
+                                           spec.valueType,
+                                           spec.offset,
+                                           memory);
+        result = Type::i32;
+        break;
+      case HelperKind::AtomicNotify:
+        operation = builder.makeAtomicNotify(address,
+                                             local(builder, 1, Type::i32),
+                                             spec.offset,
+                                             memory);
+        result = Type::i32;
+        break;
+      case HelperKind::SIMDLoad:
+        operation = builder.makeSIMDLoad(
+          spec.simdLoadOp, spec.offset, spec.align, address, memory);
+        result = Type::v128;
+        break;
+      case HelperKind::SIMDLoadStoreLane:
+        operation = builder.makeSIMDLoadStoreLane(
+          spec.simdLaneOp,
+          spec.offset,
+          spec.align,
+          spec.lane,
+          address,
+          local(builder, 1, Type::v128),
+          memory);
+        result = spec.laneStore ? Type::none : Type::v128;
+        break;
+      case HelperKind::MemoryCopy:
+      case HelperKind::MemoryFill:
+        throw std::runtime_error("bulk helper reached scalar builder");
+    }
+    return withFixedRange(
+      builder, address, aperture, spec.offset, spec.bytes, operation, result);
+  }
+
+  Expression* makeSinglePointerBody(const HelperSpec& spec, Builder& builder) {
+    auto* privateOp = makeDirectOperation(spec,
+                                          builder,
+                                          privateMemory,
+                                          rawPointer(builder, 0),
+                                          PrivateAperture);
+    auto* globalOp = makeDirectOperation(spec,
+                                         builder,
+                                         globalMemory,
+                                         maskedGlobalPointer(builder, 0),
+                                         GlobalAperture);
+    auto* dispatch = builder.makeIf(
+      isGlobal(builder, 0), globalOp, privateOp, spec.type);
+    return builder.makeBlock(
+      {nullTrap(builder, 0), reservedTagTrap(builder, 0), dispatch}, spec.type);
+  }
+
+  Expression* copyFor(Builder& builder, bool destGlobal, bool sourceGlobal) {
+    auto* dest = destGlobal ? maskedGlobalPointer(builder, 0)
+                            : rawPointer(builder, 0);
+    auto* source = sourceGlobal ? maskedGlobalPointer(builder, 1)
+                                : rawPointer(builder, 1);
+    auto* sizeForDest = local(builder, 2, Type::i32);
+    auto* sizeForSource = local(builder, 2, Type::i32);
+    auto* operation = builder.makeMemoryCopy(
+      ExpressionManipulator::copy(dest, module),
+      ExpressionManipulator::copy(source, module),
+      local(builder, 2, Type::i32),
+      destGlobal ? globalMemory : privateMemory,
+      sourceGlobal ? globalMemory : privateMemory);
+    return builder.makeBlock(
+      {dynamicRangeTrap(builder,
+                        dest,
+                        sizeForDest,
+                        destGlobal ? GlobalAperture : PrivateAperture),
+       dynamicRangeTrap(builder,
+                        source,
+                        sizeForSource,
+                        sourceGlobal ? GlobalAperture : PrivateAperture),
+       operation},
+      Type::none);
+  }
+
+  Expression* makeCopyBody(Builder& builder) {
+    auto* privateSource = builder.makeIf(isGlobal(builder, 1),
+                                         copyFor(builder, false, true),
+                                         copyFor(builder, false, false));
+    auto* globalSource = builder.makeIf(isGlobal(builder, 1),
+                                        copyFor(builder, true, true),
+                                        copyFor(builder, true, false));
+    auto* dispatch =
+      builder.makeIf(isGlobal(builder, 0), globalSource, privateSource);
+    return builder.makeBlock({nullTrap(builder, 0),
+                              reservedTagTrap(builder, 0),
+                              nullTrap(builder, 1),
+                              reservedTagTrap(builder, 1),
+                              dispatch});
+  }
+
+  Expression* fillFor(Builder& builder, bool global) {
+    auto* dest = global ? maskedGlobalPointer(builder, 0)
+                        : rawPointer(builder, 0);
+    auto* size = local(builder, 2, Type::i32);
+    auto* operation = builder.makeMemoryFill(
+      ExpressionManipulator::copy(dest, module),
+      local(builder, 1, Type::i32),
+      local(builder, 2, Type::i32),
+      global ? globalMemory : privateMemory);
+    return builder.makeBlock(
+      {dynamicRangeTrap(builder,
+                        dest,
+                        size,
+                        global ? GlobalAperture : PrivateAperture),
+       operation});
+  }
+
+  Expression* makeFillBody(Builder& builder) {
+    auto* dispatch = builder.makeIf(
+      isGlobal(builder, 0), fillFor(builder, true), fillFor(builder, false));
+    return builder.makeBlock(
+      {nullTrap(builder, 0), reservedTagTrap(builder, 0), dispatch});
+  }
+
+  std::vector<Type> helperParams(const HelperSpec& spec) {
+    switch (spec.kind) {
+      case HelperKind::Load:
+      case HelperKind::SIMDLoad:
+        return {Type::i32};
+      case HelperKind::Store:
+        return {Type::i32, spec.valueType};
+      case HelperKind::AtomicRMW:
+        return {Type::i32, spec.type};
+      case HelperKind::AtomicCmpxchg:
+        return {Type::i32, spec.type, spec.type};
+      case HelperKind::AtomicWait:
+        return {Type::i32, spec.valueType, Type::i64};
+      case HelperKind::AtomicNotify:
+        return {Type::i32, Type::i32};
+      case HelperKind::SIMDLoadStoreLane:
+        return {Type::i32, Type::v128};
+      case HelperKind::MemoryCopy:
+        return {Type::i32, Type::i32, Type::i32};
+      case HelperKind::MemoryFill:
+        return {Type::i32, Type::i32, Type::i32};
+    }
+    throw std::runtime_error("unknown helper params");
+  }
+
+  Type helperResult(const HelperSpec& spec) {
+    switch (spec.kind) {
+      case HelperKind::Store:
+      case HelperKind::MemoryCopy:
+      case HelperKind::MemoryFill:
+        return Type::none;
+      case HelperKind::AtomicWait:
+      case HelperKind::AtomicNotify:
+        return Type::i32;
+      case HelperKind::SIMDLoad:
+        return Type::v128;
+      case HelperKind::SIMDLoadStoreLane:
+        return spec.laneStore ? Type::none : Type::v128;
+      default:
+        return spec.type;
+    }
+  }
+
+  void addHelpers() {
+    Builder builder(module);
+    for (const auto& [name, spec] : helperSpecs) {
+      Expression* body = nullptr;
+      if (spec.kind == HelperKind::MemoryCopy) {
+        body = makeCopyBody(builder);
+      } else if (spec.kind == HelperKind::MemoryFill) {
+        body = makeFillBody(builder);
+      } else {
+        body = makeSinglePointerBody(spec, builder);
+      }
+      auto params = helperParams(spec);
+      auto result = helperResult(spec);
+      auto function = Builder::makeFunction(
+        name, Signature(Type(params), result), {}, body);
+      function->setExplicitName(name);
+      function->noFullInline = false;
+      function->noPartialInline = true;
+      module.addFunction(std::move(function));
+    }
+  }
+
+  void addGlobalMemory() {
+    if (module.memories.size() != 1) {
+      throw std::runtime_error(
+        "input must contain exactly one conventional memory");
+    }
+    Memory* privateMem = module.memories[0].get();
+    if (!privateMem->imported()) {
+      throw std::runtime_error(
+        "private memory must be imported so it remains memory index 0");
+    }
+    if (privateMem->addressType != Type::i32) {
+      throw std::runtime_error("memory64 input is not supported");
+    }
+    if (privateMem->initial.addr > PrivateAperture / Memory::kPageSize) {
+      throw std::runtime_error("private memory initial exceeds 2 GiB aperture");
+    }
+    if (privateMem->hasMax() &&
+        privateMem->max.addr > PrivateAperture / Memory::kPageSize) {
+      throw std::runtime_error("private memory maximum exceeds 2 GiB aperture");
+    }
+    if (privateMem->shared && !privateMem->hasMax()) {
+      throw std::runtime_error("shared private memory requires a maximum");
+    }
+
+    privateMemory = privateMem->name;
+    globalMemory = Name("__pglite_global_memory");
+    if (module.getMemoryOrNull(globalMemory)) {
+      throw std::runtime_error("reserved global memory name already exists");
+    }
+
+    uint64_t initial = options.globalInitialPages == UINT64_MAX
+                         ? privateMem->initial.addr
+                         : options.globalInitialPages;
+    uint64_t maximum = options.globalMaximumPages == UINT64_MAX
+                         ? privateMem->max.addr
+                         : options.globalMaximumPages;
+    if (initial > Memory::kMaxSize32 || maximum > Memory::kMaxSize32 ||
+        initial > maximum) {
+      throw std::runtime_error("invalid global memory limits");
+    }
+
+    auto memory = std::make_unique<Memory>();
+    memory->setExplicitName(globalMemory);
+    memory->module = Name(options.globalImportModule);
+    memory->base = Name(options.globalImportBase);
+    memory->initial = initial;
+    memory->max = maximum;
+    memory->shared = privateMem->shared;
+    memory->addressType = Type::i32;
+    module.addMemory(std::move(memory));
+    module.features.setMultiMemory();
+    if (privateMem->shared) {
+      module.features.setAtomics();
+    }
+    module.hasFeaturesSection = true;
+  }
+
+  void rejectAlreadyTransformed() {
+    for (const auto& section : module.customSections) {
+      if (section.name == ABISectionName) {
+        throw std::runtime_error("module already has PGlite memory ABI metadata");
+      }
+    }
+  }
+
+  void audit() {
+    struct Auditor
+      : public PostWalker<Auditor, UnifiedExpressionVisitor<Auditor>> {
+      Name privateMemory;
+      std::vector<std::string> errors;
+
+      explicit Auditor(Name privateMemory) : privateMemory(privateMemory) {}
+
+      void visitExpression(Expression* curr) {
+        switch (curr->_id) {
+          case Expression::LoadId:
+          case Expression::StoreId:
+          case Expression::AtomicRMWId:
+          case Expression::AtomicCmpxchgId:
+          case Expression::AtomicWaitId:
+          case Expression::AtomicNotifyId:
+          case Expression::SIMDLoadId:
+          case Expression::SIMDLoadStoreLaneId:
+          case Expression::MemoryCopyId:
+          case Expression::MemoryFillId:
+            errors.push_back(std::string("untransformed operation: ") +
+                             getExpressionName(curr));
+            break;
+          case Expression::MemoryInitId:
+            if (curr->cast<MemoryInit>()->memory != privateMemory) {
+              errors.push_back("memory.init is not private-memory allowlisted");
+            }
+            break;
+          case Expression::MemorySizeId:
+            if (curr->cast<MemorySize>()->memory != privateMemory) {
+              errors.push_back("memory.size is not private-memory allowlisted");
+            }
+            break;
+          case Expression::MemoryGrowId:
+            if (curr->cast<MemoryGrow>()->memory != privateMemory) {
+              errors.push_back("memory.grow is not private-memory allowlisted");
+            }
+            break;
+          case Expression::AtomicFenceId:
+          case Expression::DataDropId:
+            break;
+          default:
+            break;
+        }
+      }
+    };
+
+    for (const auto& function : module.functions) {
+      if (function->imported() ||
+          function->name.toString().rfind(HelperPrefix, 0) == 0) {
+        continue;
+      }
+      Auditor auditor(privateMemory);
+      auditor.walkFunctionInModule(function.get(), &module);
+      if (!auditor.errors.empty()) {
+        std::ostringstream message;
+        message << "post-transform memory audit failed in "
+                << function->name.toString();
+        for (const auto& error : auditor.errors) {
+          message << "\n  " << error;
+        }
+        throw std::runtime_error(message.str());
+      }
+    }
+  }
+
+  std::string manifestJSON() const {
+    std::ostringstream out;
+    out << '{'
+        << "\"schema\":1,"
+        << "\"tool\":\"pglite-wasm-multi-memory\","
+        << "\"toolVersion\":\"" << ToolVersion << "\","
+        << "\"binaryenCommit\":\"52bc45fc34ec6868400216074744147e9d922685\","
+        << "\"pointerABI\":\"" << PointerABI << "\","
+        << "\"profile\":\"two-domain-generic\","
+        << "\"features\":\"" << jsonEscape(module.features.toString()) << "\","
+        << "\"featureBits\":" << uint32_t(module.features) << ','
+        << "\"privateMemory\":\"" << jsonEscape(privateMemory.toString())
+        << "\","
+        << "\"globalMemory\":\"" << jsonEscape(globalMemory.toString())
+        << "\","
+        << "\"privateTag\":0,\"globalTag\":2,\"reservedTag\":3,"
+        << "\"privateApertureBytes\":" << PrivateAperture << ','
+        << "\"globalApertureBytes\":" << GlobalAperture << ','
+        << "\"inputSHA256\":\"" << jsonEscape(options.inputSHA256) << "\","
+        << "\"helperCount\":" << helperSpecs.size() << '}';
+    return out.str();
+  }
+
+  void addManifest() {
+    auto json = manifestJSON();
+    CustomSection section;
+    section.name = ABISectionName;
+    section.data.assign(json.begin(), json.end());
+    module.customSections.push_back(std::move(section));
+  }
+
+  void replaceSourceMapURL() {
+    module.customSections.erase(
+      std::remove_if(module.customSections.begin(),
+                     module.customSections.end(),
+                     [](const CustomSection& section) {
+                       return section.name == "sourceMappingURL";
+                     }),
+      module.customSections.end());
+  }
+
+public:
+  Transformer(Module& module, const Options& options)
+    : module(module), options(options) {}
+
+  Name getPrivateMemory() const { return privateMemory; }
+
+  Name helperFor(const HelperSpec& spec) {
+    auto key = helperKey(spec);
+    auto found = helperNames.find(key);
+    if (found != helperNames.end()) {
+      return found->second;
+    }
+    auto name = Name(std::string(HelperPrefix) + kindName(spec.kind) + '_' +
+                     std::to_string(helperSpecs.size()));
+    if (module.getFunctionOrNull(name)) {
+      throw std::runtime_error("generated helper name collision");
+    }
+    helperNames.emplace(key, name);
+    helperSpecs.emplace_back(name, spec);
+    return name;
+  }
+
+  void countRewrite(const std::string& name) { ++rewritten[name]; }
+  void countAllowlist(const std::string& name) { ++allowlisted[name]; }
+
+  void run() {
+    rejectAlreadyTransformed();
+    addGlobalMemory();
+
+    std::vector<Function*> originals;
+    for (const auto& function : module.functions) {
+      if (!function->imported()) {
+        originals.push_back(function.get());
+      }
+    }
+    for (auto* function : originals) {
+      Rewriter rewriter(*this);
+      rewriter.walkFunctionInModule(function, &module);
+    }
+    addHelpers();
+    audit();
+    replaceSourceMapURL();
+    addManifest();
+
+    if (!WasmValidator().validate(module)) {
+      throw std::runtime_error("Binaryen validation failed after transformation");
+    }
+  }
+
+  std::string reportJSON() const {
+    auto writeMap = [](std::ostringstream& out,
+                       const std::map<std::string, uint64_t>& values) {
+      bool first = true;
+      out << '{';
+      for (const auto& [name, value] : values) {
+        if (!first) {
+          out << ',';
+        }
+        first = false;
+        out << '"' << jsonEscape(name) << "\":" << value;
+      }
+      out << '}';
+    };
+
+    std::ostringstream out;
+    out << '{' << "\"abi\":" << manifestJSON() << ",\"rewritten\":";
+    writeMap(out, rewritten);
+    out << ",\"allowlisted\":";
+    writeMap(out, allowlisted);
+    out << ",\"helpers\":[";
+    for (size_t i = 0; i < helperSpecs.size(); ++i) {
+      if (i) {
+        out << ',';
+      }
+      out << "{\"name\":\"" << jsonEscape(helperSpecs[i].first.toString())
+          << "\",\"kind\":\"" << kindName(helperSpecs[i].second.kind)
+          << "\"}";
+    }
+    out << "]}";
+    return out.str();
+  }
+};
+
+void Rewriter::requirePrivate(Name memory, const char* operation) {
+  if (memory != transformer.getPrivateMemory()) {
+    throw std::runtime_error(std::string(operation) +
+                             " unexpectedly targets a non-private input memory");
+  }
+}
+
+void Rewriter::replaceWithHelper(const HelperSpec& spec,
+                                 std::vector<Expression*> operands,
+                                 Type result) {
+  Builder builder(*getModule());
+  replaceCurrent(builder.makeCall(transformer.helperFor(spec), operands, result));
+}
+
+void Rewriter::visitLoad(Load* curr) {
+  requirePrivate(curr->memory, "load");
+  HelperSpec spec;
+  spec.kind = HelperKind::Load;
+  spec.bytes = curr->bytes;
+  spec.signed_ = curr->signed_;
+  spec.atomic = curr->isAtomic;
+  spec.offset = curr->offset.addr;
+  spec.align = curr->align.addr;
+  spec.type = curr->type;
+  transformer.countRewrite(curr->isAtomic ? "atomic-load" : "load");
+  replaceWithHelper(spec, {curr->ptr}, curr->type);
+}
+
+void Rewriter::visitStore(Store* curr) {
+  requirePrivate(curr->memory, "store");
+  HelperSpec spec;
+  spec.kind = HelperKind::Store;
+  spec.bytes = curr->bytes;
+  spec.atomic = curr->isAtomic;
+  spec.offset = curr->offset.addr;
+  spec.align = curr->align.addr;
+  spec.type = Type::none;
+  spec.valueType = curr->valueType;
+  transformer.countRewrite(curr->isAtomic ? "atomic-store" : "store");
+  replaceWithHelper(spec, {curr->ptr, curr->value}, Type::none);
+}
+
+void Rewriter::visitAtomicRMW(AtomicRMW* curr) {
+  requirePrivate(curr->memory, "atomic.rmw");
+  HelperSpec spec;
+  spec.kind = HelperKind::AtomicRMW;
+  spec.bytes = curr->bytes;
+  spec.offset = curr->offset.addr;
+  spec.align = curr->bytes;
+  spec.type = curr->type;
+  spec.rmwOp = curr->op;
+  transformer.countRewrite("atomic-rmw");
+  replaceWithHelper(spec, {curr->ptr, curr->value}, curr->type);
+}
+
+void Rewriter::visitAtomicCmpxchg(AtomicCmpxchg* curr) {
+  requirePrivate(curr->memory, "atomic.cmpxchg");
+  HelperSpec spec;
+  spec.kind = HelperKind::AtomicCmpxchg;
+  spec.bytes = curr->bytes;
+  spec.offset = curr->offset.addr;
+  spec.align = curr->bytes;
+  spec.type = curr->type;
+  transformer.countRewrite("atomic-cmpxchg");
+  replaceWithHelper(
+    spec, {curr->ptr, curr->expected, curr->replacement}, curr->type);
+}
+
+void Rewriter::visitAtomicWait(AtomicWait* curr) {
+  requirePrivate(curr->memory, "memory.atomic.wait");
+  HelperSpec spec;
+  spec.kind = HelperKind::AtomicWait;
+  spec.bytes = curr->expectedType == Type::i64 ? 8 : 4;
+  spec.offset = curr->offset.addr;
+  spec.align = spec.bytes;
+  spec.type = Type::i32;
+  spec.valueType = curr->expectedType;
+  transformer.countRewrite("atomic-wait");
+  replaceWithHelper(
+    spec, {curr->ptr, curr->expected, curr->timeout}, Type::i32);
+}
+
+void Rewriter::visitAtomicNotify(AtomicNotify* curr) {
+  requirePrivate(curr->memory, "memory.atomic.notify");
+  HelperSpec spec;
+  spec.kind = HelperKind::AtomicNotify;
+  spec.bytes = 4;
+  spec.offset = curr->offset.addr;
+  spec.align = 4;
+  spec.type = Type::i32;
+  transformer.countRewrite("atomic-notify");
+  replaceWithHelper(spec, {curr->ptr, curr->notifyCount}, Type::i32);
+}
+
+void Rewriter::visitAtomicFence(AtomicFence*) {
+  transformer.countAllowlist("atomic-fence");
+}
+
+void Rewriter::visitSIMDLoad(SIMDLoad* curr) {
+  requirePrivate(curr->memory, "SIMD load");
+  HelperSpec spec;
+  spec.kind = HelperKind::SIMDLoad;
+  spec.bytes = curr->getMemBytes();
+  spec.offset = curr->offset.addr;
+  spec.align = curr->align.addr;
+  spec.type = Type::v128;
+  spec.simdLoadOp = curr->op;
+  transformer.countRewrite("simd-load");
+  replaceWithHelper(spec, {curr->ptr}, Type::v128);
+}
+
+void Rewriter::visitSIMDLoadStoreLane(SIMDLoadStoreLane* curr) {
+  requirePrivate(curr->memory, "SIMD lane load/store");
+  HelperSpec spec;
+  spec.kind = HelperKind::SIMDLoadStoreLane;
+  spec.bytes = curr->getMemBytes();
+  spec.offset = curr->offset.addr;
+  spec.align = curr->align.addr;
+  spec.type = curr->type;
+  spec.simdLaneOp = curr->op;
+  spec.lane = curr->index;
+  spec.laneStore = curr->isStore();
+  transformer.countRewrite(spec.laneStore ? "simd-lane-store"
+                                          : "simd-lane-load");
+  replaceWithHelper(spec, {curr->ptr, curr->vec}, curr->type);
+}
+
+void Rewriter::visitMemoryCopy(MemoryCopy* curr) {
+  requirePrivate(curr->destMemory, "memory.copy destination");
+  requirePrivate(curr->sourceMemory, "memory.copy source");
+  HelperSpec spec;
+  spec.kind = HelperKind::MemoryCopy;
+  spec.type = Type::none;
+  transformer.countRewrite("memory-copy");
+  replaceWithHelper(spec, {curr->dest, curr->source, curr->size}, Type::none);
+}
+
+void Rewriter::visitMemoryFill(MemoryFill* curr) {
+  requirePrivate(curr->memory, "memory.fill");
+  HelperSpec spec;
+  spec.kind = HelperKind::MemoryFill;
+  spec.type = Type::none;
+  transformer.countRewrite("memory-fill");
+  replaceWithHelper(spec, {curr->dest, curr->value, curr->size}, Type::none);
+}
+
+void Rewriter::visitMemoryInit(MemoryInit* curr) {
+  requirePrivate(curr->memory, "memory.init");
+  transformer.countAllowlist("memory-init-private");
+}
+
+void Rewriter::visitMemorySize(MemorySize* curr) {
+  requirePrivate(curr->memory, "memory.size");
+  transformer.countAllowlist("memory-size-private");
+}
+
+void Rewriter::visitMemoryGrow(MemoryGrow* curr) {
+  requirePrivate(curr->memory, "memory.grow");
+  transformer.countAllowlist("memory-grow-private");
+}
+
+void Rewriter::visitDataDrop(DataDrop*) {
+  transformer.countAllowlist("data-drop");
+}
+
+} // namespace
+
+int main(int argc, const char** argv) {
+  try {
+    Options options = parseOptions(argc, argv);
+    Module module;
+    ModuleReader reader;
+    reader.setDWARF(false);
+    reader.read(options.input, module, options.inputSourceMap);
+    if (!WasmValidator().validate(module)) {
+      throw std::runtime_error("Binaryen validation failed for input module");
+    }
+
+    Transformer transformer(module, options);
+    transformer.run();
+
+    PassOptions passOptions;
+    passOptions.debugInfo = true;
+    ModuleWriter writer(passOptions);
+    writer.setBinary(!options.emitText);
+    writer.setDebugInfo(true);
+    if (!options.outputSourceMap.empty()) {
+      writer.setSourceMapFilename(options.outputSourceMap);
+    }
+    if (!options.outputSourceMapURL.empty()) {
+      writer.setSourceMapUrl(options.outputSourceMapURL);
+    }
+    writer.write(module, options.output);
+
+    if (!options.report.empty()) {
+      std::ofstream report(options.report);
+      if (!report) {
+        throw std::runtime_error("cannot open report file: " + options.report);
+      }
+      report << transformer.reportJSON() << '\n';
+    }
+    return 0;
+  } catch (const std::exception& error) {
+    std::cerr << "pglite-wasm-multi-memory: " << error.what() << '\n';
+    return 1;
+  }
+}
