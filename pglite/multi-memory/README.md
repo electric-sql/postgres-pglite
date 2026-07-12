@@ -59,6 +59,29 @@ but currently misses the performance gate. The report is the input to the
 provenance/direct-access work rather than permission to proceed to postmaster
 integration unchanged.
 
+## Phase 2A: private-only performance oracle
+
+From the parent PGlite checkout, run:
+
+```sh
+pnpm wasm:multi-memory:phase2a
+```
+
+This builds deterministic private-only-oracle, outlined-generic, and
+inline-generic artifacts from the same release input. The oracle retains all
+current single-user dereferences as direct memory-0 operations while adding
+the complete multi-memory import and ABI surface. It is an experimental
+performance ceiling and is not safe for tagged postmaster pointers.
+
+The runner audits all oracle operations as direct-private, differentially
+tests it against classic PGlite, and measures all four profiles in alternating
+pairs of isolated Node processes. The oracle runs three independent
+five-pair series and must satisfy the continuation bound in every series.
+`.out/phase2a/summary.json` records the conservative workload result plus
+artifact-size, compile, and startup ratios. The runner continues only when the
+oracle is no worse than 1.15x on every agreed steady-state workload; generic
+profiles remain diagnostic correctness and cost references.
+
 The native `pglite-wasm-multi-memory` tool accepts a conventional wasm32
 module with one imported memory. It preserves that private memory as index 0,
 adds `pglite.global_memory` as index 1 and the reserved

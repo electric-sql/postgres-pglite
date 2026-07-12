@@ -15,6 +15,7 @@ async function runParent(
   transformedPath,
   pgliteEntry,
   outputPath,
+  thresholdText = '1.35',
 ) {
   if (!outputPath) {
     throw new Error(
@@ -25,7 +26,7 @@ async function runParent(
   const transformedRuns = []
   // Alternate order to avoid consistently charging one artifact for host
   // warmup or thermal state, then compare medians across isolated processes.
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < 5; round++) {
     if (round % 2 === 0) {
       classicRuns.push(invoke(classicPath, pgliteEntry))
       transformedRuns.push(invoke(transformedPath, pgliteEntry))
@@ -43,7 +44,8 @@ async function runParent(
     ]),
   )
   const worstThroughputRatio = Math.max(...Object.values(ratios))
-  const threshold = 1.35
+  const threshold = Number(thresholdText)
+  assert.ok(Number.isFinite(threshold) && threshold > 0)
   const result = {
     schema: 1,
     runtime: {

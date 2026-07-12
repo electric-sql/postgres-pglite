@@ -38,7 +38,7 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.2.0";
+constexpr const char* ToolVersion = "0.3.0";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
@@ -60,6 +60,7 @@ struct Options {
   uint64_t globalInitialPages = UINT64_MAX;
   uint64_t globalMaximumPages = UINT64_MAX;
   bool inlinePrivateFastPath = false;
+  bool privateOnlyOracle = false;
   bool emitText = false;
 };
 
@@ -199,6 +200,7 @@ void usage(std::ostream& out) {
       << "      --global-initial-pages N      default: private memory initial\n"
       << "      --global-maximum-pages N      default: private memory maximum\n"
       << "      --inline-private-fast-path    direct memory-0 arm at each site\n"
+      << "      --private-only-oracle         retain direct memory-0 operations\n"
       << "  -S, --emit-text                   emit WAT instead of binary\n"
       << "  -h, --help                        show this help\n"
       << "      --version                     show tool version\n";
@@ -247,6 +249,8 @@ Options parseOptions(int argc, const char** argv) {
       options.globalMaximumPages = parseUnsigned(take(arg.c_str()), arg.c_str());
     } else if (arg == "--inline-private-fast-path") {
       options.inlinePrivateFastPath = true;
+    } else if (arg == "--private-only-oracle") {
+      options.privateOnlyOracle = true;
     } else if (arg == "-S" || arg == "--emit-text") {
       options.emitText = true;
     } else if (!arg.empty() && arg[0] == '-') {
@@ -263,6 +267,10 @@ Options parseOptions(int argc, const char** argv) {
   if (options.output.empty()) {
     throw std::runtime_error("--output is required");
   }
+  if (options.inlinePrivateFastPath && options.privateOnlyOracle) {
+    throw std::runtime_error(
+      "--inline-private-fast-path and --private-only-oracle are exclusive");
+  }
   return options;
 }
 
@@ -275,7 +283,8 @@ class Rewriter : public ExpressionStackWalker<Rewriter> {
   void requirePrivate(Name memory, const char* operation);
   Index memoryNestingDepth();
   Index getOperandTemp(Index depth, Index position, Type type);
-  void replaceWithHelper(const HelperSpec& spec,
+  void replaceWithHelper(Expression* original,
+                         const HelperSpec& spec,
                          std::vector<Expression*> operands,
                          Type result);
 
@@ -308,6 +317,7 @@ class Transformer {
   std::map<std::string, Name> helperNames;
   std::vector<std::pair<Name, HelperSpec>> helperSpecs;
   std::map<std::string, uint64_t> rewritten;
+  std::map<std::string, uint64_t> directPrivate;
   std::map<std::string, uint64_t> allowlisted;
   std::unordered_set<Expression*> generatedDirectOperations;
 
@@ -816,9 +826,11 @@ class Transformer {
         << "\"binaryenCommit\":\"52bc45fc34ec6868400216074744147e9d922685\","
         << "\"pointerABI\":\"" << PointerABI << "\","
         << "\"profile\":\""
-        << (options.inlinePrivateFastPath
-              ? "two-domain-generic-private-fast-path"
-              : "two-domain-generic")
+        << (options.privateOnlyOracle
+              ? "private-only-oracle"
+              : options.inlinePrivateFastPath
+                  ? "two-domain-generic-private-fast-path"
+                  : "two-domain-generic")
         << "\","
         << "\"features\":\"" << jsonEscape(module.features.toString()) << "\","
         << "\"featureBits\":" << uint32_t(module.features) << ','
@@ -864,6 +876,12 @@ public:
     return options.inlinePrivateFastPath;
   }
 
+  bool usePrivateOnlyOracle() const { return options.privateOnlyOracle; }
+
+  void keepPrivateOracleOperation(Expression* operation) {
+    generatedDirectOperations.insert(operation);
+  }
+
   std::vector<Type> getHelperParams(const HelperSpec& spec) {
     return helperParams(spec);
   }
@@ -897,7 +915,13 @@ public:
     return name;
   }
 
-  void countRewrite(const std::string& name) { ++rewritten[name]; }
+  void countRewrite(const std::string& name) {
+    if (options.privateOnlyOracle) {
+      ++directPrivate[name];
+    } else {
+      ++rewritten[name];
+    }
+  }
   void countAllowlist(const std::string& name) { ++allowlisted[name]; }
 
   void run() {
@@ -942,6 +966,8 @@ public:
     std::ostringstream out;
     out << '{' << "\"abi\":" << manifestJSON() << ",\"rewritten\":";
     writeMap(out, rewritten);
+    out << ",\"directPrivate\":";
+    writeMap(out, directPrivate);
     out << ",\"allowlisted\":";
     writeMap(out, allowlisted);
     out << ",\"helpers\":[";
@@ -998,9 +1024,14 @@ Index Rewriter::getOperandTemp(Index depth, Index position, Type type) {
   return temp;
 }
 
-void Rewriter::replaceWithHelper(const HelperSpec& spec,
+void Rewriter::replaceWithHelper(Expression* original,
+                                 const HelperSpec& spec,
                                  std::vector<Expression*> operands,
                                  Type result) {
+  if (transformer.usePrivateOnlyOracle()) {
+    transformer.keepPrivateOracleOperation(original);
+    return;
+  }
   Builder builder(*getModule());
   auto helper = transformer.helperFor(spec);
   if (!transformer.useInlinePrivateFastPath() ||
@@ -1066,7 +1097,7 @@ void Rewriter::visitLoad(Load* curr) {
   spec.align = curr->align.addr;
   spec.type = curr->type;
   transformer.countRewrite(curr->isAtomic ? "atomic-load" : "load");
-  replaceWithHelper(spec, {curr->ptr}, curr->type);
+  replaceWithHelper(curr, spec, {curr->ptr}, curr->type);
 }
 
 void Rewriter::visitStore(Store* curr) {
@@ -1080,7 +1111,7 @@ void Rewriter::visitStore(Store* curr) {
   spec.type = Type::none;
   spec.valueType = curr->valueType;
   transformer.countRewrite(curr->isAtomic ? "atomic-store" : "store");
-  replaceWithHelper(spec, {curr->ptr, curr->value}, Type::none);
+  replaceWithHelper(curr, spec, {curr->ptr, curr->value}, Type::none);
 }
 
 void Rewriter::visitAtomicRMW(AtomicRMW* curr) {
@@ -1093,7 +1124,7 @@ void Rewriter::visitAtomicRMW(AtomicRMW* curr) {
   spec.type = curr->type;
   spec.rmwOp = curr->op;
   transformer.countRewrite("atomic-rmw");
-  replaceWithHelper(spec, {curr->ptr, curr->value}, curr->type);
+  replaceWithHelper(curr, spec, {curr->ptr, curr->value}, curr->type);
 }
 
 void Rewriter::visitAtomicCmpxchg(AtomicCmpxchg* curr) {
@@ -1106,7 +1137,7 @@ void Rewriter::visitAtomicCmpxchg(AtomicCmpxchg* curr) {
   spec.type = curr->type;
   transformer.countRewrite("atomic-cmpxchg");
   replaceWithHelper(
-    spec, {curr->ptr, curr->expected, curr->replacement}, curr->type);
+    curr, spec, {curr->ptr, curr->expected, curr->replacement}, curr->type);
 }
 
 void Rewriter::visitAtomicWait(AtomicWait* curr) {
@@ -1120,7 +1151,7 @@ void Rewriter::visitAtomicWait(AtomicWait* curr) {
   spec.valueType = curr->expectedType;
   transformer.countRewrite("atomic-wait");
   replaceWithHelper(
-    spec, {curr->ptr, curr->expected, curr->timeout}, Type::i32);
+    curr, spec, {curr->ptr, curr->expected, curr->timeout}, Type::i32);
 }
 
 void Rewriter::visitAtomicNotify(AtomicNotify* curr) {
@@ -1132,7 +1163,7 @@ void Rewriter::visitAtomicNotify(AtomicNotify* curr) {
   spec.align = 4;
   spec.type = Type::i32;
   transformer.countRewrite("atomic-notify");
-  replaceWithHelper(spec, {curr->ptr, curr->notifyCount}, Type::i32);
+  replaceWithHelper(curr, spec, {curr->ptr, curr->notifyCount}, Type::i32);
 }
 
 void Rewriter::visitAtomicFence(AtomicFence*) {
@@ -1149,7 +1180,7 @@ void Rewriter::visitSIMDLoad(SIMDLoad* curr) {
   spec.type = Type::v128;
   spec.simdLoadOp = curr->op;
   transformer.countRewrite("simd-load");
-  replaceWithHelper(spec, {curr->ptr}, Type::v128);
+  replaceWithHelper(curr, spec, {curr->ptr}, Type::v128);
 }
 
 void Rewriter::visitSIMDLoadStoreLane(SIMDLoadStoreLane* curr) {
@@ -1165,7 +1196,7 @@ void Rewriter::visitSIMDLoadStoreLane(SIMDLoadStoreLane* curr) {
   spec.laneStore = curr->isStore();
   transformer.countRewrite(spec.laneStore ? "simd-lane-store"
                                           : "simd-lane-load");
-  replaceWithHelper(spec, {curr->ptr, curr->vec}, curr->type);
+  replaceWithHelper(curr, spec, {curr->ptr, curr->vec}, curr->type);
 }
 
 void Rewriter::visitMemoryCopy(MemoryCopy* curr) {
@@ -1175,7 +1206,8 @@ void Rewriter::visitMemoryCopy(MemoryCopy* curr) {
   spec.kind = HelperKind::MemoryCopy;
   spec.type = Type::none;
   transformer.countRewrite("memory-copy");
-  replaceWithHelper(spec, {curr->dest, curr->source, curr->size}, Type::none);
+  replaceWithHelper(
+    curr, spec, {curr->dest, curr->source, curr->size}, Type::none);
 }
 
 void Rewriter::visitMemoryFill(MemoryFill* curr) {
@@ -1184,7 +1216,8 @@ void Rewriter::visitMemoryFill(MemoryFill* curr) {
   spec.kind = HelperKind::MemoryFill;
   spec.type = Type::none;
   transformer.countRewrite("memory-fill");
-  replaceWithHelper(spec, {curr->dest, curr->value, curr->size}, Type::none);
+  replaceWithHelper(
+    curr, spec, {curr->dest, curr->value, curr->size}, Type::none);
 }
 
 void Rewriter::visitMemoryInit(MemoryInit* curr) {
