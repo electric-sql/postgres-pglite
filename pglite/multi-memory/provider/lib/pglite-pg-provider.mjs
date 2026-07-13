@@ -16,11 +16,13 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
+import { userInfo } from 'node:os'
 import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const PROVIDER_SCHEMA = 1
 const STATE_FILE = '.pglite-provider.json'
+const CLUSTER_FILE = '.pglite-provider-cluster.json'
 const VERSION = '18.3'
 const [command, ...commandArgs] = process.argv.slice(2)
 
@@ -67,6 +69,14 @@ async function runInitdb(args) {
   if (!existsSync(join(pgdata, 'PG_VERSION'))) {
     fail(`initdb: PGlite did not initialize ${pgdata}`)
   }
+  await writeFile(
+    join(pgdata, CLUSTER_FILE),
+    `${JSON.stringify({
+      schema: PROVIDER_SCHEMA,
+      bootstrapSuperuser: parsed.username,
+    }, null, 2)}\n`,
+    { mode: 0o600 },
+  )
   console.log(`PGlite PostgreSQL data directory initialized at ${pgdata}`)
 }
 
@@ -102,6 +112,7 @@ async function runPostgres(args) {
     32,
     Number.isInteger(configuredConnections) ? configuredConnections : 100,
   )
+  const cluster = await readClusterMetadata(pgdata)
 
   const { PGlitePostmaster } = await import(
     pathToFileURL(
@@ -122,7 +133,19 @@ async function runPostgres(args) {
     respectPostgresqlConfig: true,
     icuDataDir: new Blob([icuArchive]),
     artifact: config.artifact,
-    startParams: parsed.startParams,
+    // The Node socket frontend owns the host TCP/Unix listener.  PostgreSQL's
+    // listener is the PGlite virtual socket, so prevent the Wasm postmaster
+    // from also trying to materialize the configured host Unix socket inside
+    // each Worker's Emscripten filesystem.  The settings above have already
+    // been captured for PGliteSocketServer before applying these internal
+    // transport overrides.
+    startParams: [
+      ...parsed.startParams,
+      '-c',
+      'listen_addresses=127.0.0.1',
+      '-c',
+      'unix_socket_directories=',
+    ],
     privateMaximumMemory: config.privateMaximumMemory,
     globalMaximumMemory: config.globalMaximumMemory,
     workerFilesystem: {
@@ -172,6 +195,11 @@ async function runPostgres(args) {
   let reason = 'postmaster-exit'
   let postmasterExit
   try {
+    const readinessSession = await createSessionWhenReady(postmaster, {
+      username: cluster.bootstrapSuperuser,
+      database: 'postgres',
+    })
+    await readinessSession.close()
     const address = await socket.start()
     await writeLifecycle(pgdata, {
       schema: PROVIDER_SCHEMA,
@@ -312,7 +340,15 @@ async function stopServer(pgdata, mode, timeout, silent) {
   const deadline = Date.now() + timeout * 1_000
   while (Date.now() < deadline) {
     const lifecycle = await readLifecycle(pgdata, false)
-    if (!isProcessAlive(state.pid) && !lifecycle) return
+    // The foreground provider removes lifecycle state only after the
+    // postmaster, Workers, socket frontend, and result write have completed.
+    // Its PID can remain observable as a zombie until pg_regress reaps it;
+    // requiring kill(pid, 0) to fail here deadlocks that reap behind pg_ctl.
+    if (!lifecycle) return
+    if (!isProcessAlive(state.pid)) {
+      await rm(join(pgdata, STATE_FILE), { force: true })
+      return
+    }
     await delay(100)
   }
   fail(`pg_ctl: server did not shut down within ${timeout} seconds`)
@@ -320,6 +356,7 @@ async function stopServer(pgdata, mode, timeout, silent) {
 
 function parseInitdb(args) {
   let pgdata
+  let username
   const initdbArgs = []
   const valueOptions = new Set([
     '-E', '--encoding', '--locale', '--locale-provider', '--icu-locale',
@@ -338,11 +375,16 @@ function parseInitdb(args) {
     } else if (arg.startsWith('--pgdata=')) {
       pgdata = arg.slice('--pgdata='.length)
     } else if (valueOptions.has(arg)) {
-      initdbArgs.push(arg, requiredValue(args, ++i, arg))
+      const value = requiredValue(args, ++i, arg)
+      initdbArgs.push(arg, value)
+      if (arg === '-U' || arg === '--username') username = value
     } else if ([...valueOptions].some((name) =>
       name.startsWith('--') && arg.startsWith(`${name}=`),
     )) {
       initdbArgs.push(arg)
+      if (arg.startsWith('--username=')) {
+        username = arg.slice('--username='.length)
+      }
     } else if (flagOptions.has(arg)) {
       initdbArgs.push(arg)
     } else if (arg === '--waldir' || arg.startsWith('--waldir=') ||
@@ -355,7 +397,17 @@ function parseInitdb(args) {
     }
   }
   if (!pgdata) fail('initdb: data directory must be specified with -D/--pgdata')
-  return { pgdata, initdbArgs }
+  // Native initdb defaults the bootstrap superuser to the invoking OS user.
+  // PGlite otherwise defaults to "postgres", which makes pg_regress connect
+  // as the container user to a role that does not exist.
+  if (!username) {
+    username = process.env.USER || process.env.LOGNAME || userInfo().username
+    initdbArgs.push(
+      '-U',
+      username,
+    )
+  }
+  return { pgdata, initdbArgs, username }
 }
 
 function parsePostgres(args) {
@@ -557,6 +609,19 @@ async function writeLifecycle(pgdata, state) {
   await rename(temporary, path)
 }
 
+async function readClusterMetadata(pgdata) {
+  const path = join(pgdata, CLUSTER_FILE)
+  const metadata = JSON.parse(await readFile(path, 'utf8'))
+  if (
+    metadata.schema !== PROVIDER_SCHEMA ||
+    typeof metadata.bootstrapSuperuser !== 'string' ||
+    metadata.bootstrapSuperuser.length === 0
+  ) {
+    fail(`provider: invalid cluster metadata: ${path}`)
+  }
+  return metadata
+}
+
 async function writeClusterResult(result) {
   const directory = join(config.resultsRoot, 'clusters')
   await mkdir(directory, { recursive: true })
@@ -646,6 +711,20 @@ function maximumSample(left, right) {
 
 function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds))
+}
+
+async function createSessionWhenReady(postmaster, options) {
+  const deadline = Date.now() + 60_000
+  let lastError
+  while (Date.now() < deadline) {
+    try {
+      return await postmaster.createSession(options)
+    } catch (error) {
+      lastError = error
+      await delay(100)
+    }
+  }
+  throw lastError ?? new Error('PGlite postmaster did not become ready')
 }
 
 function fail(message) {

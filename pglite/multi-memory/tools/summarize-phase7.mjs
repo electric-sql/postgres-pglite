@@ -11,7 +11,7 @@ const repoRoot = resolve(repoRootArg)
 const out = resolve(outArg)
 const status = Number.parseInt(statusText, 10)
 const provider = join(out, 'provider')
-const clusterDirectory = join(out, 'results/clusters')
+const clusterDirectory = join(out, `results/raw-${target}/clusters`)
 let clusterFiles = []
 try {
   clusterFiles = (await readdir(clusterDirectory)).filter((name) =>

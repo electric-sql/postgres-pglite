@@ -18,7 +18,8 @@ const native = resolve(nativeArg)
 const pgRoot = join(repoRoot, 'postgres-pglite')
 const source = join(pgRoot, 'pglite/multi-memory/provider')
 const provider = join(phase7, 'provider')
-const resultsRoot = join(phase7, 'results')
+const target = process.env.PGLITE_PHASE7_TARGET ?? 'check'
+const resultsRoot = join(phase7, 'results', `raw-${target}`)
 const revision = execFileSync('git', ['-C', pgRoot, 'rev-parse', 'HEAD'], {
   encoding: 'utf8',
 }).trim()
@@ -66,6 +67,7 @@ const config = {
   globalMaximumMemory: 1024 * 1024 * 1024,
   resultsRoot,
   mounts: [
+    { root: join(phase6, 'icu'), path: '/pglite/icu' },
     { root: phase7, path: phase7 },
     { root: repoRoot, path: repoRoot },
     { root: '/tmp', path: '/tmp' },

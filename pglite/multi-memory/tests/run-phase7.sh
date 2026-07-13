@@ -18,6 +18,7 @@ perl -MIPC::Run -e 'print "Phase 7 TAP dependency: PASS\n"'
 test -f "${PHASE6}/artifact/postmaster.wasm"
 test -f "${PHASE6}/source-build/bin/pglite.js"
 test -f "${PHASE6}/source-build/bin/pglite.data"
+test -d "${PHASE6}/icu"
 
 PGLITE_BUILD_JOBS="${JOBS}" \
   "${MM_ROOT}/tests/build-native-regress-tools.sh" "${REPO_ROOT}" "${NATIVE}"
