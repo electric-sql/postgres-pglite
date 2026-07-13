@@ -3,8 +3,8 @@ set -euo pipefail
 
 REPO_ROOT=${1:?main PGlite repository root is required}
 MM_ROOT="${REPO_ROOT}/postgres-pglite/pglite/multi-memory"
-OUT="${MM_ROOT}/.out/phase4"
-SOURCE_OUT="${OUT}/source-build"
+OUT=${PGLITE_MULTI_MEMORY_PHASE4_INNER_OUT:-${MM_ROOT}/.out/phase4}
+SOURCE_OUT=${PGLITE_MULTI_MEMORY_PHASE4_SOURCE_OUT:-${OUT}/source-build}
 INPUT="${SOURCE_OUT}/bin/pglite.wasm"
 GLUE="${SOURCE_OUT}/bin/pglite.js"
 DATA="${SOURCE_OUT}/bin/pglite.data"
@@ -16,6 +16,7 @@ EXPORTS="${OUT}/source-function-exports.txt"
 test -f "${INPUT}"
 test -f "${GLUE}"
 test -f "${DATA}"
+mkdir -p "${OUT}"
 HASH=$(sha256sum "${INPUT}" | cut -d' ' -f1)
 FEATURES=(
   --enable-feature atomics
@@ -56,6 +57,7 @@ transform() {
     --inline-private-fast-path \
     --global-initial-pages 2 \
     --global-maximum-pages 16384 \
+    --wasm-shadow-stack-frame-bytes 1024 \
     --private-identity-export pgl_private_pointer \
     "${SUMMARIES[@]}"
 }

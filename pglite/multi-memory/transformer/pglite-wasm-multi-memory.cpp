@@ -30,8 +30,10 @@
 
 #include "cfg/cfg-traversal.h"
 #include "cfg/domtree.h"
+#include "ir/branch-utils.h"
 #include "ir/find_all.h"
 #include "ir/local-graph.h"
+#include "ir/names.h"
 #include "pass.h"
 #include "wasm-builder.h"
 #include "wasm-features.h"
@@ -44,12 +46,14 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.8.3";
+constexpr const char* ToolVersion = "0.8.4";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
 constexpr const char* ScopedMemoryKeepalive =
   "__pglite_scoped_memory_keepalive";
+constexpr const char* WasmShadowStackDepth =
+  "__pglite_wasm_shadow_stack_depth";
 constexpr uint64_t PrivateAperture = uint64_t(1) << 31;
 constexpr uint64_t GlobalAperture = uint64_t(1) << 30;
 constexpr uint64_t GlobalPointerTag = uint64_t(1) << 31;
@@ -74,6 +78,7 @@ struct Options {
   std::vector<uint64_t> directPrivateFunctionIndices;
   uint64_t globalInitialPages = UINT64_MAX;
   uint64_t globalMaximumPages = UINT64_MAX;
+  uint64_t wasmShadowStackFrameBytes = 0;
   bool inlinePrivateFastPath = false;
   bool privateOnlyOracle = false;
   bool profileFunctionEntries = false;
@@ -232,6 +237,7 @@ void usage(std::ostream& out) {
       << "      --enable-feature NAME         enable a missing input target feature\n"
       << "      --global-initial-pages N      default: private memory initial\n"
       << "      --global-maximum-pages N      default: private memory maximum\n"
+      << "      --wasm-shadow-stack-frame-bytes N  logical bytes per active Wasm frame\n"
       << "      --inline-private-fast-path    direct memory-0 arm at each site\n"
       << "      --private-only-oracle         retain direct memory-0 operations\n"
       << "      --profile-function-entries    import a profiling entry hook\n"
@@ -290,6 +296,9 @@ Options parseOptions(int argc, const char** argv) {
       options.globalInitialPages = parseUnsigned(take(arg.c_str()), arg.c_str());
     } else if (arg == "--global-maximum-pages") {
       options.globalMaximumPages = parseUnsigned(take(arg.c_str()), arg.c_str());
+    } else if (arg == "--wasm-shadow-stack-frame-bytes") {
+      options.wasmShadowStackFrameBytes =
+        parseUnsigned(take(arg.c_str()), arg.c_str());
     } else if (arg == "--inline-private-fast-path") {
       options.inlinePrivateFastPath = true;
     } else if (arg == "--private-only-oracle") {
@@ -387,6 +396,10 @@ Options parseOptions(int argc, const char** argv) {
     throw std::runtime_error(
       "--debug-provenance-assertions requires --provenance");
   }
+  if (options.wasmShadowStackFrameBytes > uint64_t(INT32_MAX)) {
+    throw std::runtime_error(
+      "--wasm-shadow-stack-frame-bytes must fit in a positive i32");
+  }
   return options;
 }
 
@@ -478,6 +491,7 @@ class Transformer {
   std::set<std::string> explicitPrivateParameters;
   std::map<std::string, std::string> privateCloneSources;
   uint64_t removedPrivateIdentityCalls = 0;
+  uint64_t wasmShadowStackInstrumentedFunctions = 0;
   Name memoryAccessProfileHook = Name("__pglite_profile_memory_access");
 
   static const std::vector<std::string>& memoryAccessProfileKinds() {
@@ -949,6 +963,183 @@ class Transformer {
     }
   }
 
+  Function* getExportedFunction(const char* exportName) {
+    auto* export_ = module.getExportOrNull(Name(exportName));
+    if (!export_ || export_->kind != ExternalKind::Function) {
+      throw std::runtime_error(
+        std::string("Wasm shadow stack requires function export ") +
+        exportName);
+    }
+    return module.getFunction(export_->value);
+  }
+
+  Expression* normalizeFunctionReturns(Function* function,
+                                       Builder& builder,
+                                       uint64_t labelIndex) {
+    auto branchNames =
+      BranchUtils::BranchAccumulator::get(function->body);
+    auto label = Names::getValidName(
+      "__pglite_shadow_return",
+      [&](Name candidate) { return !branchNames.count(candidate); },
+      labelIndex);
+
+    struct ReturnRewriter : public PostWalker<ReturnRewriter> {
+      Builder& builder;
+      Name label;
+
+      ReturnRewriter(Builder& builder, Name label)
+        : builder(builder), label(label) {}
+
+      void visitReturn(Return* curr) {
+        replaceCurrent(builder.makeBreak(label, curr->value));
+      }
+
+      void visitCall(Call* curr) {
+        if (curr->isReturn) {
+          throw std::runtime_error(
+            "Wasm shadow stack does not support return_call instructions");
+        }
+      }
+      void visitCallIndirect(CallIndirect* curr) {
+        if (curr->isReturn) {
+          throw std::runtime_error(
+            "Wasm shadow stack does not support return_call instructions");
+        }
+      }
+      void visitCallRef(CallRef* curr) {
+        if (curr->isReturn) {
+          throw std::runtime_error(
+            "Wasm shadow stack does not support return_call instructions");
+        }
+      }
+    } rewriter(builder, label);
+    rewriter.walk(function->body);
+    return builder.makeBlock(
+      label, {function->body}, function->getResults());
+  }
+
+  void addWasmShadowStack(const std::vector<Function*>& originals) {
+    if (options.wasmShadowStackFrameBytes == 0) {
+      return;
+    }
+
+    Builder builder(module);
+    Name depthName(WasmShadowStackDepth);
+    if (module.getGlobalOrNull(depthName)) {
+      throw std::runtime_error("reserved Wasm shadow-stack global exists");
+    }
+    module.addGlobal(builder.makeGlobal(depthName,
+                                        Type::i32,
+                                        builder.makeConst(int32_t(0)),
+                                        Builder::Mutable));
+
+    Function* cursor = getExportedFunction("pgl_stack_get_current");
+    if (cursor->getParams() != Type::none ||
+        cursor->getResults() != Type::i32) {
+      throw std::runtime_error(
+        "pgl_stack_get_current has an unexpected Wasm signature");
+    }
+    if (auto* emscriptenCursorExport =
+          module.getExportOrNull(Name("emscripten_stack_get_current"))) {
+      if (emscriptenCursorExport->kind == ExternalKind::Function &&
+          emscriptenCursorExport->value == cursor->name) {
+        throw std::runtime_error(
+          "pgl_stack_get_current was merged with Emscripten's stack cursor");
+      }
+    }
+
+    std::unordered_set<Function*> resetFunctions = {
+      getExportedFunction("pgl_longjmp"),
+      getExportedFunction("PostgresMainLoopOnce"),
+      getExportedFunction("PostgresMainLongJmp"),
+    };
+
+    uint64_t labelIndex = 0;
+    auto* cursorValue =
+      normalizeFunctionReturns(cursor, builder, labelIndex++);
+    cursor->body = builder.makeBinary(
+      SubInt32,
+      cursorValue,
+      builder.makeBinary(
+        MulInt32,
+        builder.makeGlobalGet(depthName, Type::i32),
+        builder.makeConst(
+          int32_t(options.wasmShadowStackFrameBytes))));
+
+    struct NonLeafFinder : public PostWalker<NonLeafFinder> {
+      bool found = false;
+
+      void visitCall(Call* curr) {
+        if (curr->target.toString().rfind(HelperPrefix, 0) != 0) {
+          found = true;
+        }
+      }
+      void visitCallIndirect(CallIndirect*) { found = true; }
+      void visitCallRef(CallRef*) { found = true; }
+    };
+
+    auto makeEnter = [&](bool reset) -> Expression* {
+      if (reset) {
+        return builder.makeGlobalSet(
+          depthName, builder.makeConst(int32_t(1)));
+      }
+      return builder.makeGlobalSet(
+        depthName,
+        builder.makeBinary(
+          AddInt32,
+          builder.makeGlobalGet(depthName, Type::i32),
+          builder.makeConst(int32_t(1))));
+    };
+    auto makeLeave = [&]() -> Expression* {
+      return builder.makeIf(
+        builder.makeBinary(
+          GtUInt32,
+          builder.makeGlobalGet(depthName, Type::i32),
+          builder.makeConst(int32_t(0))),
+        builder.makeGlobalSet(
+          depthName,
+          builder.makeBinary(
+            SubInt32,
+            builder.makeGlobalGet(depthName, Type::i32),
+            builder.makeConst(int32_t(1)))));
+    };
+
+    for (auto* function : originals) {
+      if (function == cursor) {
+        continue;
+      }
+      NonLeafFinder finder;
+      finder.walk(function->body);
+      bool reset = resetFunctions.count(function) != 0;
+      if (!finder.found && !reset) {
+        continue;
+      }
+
+      Type results = function->getResults();
+      if (results.isTuple()) {
+        throw std::runtime_error(
+          "Wasm shadow stack does not support multi-value functions");
+      }
+      auto* normalized =
+        normalizeFunctionReturns(function, builder, labelIndex++);
+      auto* enter = makeEnter(reset);
+      auto* leave = makeLeave();
+      if (results.isConcrete()) {
+        Index resultLocal = Builder::addVar(function, results);
+        function->body = builder.makeBlock(
+          {enter,
+           builder.makeLocalSet(resultLocal, normalized),
+           leave,
+           builder.makeLocalGet(resultLocal, results)},
+          results);
+      } else {
+        function->body =
+          builder.makeBlock({enter, normalized, leave}, Type::none);
+      }
+      ++wasmShadowStackInstrumentedFunctions;
+    }
+  }
+
   void addGlobalMemory() {
     if (module.memories.size() != 1) {
       throw std::runtime_error(
@@ -1159,6 +1350,10 @@ class Transformer {
         << "\"privateTag\":0,\"globalTag\":2,\"reservedTag\":3,"
         << "\"privateApertureBytes\":" << PrivateAperture << ','
         << "\"globalApertureBytes\":" << GlobalAperture << ','
+        << "\"wasmShadowStackFrameBytes\":"
+        << options.wasmShadowStackFrameBytes << ','
+        << "\"wasmShadowStackInstrumentedFunctions\":"
+        << wasmShadowStackInstrumentedFunctions << ','
         << "\"inputSHA256\":\"" << jsonEscape(options.inputSHA256) << "\","
         << "\"helperCount\":" << helperSpecs.size() << '}';
     return out.str();
@@ -1777,6 +1972,7 @@ public:
     removePrivateIdentityCalls(originals);
     addFunctionEntryProfiling(originals);
     addHelpers();
+    addWasmShadowStack(originals);
     addScopedMemoryKeepalive();
     audit();
     replaceSourceMapURL();
@@ -1841,6 +2037,10 @@ public:
     out << ']';
     out << ",\"removedPrivateIdentityCalls\":"
         << removedPrivateIdentityCalls;
+    out << ",\"wasmShadowStackFrameBytes\":"
+        << options.wasmShadowStackFrameBytes;
+    out << ",\"wasmShadowStackInstrumentedFunctions\":"
+        << wasmShadowStackInstrumentedFunctions;
     out << ",\"privateCloneExports\":[";
     for (size_t i = 0; i < options.privateCloneExports.size(); ++i) {
       if (i) {

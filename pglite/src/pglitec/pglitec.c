@@ -30,17 +30,133 @@
 #include <poll.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
+#include <dlfcn.h>
 
 #include "pglitec.h"
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
+#include <emscripten/stack.h>
 #else
 #define EMSCRIPTEN_KEEPALIVE
 /*  TODO: an include for libpglite */
 #endif
 
 volatile int is_pglite_active = 0;
+
+/*
+ * Emscripten's JS-backed filesystems expose directory children but omit the
+ * POSIX synthetic `.` and `..` entries.  Keep that host-filesystem fact in
+ * the PGlite libc boundary so PostgreSQL can preserve pg_ls_dir's contract.
+ */
+int
+pgl_readdir_includes_dot_entries(void)
+{
+	return 0;
+}
+
+#ifdef __PGLITE_POSTMASTER__
+/* Keep this wrapper distinct from Emscripten's public stack-cursor export. */
+static volatile uintptr_t pgl_stack_cursor_identity = 0;
+
+EMSCRIPTEN_KEEPALIVE __attribute__((noinline))
+uintptr_t
+pgl_stack_get_current(void)
+{
+	return emscripten_stack_get_current() + pgl_stack_cursor_identity;
+}
+#endif
+
+#ifdef __PGLITE_POSTMASTER__
+#define PGL_STATIC_DL_NOT_HANDLED ((void *) (intptr_t) -1)
+
+extern void *pgl_static_dlopen(const char *, int) __attribute__((weak));
+extern void *pgl_static_dlsym(void *, const char *) __attribute__((weak));
+extern int pgl_static_dlclose(void *) __attribute__((weak));
+
+/*
+ * Test-only postmaster artifacts can statically link extension objects before
+ * the multi-memory transform.  Keep the ordinary dynamic loader as the
+ * fallback while allowing the generated test registry to claim its modules.
+ */
+void *
+pgl_dlopen(const char *filename, int flags)
+{
+	void *		result;
+
+	if (pgl_static_dlopen != NULL)
+	{
+		result = pgl_static_dlopen(filename, flags);
+		if (result != PGL_STATIC_DL_NOT_HANDLED)
+			return result;
+	}
+	return dlopen(filename, flags);
+}
+
+void *
+pgl_dlsym(void *handle, const char *name)
+{
+	void *		result;
+
+	if (pgl_static_dlsym != NULL)
+	{
+		result = pgl_static_dlsym(handle, name);
+		if (result != PGL_STATIC_DL_NOT_HANDLED)
+			return result;
+	}
+	return dlsym(handle, name);
+}
+
+int
+pgl_dlclose(void *handle)
+{
+	int			result;
+
+	if (pgl_static_dlclose != NULL)
+	{
+		result = pgl_static_dlclose(handle);
+		if (result != PGL_SOCKET_NOT_HANDLED)
+			return result;
+	}
+	return dlclose(handle);
+}
+
+/*
+ * A statically linked module has no runtime dependency on its side-module
+ * file, but PostgreSQL deliberately stats the canonical filename before
+ * dlopen().  Preserve that loader contract for ordinary files and synthesize
+ * a stable per-instance identity only when the test registry owns the name.
+ */
+int
+pgl_dlopen_stat(const char *filename, struct stat *stat_buf)
+{
+	void	   *handle;
+	int			saved_errno;
+
+	if (stat(filename, stat_buf) == 0)
+		return 0;
+	saved_errno = errno;
+	if (pgl_static_dlopen == NULL)
+	{
+		errno = saved_errno;
+		return -1;
+	}
+	handle = pgl_static_dlopen(filename, RTLD_NOW | RTLD_GLOBAL);
+	if (handle == PGL_STATIC_DL_NOT_HANDLED)
+	{
+		errno = saved_errno;
+		return -1;
+	}
+
+	memset(stat_buf, 0, sizeof(*stat_buf));
+	stat_buf->st_mode = S_IFREG | 0555;
+	stat_buf->st_nlink = 1;
+	stat_buf->st_dev = (dev_t) 0x5047;
+	stat_buf->st_ino = (ino_t) (uintptr_t) handle;
+	stat_buf->st_size = 1;
+	return 0;
+}
+#endif
 
 /*
  * EXEC_BACKEND normally verifies the child executable by running `postgres
@@ -263,6 +379,20 @@ pgl_setPGliteActive(int newValue)
 	return current;
 }
 
+/*
+ * The ordinary PGlite API drives one extracted PostgreSQL loop iteration at
+ * a time.  A postmaster process Worker instead owns a normal blocking
+ * PostgreSQL process lifetime, so the unrolled-loop exit/longjmp protocol
+ * must be compile-time unreachable even if its legacy state word is changed.
+ */
+#ifndef __PGLITE_POSTMASTER__
+int
+pgl_uses_unrolled_main_loop(void)
+{
+	return is_pglite_active != 0;
+}
+#endif
+
 /* ========== Top level exception handling ==========
 *
 * In Postgres, the top level sigsetjmp handles exceptions encountered during executions
@@ -285,7 +415,8 @@ volatile bool send_ready_for_query = false;
 void		EMSCRIPTEN_KEEPALIVE
 pgl_longjmp(jmp_buf env, int val)
 {
-	if (is_pglite_active && memcmp(env, (void *) postgresmain_sigjmp_buf, sizeof(jmp_buf)) == 0)
+	if (pgl_uses_unrolled_main_loop() &&
+		memcmp(env, (void *) postgresmain_sigjmp_buf, sizeof(jmp_buf)) == 0)
 	{
 		/* reset this as it is expected */
 		if (!ignore_till_sync)
@@ -682,6 +813,51 @@ pgl_getpwuid(uid_t uid)
 	pw.pw_shell = shell;
 
 	return &pw;
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_getpwuid_r(uid_t uid, struct passwd *pwd, char *buffer,
+			   size_t buffer_size, struct passwd **result)
+{
+	struct passwd *source;
+	char	   *cursor = buffer;
+	size_t		name_size;
+	size_t		passwd_size;
+	size_t		gecos_size;
+	size_t		dir_size;
+	size_t		shell_size;
+	size_t		required;
+
+	if (pwd == NULL || buffer == NULL || result == NULL)
+		return EINVAL;
+	source = pgl_getpwuid(uid);
+	name_size = strlen(source->pw_name) + 1;
+	passwd_size = strlen(source->pw_passwd) + 1;
+	gecos_size = strlen(source->pw_gecos) + 1;
+	dir_size = strlen(source->pw_dir) + 1;
+	shell_size = strlen(source->pw_shell) + 1;
+	required = name_size + passwd_size + gecos_size + dir_size + shell_size;
+	if (required > buffer_size)
+	{
+		*result = NULL;
+		return ERANGE;
+	}
+
+	*pwd = *source;
+#define PGL_COPY_PASSWD_FIELD(field, field_size) \
+	do { \
+		memcpy(cursor, source->field, field_size); \
+		pwd->field = cursor; \
+		cursor += field_size; \
+	} while (0)
+	PGL_COPY_PASSWD_FIELD(pw_name, name_size);
+	PGL_COPY_PASSWD_FIELD(pw_passwd, passwd_size);
+	PGL_COPY_PASSWD_FIELD(pw_gecos, gecos_size);
+	PGL_COPY_PASSWD_FIELD(pw_dir, dir_size);
+	PGL_COPY_PASSWD_FIELD(pw_shell, shell_size);
+#undef PGL_COPY_PASSWD_FIELD
+	*result = pwd;
+	return 0;
 }
 
 /* ========== atexit functions ==========

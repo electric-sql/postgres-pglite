@@ -102,7 +102,7 @@ pglite-exported-functions:
 	sed 's/^/_/' \
 	> '/install/pglite/exported_functions.txt'
 
-pglite: $(OBJS)
+pglite: $(OBJS) $(PGLITE_EXTRA_OBJS)
 	$(CC) $(CFLAGS) $(call expand_subsys,$^) $(LDFLAGS) $(LIBS) $(POSTGRES_PGLITE_FLAGS) -o $@$(X)
 
 pglite-libc:

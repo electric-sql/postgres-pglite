@@ -27,6 +27,8 @@ test -f /.dockerenv || {
 REVISION=$(git -C "${PG_ROOT}" rev-parse HEAD)
 if [[ -f "${OUT}/manifest.json" && \
       -x "${BUILD}/src/test/regress/pg_regress" && \
+      -x "${BUILD}/src/test/isolation/pg_isolation_regress" && \
+      -x "${BUILD}/src/test/isolation/isolationtester" && \
       -x "${BUILD}/src/bin/psql/psql" && \
       -x "${BUILD}/src/bin/scripts/pg_isready" && \
       -x "${BUILD}/src/bin/pgbench/pgbench" && \
@@ -49,6 +51,8 @@ then
   export LD_LIBRARY_PATH="${BUILD}/src/interfaces/libpq${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
   test "$(uname -m)" = "${ARCHITECTURE}"
   test "$("${BUILD}/src/test/regress/pg_regress" --version)" = \
+    'pg_regress (PostgreSQL) 18.3'
+  test "$("${BUILD}/src/test/isolation/pg_isolation_regress" --version)" = \
     'pg_regress (PostgreSQL) 18.3'
   test "$("${BUILD}/src/bin/psql/psql" --version)" = \
     'psql (PostgreSQL) 18.3'
@@ -81,12 +85,15 @@ git -C "${PG_ROOT}" archive --format=tar "${REVISION}" \
 
 make -j"${JOBS}" -C "${BUILD}/src/interfaces/libpq" all
 make -j"${JOBS}" -C "${BUILD}/src/test/regress" pg_regress
+make -j"${JOBS}" -C "${BUILD}/src/test/isolation" all
 make -j"${JOBS}" -C "${BUILD}/src/bin/psql" all
-make -j"${JOBS}" -C "${BUILD}/src/bin/scripts" pg_isready
+make -j"${JOBS}" -C "${BUILD}/src/bin/scripts" all
 make -j"${JOBS}" -C "${BUILD}/src/bin/pgbench" all
 
 export LD_LIBRARY_PATH="${BUILD}/src/interfaces/libpq${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 test "$("${BUILD}/src/test/regress/pg_regress" --version)" = \
+  'pg_regress (PostgreSQL) 18.3'
+test "$("${BUILD}/src/test/isolation/pg_isolation_regress" --version)" = \
   'pg_regress (PostgreSQL) 18.3'
 test "$("${BUILD}/src/bin/psql/psql" --version)" = \
   'psql (PostgreSQL) 18.3'
@@ -107,7 +114,17 @@ fs.writeFileSync(output, `${JSON.stringify({
   postgresql: '18.3',
   host,
   architecture,
-  tools: ['libpq', 'psql', 'pg_isready', 'pgbench', 'pg_regress'],
+  tools: [
+    'libpq',
+    'psql',
+    'pg_isready',
+    'pgbench',
+    'pg_regress',
+    'pg_isolation_regress',
+    'isolationtester',
+    'createdb',
+    'dropdb',
+  ],
   sourceIsolation: 'git-archive',
 }, null, 2)}\n`)
 NODE

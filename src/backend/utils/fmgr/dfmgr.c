@@ -208,7 +208,12 @@ internal_load_library(const char *libname)
 		/*
 		 * Check for same files - different paths (ie, symlink or link)
 		 */
+		/* PGLITE: static postmaster modules use the libc loader abstraction. */
+#ifdef __PGLITE_POSTMASTER__
+		if (pgl_dlopen_stat(libname, &stat_buf) == -1)
+#else
 		if (stat(libname, &stat_buf) == -1)
+#endif
 			ereport(ERROR,
 					(errcode_for_file_access(),
 					 errmsg("could not access file \"%s\": %m",

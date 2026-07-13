@@ -63,6 +63,11 @@ if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
     PGLITE_CFLAGS="$PGLITE_CFLAGS -D__PGLITE_POSTMASTER__ \
 -I$(pwd)/pglite/src/pglitec -include $(pwd)/pglite/src/pglitec/pglitec.h"
     PGLITE_POSTMASTER_RECONFIGURE=true
+    # The forced PGlite libc header redirects the dynamic-loader boundary.
+    # Make does not otherwise notice a change to this injected header.
+    rm -f src/backend/utils/fmgr/dfmgr.o
+    rm -f src/backend/utils/misc/stack_depth.o
+    rm -f src/backend/postmaster/checkpointer.o
 fi
 
 # PGLITE_OTHER_FLAGS="-sUSE_PTHREADS=0 -fPIC -m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn"
@@ -70,13 +75,14 @@ fi
 
 # first build pglite-libc object WITHOUT the overriding flags
 # pushd pglite/src/pglitec && emcc -g --no-wasm-opt -gsource-map -static -fPIC -o pglitec.o -c pglitec.c && popd
-pushd pglite/src/pglitec && emcc $PGLITE_CFLAGS -static -fpic -o pglitec.o -c pglitec.c && popd
+pushd pglite/src/pglitec && emcc $PGLITE_CFLAGS -DPGLITEC_IMPLEMENTATION -static -fpic -o pglitec.o -c pglitec.c && popd
 
 # -Dread=pgl_read -Dwrite=pgl_write
 PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -D__PGLITE__ \
 -Dsystem=pgl_system -Dpopen=pgl_popen -Dpclose=pgl_pclose \
--Dgeteuid=pgl_geteuid -Dgetuid=pgl_getuid -Dgetpwuid=pgl_getpwuid \
+-Dgeteuid=pgl_geteuid -Dgetuid=pgl_getuid \
+-Dgetpwuid=pgl_getpwuid -Dgetpwuid_r=pgl_getpwuid_r \
 -Dexit=pgl_exit \
 -Dmunmap=pgl_munmap \
 -Dfcntl=pgl_fcntl \
@@ -207,6 +213,99 @@ POSTGRES_PGLITE_FLAGS="\
 $PGPRELOAD \
 -lnodefs.js -lidbfs.js"
 
+build_regression_test_modules() {
+    REGRESS_DIR="src/test/regress"
+    REGRESS_IMPORTS_DIR="$INSTALL_FOLDER/include/postgresql/emscripten/extension/imports"
+    rm -f "$REGRESS_DIR/regress.o" "$REGRESS_DIR/regress.so"
+    emmake make PORTNAME=emscripten \
+        CPPFLAGS="-DPg_magic_func=pgl_static_regress_Pg_magic_func" \
+        -C "$REGRESS_DIR" regress.so || \
+        { echo 'error: building core regression side module' ; exit 33; }
+    mkdir -p "$INSTALL_FOLDER/lib/postgresql" "$REGRESS_IMPORTS_DIR"
+    install -m 755 "$REGRESS_DIR/regress.so" \
+        "$INSTALL_FOLDER/lib/postgresql/regress.so"
+    "$LLVM_NM" --undefined-only "$REGRESS_DIR/regress.o" \
+        | awk '{print $2}' \
+        | sed '/^$/d' \
+        | sort -u > "$REGRESS_DIR/regress.undef.txt"
+    "$LLVM_NM" --defined-only "$REGRESS_DIR/regress.o" \
+        | awk '$2 ~ /^[TDB]$/ {print $3}' \
+        | sed '/^$/d' \
+        | sort -u > "$REGRESS_DIR/regress.defs.txt"
+    comm -23 "$REGRESS_DIR/regress.undef.txt" "$REGRESS_DIR/regress.defs.txt" \
+        > "$REGRESS_IMPORTS_DIR/regress.imports"
+
+    # Core regression exercises Datums backed by shared buffers. Ordinary
+    # Emscripten side modules only understand memory 0, so the test artifact
+    # links the core test module, PL/pgSQL, and encoding conversions into the
+    # main module before the multi-memory transform. Installed .so files stay
+    # present for PostgreSQL's normal filename/stat checks; the PGlite libc
+    # loader resolves these modules from the generated static registry.
+    rm -f src/pl/plpgsql/src/*.o src/pl/plpgsql/src/plpgsql.so
+    emmake make PORTNAME=emscripten \
+        CPPFLAGS="-DPg_magic_func=pgl_static_plpgsql_Pg_magic_func" \
+        -C src/pl/plpgsql/src install || \
+        { echo 'error: building static PL/pgSQL test module' ; exit 34; }
+
+    rm -f src/test/modules/test_dsa/test_dsa.o \
+        src/test/modules/test_dsa/test_dsa.so
+    emmake make PORTNAME=emscripten \
+        CPPFLAGS="-DPg_magic_func=pgl_static_test_dsa_Pg_magic_func" \
+        -C src/test/modules/test_dsa install || \
+        { echo 'error: building static DSA test module' ; exit 38; }
+
+    rm -f src/backend/replication/libpqwalreceiver/libpqwalreceiver.o \
+        src/backend/replication/libpqwalreceiver/libpqwalreceiver.so
+    emmake make PORTNAME=emscripten \
+        CPPFLAGS="-DPg_magic_func=pgl_static_libpqwalreceiver_Pg_magic_func -D_PG_init=pgl_static_libpqwalreceiver_PG_init" \
+        -C src/backend/replication/libpqwalreceiver all || \
+        { echo 'error: building static libpqwalreceiver test module' ; exit 39; }
+    rm -f src/interfaces/libpq/*.o src/interfaces/libpq/libpq.a
+    emmake make PORTNAME=emscripten \
+        CPPFLAGS="-Dpg_link_canary_is_frontend=pgl_static_libpq_link_canary_is_frontend" \
+        -C src/interfaces/libpq all || \
+        { echo 'error: building libpq for the static walreceiver' ; exit 40; }
+
+    STATIC_TEST_DIR="$INSTALL_FOLDER/pglite-static-tests"
+    STATIC_MODULE_ARGS=(
+        --module regress "$REGRESS_DIR/regress.o"
+        --module plpgsql src/pl/plpgsql/src/*.o
+        --module test_dsa src/test/modules/test_dsa/test_dsa.o
+        --module libpqwalreceiver \
+            src/backend/replication/libpqwalreceiver/libpqwalreceiver.o
+        --alias \
+            libpqwalreceiver:_PG_init=pgl_static_libpqwalreceiver_PG_init
+    )
+    for module_dir in src/backend/utils/mb/conversion_procs/*; do
+        [ -d "$module_dir" ] || continue
+        module_name=$(basename "$module_dir")
+        rm -f "$module_dir"/*.o "$module_dir"/*.so
+        emmake make PORTNAME=emscripten \
+            CPPFLAGS="-DPg_magic_func=pgl_static_${module_name}_Pg_magic_func" \
+            -C "$module_dir" install || \
+            { echo "error: building static $module_name conversion module" ; exit 35; }
+        module_objects=("$module_dir"/*.o)
+        [ -f "${module_objects[0]}" ] || continue
+        STATIC_MODULE_ARGS+=(
+            --module "$module_name" "${module_objects[@]}"
+        )
+    done
+    node22 pglite/multi-memory/tools/generate-static-test-modules.mjs \
+        --output-dir "$STATIC_TEST_DIR" \
+        --llvm-nm "$LLVM_NM" \
+        "${STATIC_MODULE_ARGS[@]}" || \
+        { echo 'error: generating static regression module registry' ; exit 36; }
+    emcc $PGLITE_CFLAGS -c \
+        "$STATIC_TEST_DIR/static-test-modules.c" \
+        -o "$STATIC_TEST_DIR/static-test-modules.o" || \
+        { echo 'error: compiling static regression module registry' ; exit 37; }
+    emcc $PGLITE_CFLAGS -c \
+        pglite/multi-memory/tools/static-libpq-encoding.c \
+        -o "$STATIC_TEST_DIR/static-libpq-encoding.o" || \
+        { echo 'error: compiling the static libpq encoding adapter' ; exit 41; }
+    PGLITE_STATIC_TEST_OBJECTS="$(tr '\n' ' ' < "$STATIC_TEST_DIR/objects.rsp") $STATIC_TEST_DIR/static-test-modules.o $STATIC_TEST_DIR/static-libpq-encoding.o $(pwd)/src/interfaces/libpq/libpq.a"
+}
+
 if [ "${PGLITE_PROFILING_FUNCS:-false}" = true ]; then
     echo "pglite: preserving optimized Wasm function names for profiling."
     POSTGRES_PGLITE_FLAGS="$POSTGRES_PGLITE_FLAGS --profiling-funcs"
@@ -225,6 +324,14 @@ if [ "${PGLITE_BACKEND_ONLY:-false}" = true ]; then
         rm -f src/include/utils/header-stamp
     fi
     emmake make PORTNAME=emscripten -C src/backend generated-headers || exit 54
+    if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
+        emmake make PORTNAME=emscripten -C src/backend/utils/fmgr \
+            dfmgr.o || exit 61
+        emmake make PORTNAME=emscripten -C src/backend/utils/misc \
+            stack_depth.o || exit 62
+        emmake make PORTNAME=emscripten -C src/backend/postmaster \
+            checkpointer.o || exit 63
+    fi
     if [ "${PGLITE_MULTI_MEMORY_PROVENANCE:-false}" = true ]; then
         emmake make PORTNAME=emscripten -C src/backend/executor \
             execExprInterp.o execTuples.o || exit 55
@@ -235,10 +342,14 @@ if [ "${PGLITE_BACKEND_ONLY:-false}" = true ]; then
         -j"${PGLITE_BUILD_JOBS:-}" all || exit 56
     emmake make PORTNAME=emscripten -C src/common \
         -j"${PGLITE_BUILD_JOBS:-}" all || exit 57
+    if [ "${PGLITE_WITH_REGRESSION_TESTS:-false}" = true ]; then
+        build_regression_test_modules
+    fi
     # /install is image-local, so rematerialize the Emscripten export list in
     # every backend-only container invocation from the persisted install tree.
     emmake make PORTNAME=emscripten -C src/backend \
         pglite-exported-functions || exit 58
+    PGLITE_EXTRA_OBJS="${PGLITE_STATIC_TEST_OBJECTS:-}" \
     POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" \
         emmake make PORTNAME=emscripten -C src/backend \
         -j"${PGLITE_BUILD_JOBS:-}" pglite || exit 59
@@ -257,6 +368,19 @@ if [ "${PGLITE_MULTI_MEMORY_PROVENANCE:-false}" = true ]; then
         || { echo 'error: generating headers for provenance-marked executor objects' ; exit 19; }
     emmake make PORTNAME=emscripten -C src/backend/executor \
         execExprInterp.o execTuples.o || { echo 'error: rebuilding provenance-marked executor objects' ; exit 20; }
+fi
+if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
+    # SUBDIROBJS tracks each directory's objfiles.txt rather than its member
+    # objects.  Rebuild the fenced dynamic-loader boundary explicitly after
+    # deleting it above, before the parallel top-level link can consume it.
+    emmake make PORTNAME=emscripten -C src/backend generated-headers \
+        || { echo 'error: generating headers for the postmaster loader boundary' ; exit 18; }
+    emmake make PORTNAME=emscripten -C src/backend/utils/fmgr dfmgr.o \
+        || { echo 'error: rebuilding the postmaster loader boundary' ; exit 22; }
+    emmake make PORTNAME=emscripten -C src/backend/utils/misc stack_depth.o \
+        || { echo 'error: rebuilding postmaster stack-depth checks' ; exit 24; }
+    emmake make PORTNAME=emscripten -C src/backend/postmaster checkpointer.o \
+        || { echo 'error: rebuilding postmaster checkpoint routing' ; exit 25; }
 fi
 emmake make PORTNAME=emscripten -j"${PGLITE_BUILD_JOBS:-}" || { echo 'error: emmake make PORTNAME=emscripten -j' ; exit 21; }
 emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 23; }
@@ -281,23 +405,7 @@ PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist \
 # acquire test-only code, while still using the normal extension-import export
 # path for the shared test build.
 if [ "${PGLITE_WITH_REGRESSION_TESTS:-false}" = true ]; then
-    REGRESS_DIR="src/test/regress"
-    REGRESS_IMPORTS_DIR="$INSTALL_FOLDER/include/postgresql/emscripten/extension/imports"
-    emmake make PORTNAME=emscripten -C "$REGRESS_DIR" regress.so || \
-        { echo 'error: building core regression side module' ; exit 33; }
-    mkdir -p "$INSTALL_FOLDER/lib/postgresql" "$REGRESS_IMPORTS_DIR"
-    install -m 755 "$REGRESS_DIR/regress.so" \
-        "$INSTALL_FOLDER/lib/postgresql/regress.so"
-    "$LLVM_NM" --undefined-only "$REGRESS_DIR/regress.o" \
-        | awk '{print $2}' \
-        | sed '/^$/d' \
-        | sort -u > "$REGRESS_DIR/regress.undef.txt"
-    "$LLVM_NM" --defined-only "$REGRESS_DIR/regress.o" \
-        | awk '$2 ~ /^[TDB]$/ {print $3}' \
-        | sed '/^$/d' \
-        | sort -u > "$REGRESS_DIR/regress.defs.txt"
-    comm -23 "$REGRESS_DIR/regress.undef.txt" "$REGRESS_DIR/regress.defs.txt" \
-        > "$REGRESS_IMPORTS_DIR/regress.imports"
+    build_regression_test_modules
 fi
 
 # Step 4: make and dist other extensions. Phase 3 deliberately validates the
@@ -318,5 +426,6 @@ fi
 emmake make PORTNAME=emscripten -j"${PGLITE_BUILD_JOBS:-}" -C src/backend pglite-exported-functions || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
+PGLITE_EXTRA_OBJS="${PGLITE_STATIC_TEST_OBJECTS:-}" \
 POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" emmake make PORTNAME=emscripten -C src/backend/ -j"${PGLITE_BUILD_JOBS:-}" pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
 emmake make PORTNAME=emscripten -C src/backend/ install-pglite || { echo 'emmake make PORTNAME=emscripten -C src/backend/ install-pglite' ; exit 62; }

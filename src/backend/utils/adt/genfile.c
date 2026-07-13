@@ -526,6 +526,22 @@ pg_ls_dir(PG_FUNCTION_ARGS)
 		/* Otherwise, we can let ReadDir() throw the error */
 	}
 
+#ifdef __PGLITE__
+	/* Emscripten VFS readdir omits the two POSIX synthetic entries. */
+	if (include_dot_dirs && !pgl_readdir_includes_dot_entries())
+	{
+		Datum		values[1];
+		bool		nulls[1] = {false};
+
+		values[0] = CStringGetTextDatum(".");
+		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc,
+							 values, nulls);
+		values[0] = CStringGetTextDatum("..");
+		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc,
+							 values, nulls);
+	}
+#endif
+
 	while ((de = ReadDir(dirdesc, location)) != NULL)
 	{
 		Datum		values[1];

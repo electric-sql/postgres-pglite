@@ -43,7 +43,7 @@ static char *stack_base_ptr = NULL;
 pg_stack_base_t
 set_stack_base(void)
 {
-#ifndef HAVE__BUILTIN_FRAME_ADDRESS
+#if !defined(HAVE__BUILTIN_FRAME_ADDRESS) && !defined(__PGLITE_POSTMASTER__)
 	char		stack_base;
 #endif
 	pg_stack_base_t old;
@@ -55,7 +55,16 @@ set_stack_base(void)
 	 * __builtin_frame_address() to avoid a warning about storing a local
 	 * variable's address in a long-lived variable.
 	 */
-#ifdef HAVE__BUILTIN_FRAME_ADDRESS
+#ifdef __PGLITE_POSTMASTER__
+	/*
+	 * LLVM's frame-address builtin does not provide a useful changing C-stack
+	 * address after Wasm lowering.  Ask the PGlite libc boundary for its stack
+	 * cursor.  The multi-memory post-link step augments that cursor with a
+	 * recoverable software count of active Wasm frames, while retaining the
+	 * real Emscripten linear-stack movement.
+	 */
+	stack_base_ptr = (char *) pgl_stack_get_current();
+#elif defined(HAVE__BUILTIN_FRAME_ADDRESS)
 	stack_base_ptr = __builtin_frame_address(0);
 #else
 	stack_base_ptr = &stack_base;
@@ -108,13 +117,20 @@ check_stack_depth(void)
 bool
 stack_is_too_deep(void)
 {
+#ifndef __PGLITE_POSTMASTER__
 	char		stack_top_loc;
+#endif
 	ssize_t		stack_depth;
 
 	/*
 	 * Compute distance from reference point to my local variables
 	 */
+#ifdef __PGLITE_POSTMASTER__
+	stack_depth = (ssize_t) ((uintptr_t) stack_base_ptr -
+							pgl_stack_get_current());
+#else
 	stack_depth = (ssize_t) (stack_base_ptr - &stack_top_loc);
+#endif
 
 	/*
 	 * Take abs value, since stacks grow up on some machines, down on others

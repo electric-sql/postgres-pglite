@@ -2,9 +2,11 @@
 #define PGLITEC_H
 
 #include <poll.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdint.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -18,6 +20,20 @@ extern "C" {
 int pgl_find_other_exec(const char *argv0, const char *target,
 						const char *version_string, char *result,
 						size_t result_size);
+int pgl_readdir_includes_dot_entries(void);
+struct passwd *pgl_getpwuid(uid_t uid);
+int pgl_getpwuid_r(uid_t uid, struct passwd *pwd, char *buffer,
+				   size_t buffer_size, struct passwd **result);
+#ifdef __PGLITE_POSTMASTER__
+uintptr_t pgl_stack_get_current(void);
+static inline int
+pgl_uses_unrolled_main_loop(void)
+{
+	return 0;
+}
+#else
+int pgl_uses_unrolled_main_loop(void);
+#endif
 
 pid_t pgl_spawn_backend(const char *child_kind, const char *parameter_file,
 						int client_socket);
@@ -30,6 +46,17 @@ int pgl_sigaction(int signal_number, const struct sigaction *action,
 				  struct sigaction *old_action);
 int pgl_sigprocmask(int how, const sigset_t *set, sigset_t *old_set);
 void pgl_dispatch_pending_signals(void);
+#ifdef __PGLITE_POSTMASTER__
+void *pgl_dlopen(const char *filename, int flags);
+void *pgl_dlsym(void *handle, const char *name);
+int pgl_dlclose(void *handle);
+int pgl_dlopen_stat(const char *filename, struct stat *stat_buf);
+#ifndef PGLITEC_IMPLEMENTATION
+#define dlopen pgl_dlopen
+#define dlsym pgl_dlsym
+#define dlclose pgl_dlclose
+#endif
+#endif
 int pgl_futex_wait(void *address, uint32_t expected, double timeout_ms);
 int pgl_futex_wake(void *address, int count);
 int pgl_socket(int domain, int type, int protocol);

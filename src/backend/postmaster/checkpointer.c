@@ -1009,7 +1009,9 @@ RequestCheckpoint(int flags)
 	/*
 	 * If in a standalone backend, just do it ourselves.
 	 */
-#ifndef __PGLITE__	
+#if defined(__PGLITE__) && !defined(__PGLITE_POSTMASTER__)
+	if (true)
+#else
 	if (!IsPostmasterEnvironment)
 #endif
 	{

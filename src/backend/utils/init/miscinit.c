@@ -1176,6 +1176,23 @@ UnlinkLockFiles(int status, Datum arg)
 {
 	ListCell   *l;
 
+	/*
+	 * PGLITE: every EXEC_BACKEND child has a fresh address space and must
+	 * never own the postmaster's data-directory or socket lock files.  Keep
+	 * the upstream invariant defensive at the destructive boundary: a child
+	 * that reaches this callback because of incorrectly restored exit state
+	 * must not remove the live postmaster's files.
+	 */
+#ifdef __PGLITE_POSTMASTER__
+	if (IsUnderPostmaster)
+	{
+		ereport(WARNING,
+				(errmsg("postmaster child attempted to remove postmaster lock files")));
+		lock_files = NIL;
+		return;
+	}
+#endif
+
 	foreach(l, lock_files)
 	{
 		char	   *curfile = (char *) lfirst(l);
