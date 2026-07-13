@@ -179,7 +179,7 @@ expect_failure invalid-private-return-export \
     --provenance \
     --private-return-export missing
 
-node "${ROOT}/tests/capability-tests.mjs" \
+node20 "${ROOT}/tests/capability-tests.mjs" \
   "${OUT}/capability.wasm" \
   --expect-reject
 node22 "${ROOT}/tests/capability-tests.mjs" "${OUT}/capability.wasm"

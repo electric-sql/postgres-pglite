@@ -1,4 +1,5 @@
-FROM electricsql/pglite-builder:3.1.74-7
+ARG PGLITE_BUILDER_IMAGE=electricsql/pglite-builder:3.1.74-7
+FROM ${PGLITE_BUILDER_IMAGE}
 
 ARG BINARYEN_COMMIT=52bc45fc34ec6868400216074744147e9d922685
 ARG NODE22_VERSION=22.13.0
@@ -53,6 +54,7 @@ RUN case "${TARGETARCH}" in \
     && mkdir -p /opt/node24 \
     && tar -xJf /tmp/node24.tar.xz --strip-components=1 -C /opt/node24 \
     && rm /tmp/node22.tar.xz /tmp/node24.tar.xz \
+    && ln -s "$(command -v node)" /usr/local/bin/node20 \
     && ln -s /opt/node22/bin/node /usr/local/bin/node22 \
     && ln -s /opt/node24/bin/node /usr/local/bin/node24 \
     && /opt/node22/bin/npm install --global --prefix /opt/node22 \

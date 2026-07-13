@@ -1,11 +1,29 @@
 ARG EMSDK_VER=3.1.74
-ARG BUILDPLATFORM
-# we only need to build on one platform, since we're interested in the WASM output
-# building on the native (BUILDPLATFORM) is much faster, so use that
-# remove "-arm64" suffix if building on x86_64
-FROM --platform=$BUILDPLATFORM emscripten/emsdk:${EMSDK_VER} AS builder
+ARG BUILDARCH
+ARG PGLITE_WASM_FEATURE_FLAGS=
+
+# Emscripten publishes arm64 as a separate tag. Select the native builder image
+# explicitly: --platform does not turn the amd64-only default tag into a native
+# image on Apple Silicon.
+FROM emscripten/emsdk:${EMSDK_VER} AS builder-base-amd64
+FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS builder-base-arm64
+FROM builder-base-${BUILDARCH} AS builder
+
+ARG BUILDARCH
+ARG PGLITE_WASM_FEATURE_FLAGS
+ARG PGLITE_BUILD_JOBS=4
+ENV EMCC_CFLAGS="${PGLITE_WASM_FEATURE_FLAGS}"
 
 ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
+
+# Fail closed if Docker selected a base image for a different host architecture.
+# This catches accidental Rosetta/QEMU builds before the expensive dependencies.
+RUN actual_arch="$(uname -m)"; \
+    case "${BUILDARCH}:${actual_arch}" in \
+      amd64:x86_64|arm64:aarch64) ;; \
+      *) echo "builder architecture mismatch: BUILDARCH=${BUILDARCH}, uname -m=${actual_arch}" >&2; exit 1 ;; \
+    esac; \
+    echo "PGlite dependency builder host: linux/${BUILDARCH} (${actual_arch})"
 
 RUN apt update && apt upgrade -y && apt install -y \
     xz-utils autoconf libtool automake pkgconf bison flex
@@ -25,10 +43,10 @@ WORKDIR /src
 ENV EMCC_COMMON_FLAGS="-O2 -fPIC -sWASM_BIGINT"
 
 WORKDIR /src
-RUN curl -L https://www.zlib.net/zlib-1.3.1.tar.gz | tar -xz
+RUN curl -L https://www.zlib.net/fossils/zlib-1.3.1.tar.gz | tar -xz
 WORKDIR /src/zlib-1.3.1
 RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --static --prefix=/install/libs
-RUN emmake make -j && emmake make install
+RUN emmake make -j "${PGLITE_BUILD_JOBS}" && emmake make install
 RUN ${LLVM_NM} /install/libs/lib/libz.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libz.exports
 
 WORKDIR /src
@@ -36,7 +54,7 @@ RUN curl -L https://gitlab.gnome.org/GNOME/libxml2/-/archive/v2.14.5/libxml2-v2.
 WORKDIR /src/libxml2-v2.14.5
 RUN ./autogen.sh --with-python=no --with-threads=no
 RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --enable-shared=no --enable-static=yes --with-python=no --prefix=/install/libs
-RUN emmake make -j && emmake make install
+RUN emmake make -j "${PGLITE_BUILD_JOBS}" && emmake make install
 # extract exported symbols - useful for passing them to emscripten as EXPORTED_FUNCTIONS 
 RUN ${LLVM_NM} /install/libs/lib/libxml2.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libxml2.exports
 
@@ -45,7 +63,7 @@ RUN curl -L https://gitlab.gnome.org/GNOME/libxslt/-/archive/v1.1.43/libxslt-v1.
 WORKDIR /src/libxslt-v1.1.43
 RUN ./autogen.sh --with-python=no
 RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --enable-shared=no --enable-static=yes --with-python=no --prefix=/install/libs --with-libxml-src=/src/libxml2-v2.14.5/ --with-pic=yes
-RUN emmake make -j && emmake make install
+RUN emmake make -j "${PGLITE_BUILD_JOBS}" && emmake make install
 # extract exported symbols - useful for passing them to emscripten as EXPORTED_FUNCTIONS 
 RUN ${LLVM_NM} /install/libs/lib/libxslt.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libxslt.exports
 
@@ -54,13 +72,13 @@ RUN curl -L https://github.com/openssl/openssl/releases/download/openssl-3.0.17/
 WORKDIR /src/openssl-3.0.17
 RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./config no-sse2 no-hw no-asm no-tests no-threads no-shared linux-generic32 --prefix=/install/libs
 RUN sed -i 's|^CROSS_COMPILE.*$|CROSS_COMPILE=|g' Makefile # see https://github.com/emscripten-core/emscripten/issues/19597#issue-1754476454
-RUN emmake make -j && emmake make install_sw install_ssldirs
+RUN emmake make -j "${PGLITE_BUILD_JOBS}" && emmake make install_sw install_ssldirs
 # extract exported symbols - useful for passing them to emscripten as EXPORTED_FUNCTIONS 
 RUN ${LLVM_NM} /install/libs/lib/libssl.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libssl.exports
 RUN ${LLVM_NM} /install/libs/lib/libcrypto.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libcrypto.exports
 
 WORKDIR /src
-RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
+RUN curl -L https://deb.debian.org/debian/pool/main/o/ossp-uuid/ossp-uuid_1.6.2.orig.tar.gz | tar xz
 # COPY . .
 # RUN tar xvf uuid-1.6.2.tar.gz
 WORKDIR /src/uuid-1.6.2
@@ -73,7 +91,7 @@ emconfigure ./configure \
   ac_cv_header_sys_ioctl_h=no \
   ac_cv_func_getifaddrs=no \
   --build=wasm32-unknown-linux-gnu --enable-shared=no --enable-static=yes --with-perl=no --with-perl-compat=no --prefix=/install/libs --with-php=no --with-pic=yes
-RUN emmake make -j && emmake make install || true # install tries to strip the wasm, but it doesnt recognize the format, so ignore atm
+RUN emmake make -j "${PGLITE_BUILD_JOBS}" && emmake make install || true # install tries to strip the wasm, but it doesnt recognize the format, so ignore atm
 WORKDIR /install/libs/lib
 RUN ln -s libuuid.a libossp-uuid.a # contrib extensions use -lossp-uuid
 RUN ${LLVM_NM} /install/libs/lib/libossp-uuid.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libossp-uuid.exports
@@ -87,7 +105,7 @@ WORKDIR /src/icu/source
 RUN mkdir /src/icu-native
 RUN cd /src/icu-native && \
     /src/icu/source/configure --disable-shared --enable-static --disable-tests --disable-samples && \
-    make -j
+    make -j "${PGLITE_BUILD_JOBS}"
 
 RUN mkdir -p /install/libs/share/icu/76.1/icudt76l/brkitr /install/libs/share/icu/76.1/icudt76l/coll /install/libs/share/icu/76.1/icudt76l/curr /install/libs/share/icu/76.1/icudt76l/lang /install/libs/share/icu/76.1/icudt76l/rbnf /install/libs/share/icu/76.1/icudt76l/region /install/libs/share/icu/76.1/icudt76l/translit /install/libs/share/icu/76.1/icudt76l/unit /install/libs/share/icu/76.1/icudt76l/zone
 
@@ -107,7 +125,7 @@ RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS} -std=c++17" \
     --disable-icuio \
     --disable-layoutex \
     --prefix=/install/libs
-RUN emmake make -j PKGDATA_OPTS="--without-assembly -O $(pwd)/data/icupkg.inc"
+RUN emmake make -j "${PGLITE_BUILD_JOBS}" PKGDATA_OPTS="--without-assembly -O $(pwd)/data/icupkg.inc"
 RUN emmake make install
 
 # for postgis
@@ -119,7 +137,7 @@ RUN emcmake cmake \
 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
 -DCMAKE_INSTALL_PREFIX=/install/libs \
 -DENABLE_THREADING=OFF -DBUILD_SHARED_LIBS=OFF -DDISABLE_EXTRA_LIBS=ON -DBUILD_APPS=OFF -DBUILD_TESTING=OFF ..
-RUN cmake --build . -j && cmake --build . --target install
+RUN cmake --build . -j "${PGLITE_BUILD_JOBS}" && cmake --build . --target install
 RUN ${LLVM_NM} /install/libs/lib/libjson-c.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libjson-c.exports
 
 WORKDIR /src
@@ -130,7 +148,7 @@ RUN emcmake cmake \
 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
 -DCMAKE_INSTALL_PREFIX=/install/libs \
 -DLIBDEFLATE_BUILD_SHARED_LIB=OFF -DLIBDEFLATE_BUILD_TESTS=OFF ..
-RUN cmake --build . -j && cmake --build . --target install
+RUN cmake --build . -j "${PGLITE_BUILD_JOBS}" && cmake --build . --target install
 RUN ${LLVM_NM} /install/libs/lib/libdeflate.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libdeflate.exports
 
 WORKDIR /src
@@ -145,7 +163,7 @@ RUN emconfigure ./configure \
 --with-zlib-include-dir=/install/libs/include --with-zlib-lib-dir=/install/libs/lib \
 --with-libdeflate-include-dir=/install/libs/include --with-libdeflate-lib-dir=/install/libs/lib/ \
 --prefix=/install/libs --enable-shared=no
-RUN emmake make -j && emmake make install
+RUN emmake make -j "${PGLITE_BUILD_JOBS}" && emmake make install
 RUN ${LLVM_NM} /install/libs/lib/libtiff.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libtiff.exports
 
 WORKDIR /src
@@ -154,9 +172,9 @@ RUN unzip sqlite-src-3500400.zip
 # RUN unzip sqlite-src-3500400.zip
 WORKDIR /src/sqlite-src-3500400
 RUN emconfigure ./configure --disable-shared --disable-threadsafe --prefix=/install/libs --with-emsdk
-RUN emmake make -j && emmake make install 
+RUN emmake make -j "${PGLITE_BUILD_JOBS}" && emmake make install
 # we need a sqlite3 executable for the system on which we're building (needed by https://proj.org/en/stable/install.html#build-requirements)
-RUN emmake make clean && ./configure --disable-shared && make -j && cp sqlite3 /tmp/sqlite3
+RUN emmake make clean && ./configure --disable-shared && make -j "${PGLITE_BUILD_JOBS}" && cp sqlite3 /tmp/sqlite3
 RUN ${LLVM_NM} /install/libs/lib/libsqlite3.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libsqlite3.exports
 
 WORKDIR /src
@@ -172,7 +190,7 @@ RUN emcmake cmake \
 -DSQLite3_INCLUDE_DIR=/install/libs/include/ -DSQLite3_LIBRARY=/install/libs/lib/libsqlite3.a -DEXE_SQLITE3=/tmp/sqlite3 \
 -DTIFF_LIBRARY=/install/libs/lib/libtiff.a -DTIFF_INCLUDE_DIR=/install/libs/include/ \
 -DENABLE_CURL=OFF -DBUILD_APPS=OFF -DBUILD_TESTING=OFF
-RUN cmake --build . -j && cmake --build . --target install
+RUN cmake --build . -j "${PGLITE_BUILD_JOBS}" && cmake --build . --target install
 RUN ${LLVM_NM} /install/libs/lib/libproj.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libproj.exports
 
 WORKDIR /src
@@ -184,7 +202,7 @@ RUN emcmake cmake \
 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
 -DCMAKE_INSTALL_PREFIX=/install/libs \
 -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DBUILD_GEOSOP=OFF ..
-RUN emmake make -j && emmake make install
+RUN emmake make -j "${PGLITE_BUILD_JOBS}" && emmake make install
 RUN ${LLVM_NM} /install/libs/lib/libgeos.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgeos.exports
 
 WORKDIR /src
@@ -208,9 +226,10 @@ RUN emcmake cmake \
 -DJSONC_LIBRARY=/install/libs/lib/libjson-c.a -DJSONC_INCLUDE_DIR=/install/libs/include/json-c -DGDAL_USE_JSONC=ON -DGDAL_USE_JSONC_INTERNAL=OFF \
 -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
 -DGDAL_USE_HDFS=OFF \
+-D_ICONV_SECOND_ARGUMENT_IS_NOT_CONST=ON \
 -DACCEPT_MISSING_SQLITE3_MUTEX_ALLOC:BOOL=ON \
 ..
-RUN cmake --build . -j && cmake --build . --target install
+RUN cmake --build . -j "${PGLITE_BUILD_JOBS}" && cmake --build . --target install
 RUN ${LLVM_NM} /install/libs/lib/libgdal.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libgdal.exports
 RUN find . -type f \( -name "*.o" -o -name "*.so" \) -exec ${LLVM_NM} --defined-only {} \; | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /tmp/libgdal.defs.txt
 RUN find . -name "*.o" -exec ${LLVM_NM} --undefined-only {} \; | awk '{print $2}' | sed '/^$/d' | sort -u > /tmp/libgdal.undef.txt
@@ -220,6 +239,9 @@ ARG TARGETARCH
 FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
 FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
 FROM base-${TARGETARCH} AS runner
+
+ARG PGLITE_WASM_FEATURE_FLAGS
+ENV EMCC_CFLAGS="${PGLITE_WASM_FEATURE_FLAGS}"
 
 SHELL ["/bin/bash", "-c"]
 
@@ -241,3 +263,5 @@ RUN chmod -R 777 /install
 
 # needed in building pglite.wasm
 ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
+
+LABEL org.opencontainers.image.pglite-wasm-feature-flags="${PGLITE_WASM_FEATURE_FLAGS}"

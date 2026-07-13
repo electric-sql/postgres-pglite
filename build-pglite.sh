@@ -11,6 +11,21 @@ INSTALL_FOLDER=${INSTALL_FOLDER:-"/pglite"}
 
 # build with optimizations by default aka release
 PGLITE_CFLAGS="-m32 -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types"
+PGLITE_WASM_FEATURE_FLAGS=""
+PGLITE_MEMORY_LDFLAGS="-sUSE_PTHREADS=0"
+if [ "${PGLITE_SHARED_MEMORY:-false}" = true ]; then
+    echo "pglite: enabling shared Wasm memory without the Emscripten pthread runtime."
+    PGLITE_WASM_FEATURE_FLAGS="-matomics -mbulk-memory"
+    PGLITE_CFLAGS="$PGLITE_CFLAGS $PGLITE_WASM_FEATURE_FLAGS"
+    PGLITE_MEMORY_LDFLAGS="$PGLITE_MEMORY_LDFLAGS -sSHARED_MEMORY=1 -sMAXIMUM_MEMORY=2GB"
+    PGLITE_SHARED_MEMORY_RECONFIGURE=true
+
+    # Feature flags are recorded on every object. Never reuse the ordinary
+    # single-user object graph for a shared-memory link.
+    if [ -f Makefile ]; then
+        emmake make clean || { echo 'error: cleaning ordinary Wasm objects for shared build' ; exit 8; }
+    fi
+fi
 if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
@@ -66,8 +81,9 @@ REF_FILE="build-pglite.sh"
 CONFIG_STATUS="config.status"
 RUN_CONFIGURE=false
 
-if [ "${PGLITE_MULTI_MEMORY_RECONFIGURE:-false}" = true ]; then
-    echo "multi-memory provenance flags require ./configure."
+if [ "${PGLITE_MULTI_MEMORY_RECONFIGURE:-false}" = true ] ||
+   [ "${PGLITE_SHARED_MEMORY_RECONFIGURE:-false}" = true ]; then
+    echo "multi-memory/shared build flags require ./configure."
     RUN_CONFIGURE=true
 elif [ ! -f "$CONFIG_STATUS" ]; then
     echo "$CONFIG_STATUS does not exist, need to run ./configure"
@@ -79,8 +95,8 @@ else
     echo "$CONFIG_STATUS exists and is newer than $REF_FILE. ./configure will NOT be run."
 fi
 
-PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0"
-PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
+PGLITE_LDFLAGS="-sWASM_BIGINT $PGLITE_MEMORY_LDFLAGS"
+PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 $PGLITE_WASM_FEATURE_FLAGS $PGLITE_MEMORY_LDFLAGS -Wno-unused-function"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
 EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack"
@@ -89,7 +105,7 @@ PGLITE_LDFLAGS_EX="\
 -sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sFORCE_FILESYSTEM=1 \
--sUSE_PTHREADS=0 \
+$PGLITE_MEMORY_LDFLAGS \
 -sEXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
 -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
@@ -147,31 +163,40 @@ if [ "${PGLITE_MULTI_MEMORY_PROVENANCE:-false}" = true ]; then
     emmake make PORTNAME=emscripten -C src/backend/executor \
         execExprInterp.o execTuples.o || { echo 'error: rebuilding provenance-marked executor objects' ; exit 20; }
 fi
-emmake make PORTNAME=emscripten -j || { echo 'error: emmake make PORTNAME=emscripten -j' ; exit 21; }
+emmake make PORTNAME=emscripten -j"${PGLITE_BUILD_JOBS:-}" || { echo 'error: emmake make PORTNAME=emscripten -j' ; exit 21; }
 emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 23; }
 
 # Step 3.1: make ported contrib extensions - do not install
-emmake make PORTNAME=emscripten -C contrib/ -j || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
+emmake make PORTNAME=emscripten -C contrib/ -j"${PGLITE_BUILD_JOBS:-}" || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
 
 # Step 3.2 pgcrypto - special case
-cd ./pglite && ./build-pgcrypto.sh && cd ../
+cd ./pglite && \
+    PGLITE_CFLAGS="${PGLITE_CFLAGS}" \
+    PGLITE_LDFLAGS_SL="${PGLITE_LDFLAGS_SL}" \
+    PGLITE_BUILD_JOBS="${PGLITE_BUILD_JOBS:-}" \
+    ./build-pgcrypto.sh && cd ../
 
 # Step 3.3: make dist contrib extensions - this will create an archive for each extension
-PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }
+PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist \
+    ARCHIVE_DIR="$INSTALL_FOLDER/extensions" || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }
 # the above will also create a file with the imports that each extension needs - we pass these as input in the next step for emscripten to keep alive
 
-# Step 4: make and dist other extensions
-SAVE_PATH=$PATH
-PATH=$PATH:$INSTALL_FOLDER/bin
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions -j || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite/other_extensions' ; exit 41; }
-# Step 4.1: special case: make PostGIS
-cd ./pglite/ && ./build-postgis.sh && cd ../
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist' ; exit 42; }
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist-postgis' ; exit 43; }
-PATH=$SAVE_PATH
+# Step 4: make and dist other extensions. Phase 3 deliberately validates the
+# complete core dependency/PostgreSQL/contrib world first; dynamic third-party
+# side modules remain separately gated.
+if [ "${PGLITE_SKIP_THIRD_PARTY_EXTENSIONS:-false}" != true ]; then
+    SAVE_PATH=$PATH
+    PATH=$PATH:$INSTALL_FOLDER/bin
+    emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions -j"${PGLITE_BUILD_JOBS:-}" || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite/other_extensions' ; exit 41; }
+    # Step 4.1: special case: make PostGIS
+    cd ./pglite/ && ./build-postgis.sh && cd ../
+    emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist' ; exit 42; }
+    emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist-postgis' ; exit 43; }
+    PATH=$SAVE_PATH
+fi
 
 # Step 5: get exported functions
-emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
+emmake make PORTNAME=emscripten -j"${PGLITE_BUILD_JOBS:-}" -C src/backend pglite-exported-functions || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
 
 # Step 6: make and install pglite
 PGROOT=$INSTALL_FOLDER
@@ -210,5 +235,5 @@ if [ "${PGLITE_PROFILING_FUNCS:-false}" = true ]; then
 fi
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
-POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" emmake make PORTNAME=emscripten -C src/backend/ -j pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
+POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" emmake make PORTNAME=emscripten -C src/backend/ -j"${PGLITE_BUILD_JOBS:-}" pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
 emmake make PORTNAME=emscripten -C src/backend/ install-pglite || { echo 'emmake make PORTNAME=emscripten -C src/backend/ install-pglite' ; exit 62; }

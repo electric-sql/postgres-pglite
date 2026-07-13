@@ -271,6 +271,45 @@ Phase 2 and Gate C are therefore complete. The multi-memory lowering is sound
 enough and fast enough to proceed to the Phase 3 shared/atomics world rebuild;
 generic dispatch remains the required fallback for every unproved pointer.
 
+## Phase 3: shared/atomics world
+
+Run the shared-world rebuild and single-process gate from the parent checkout:
+
+```sh
+pnpm wasm:multi-memory:phase3
+```
+
+The runner builds a separate pinned builder image in which every Wasm
+dependency is compiled with `-matomics -mbulk-memory`, then rebuilds PostgreSQL
+and its core/contrib side modules with `-sSHARED_MEMORY=1` and without the
+Emscripten pthread runtime. It transforms the resulting module twice, requires
+deterministic pre- and post-optimization output, and audits the binary memory
+descriptors and target-feature sections rather than trusting command-line
+flags alone.
+
+Runtime validation uses a disposable PGlite package containing the newly
+generated shared Emscripten glue and filesystem bundle. Both a matched shared
+classic module and the transformed module execute the normal PGlite SQL
+interface over separate `SharedArrayBuffer`-backed private and global memories;
+the global memory object is capped at the ABI's 1 GiB aperture, while the
+reserved scoped import aliases private memory for v1. A focused synthetic
+allocator additionally returns tagged global pointers and exercises ordinary,
+bulk, and atomic accesses. Every generated core/contrib side module is audited
+for a shared memory import, and `pgcrypto.so` is loaded by the SQL differential
+corpus. No tracked release artifact is replaced by this gate.
+
+The 13 July 2026 build/lowering POC gate passes from a clean rebuild on an
+Apple Silicon host. Docker selected the explicit `emscripten/emsdk:3.1.74-arm64`
+builder base; both the dependency builder and derived tools image inspect as
+`linux/arm64`, and the builder reports `aarch64` at runtime. The Wasm target and
+flags are unchanged. The gate rewrote 250,397 operations, audited 50 shared
+core/contrib side modules, passed the tagged global allocation test, and passed
+9/9 matched-classic differential SQL cases including `pgcrypto`. The optimized
+candidate is 13,687,920 bytes versus 9,785,130 bytes for the matched classic
+artifact. This is the Phase 3 POC gate, not the full phase exit: the design's
+explicit `pg_regress` requirement remains open until the regression harness is
+available.
+
 The native `pglite-wasm-multi-memory` tool accepts a conventional wasm32
 module with one imported memory. It preserves that private memory as index 0,
 adds `pglite.global_memory` as index 1 and the reserved

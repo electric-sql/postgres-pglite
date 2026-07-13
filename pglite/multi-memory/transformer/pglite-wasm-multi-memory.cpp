@@ -183,6 +183,19 @@ std::string jsonEscape(const std::string& input) {
   return out.str();
 }
 
+std::string abiFeatureNames(FeatureSet features) {
+  auto names = features.toString();
+  if (features.hasAtomics()) {
+    // Binaryen 121 uses its historical internal name "threads". The Wasm
+    // target_features convention and the PGlite ABI call this "atomics".
+    auto offset = names.find("threads");
+    if (offset != std::string::npos) {
+      names.replace(offset, std::string("threads").size(), "atomics");
+    }
+  }
+  return names;
+}
+
 uint64_t parseUnsigned(const std::string& value, const char* option) {
   size_t used = 0;
   uint64_t result = 0;
@@ -883,6 +896,11 @@ class Transformer {
     };
     addMemoryImport(globalMemory, options.globalImportBase);
     addMemoryImport(scopedMemory, options.scopedImportBase);
+    // The scoped import is reserved in v1 and therefore has no dereferences
+    // yet. Keep it observable so Binaryen's -O3 module DCE cannot remove the
+    // third ABI memory before the host aliases it to private memory.
+    module.addExport(
+      Builder::makeExport(scopedMemory, scopedMemory, ExternalKind::Memory));
     module.features.setMultiMemory();
     if (privateMem->shared) {
       module.features.setAtomics();
@@ -1008,7 +1026,8 @@ class Transformer {
       out << ']';
     }
     out << ','
-        << "\"features\":\"" << jsonEscape(module.features.toString()) << "\","
+        << "\"features\":\"" << jsonEscape(abiFeatureNames(module.features))
+        << "\","
         << "\"featureBits\":" << uint32_t(module.features) << ','
         << "\"privateMemory\":\"" << jsonEscape(privateMemory.toString())
         << "\","
@@ -2213,7 +2232,17 @@ void Rewriter::visitDataDrop(DataDrop*) {
 void enableInputFeatures(Module& module, const Options& options) {
   for (const auto& requested : options.inputFeatures) {
     bool found = false;
+    // Binaryen 121 calls the atomics feature "threads" internally, while the
+    // WebAssembly target_features convention and our CLI use "atomics". Keep
+    // the public spelling aligned with the emitted Wasm metadata.
+    if (requested == "atomics") {
+      module.features.setAtomics();
+      found = true;
+    }
     for (uint32_t bit = 1; bit <= FeatureSet::CallIndirectOverlong; bit <<= 1) {
+      if (found) {
+        break;
+      }
       auto feature = FeatureSet::Feature(bit);
       if (FeatureSet::toString(feature) == requested) {
         module.features.set(feature);
