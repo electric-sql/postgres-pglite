@@ -78,6 +78,10 @@
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
 #include "utils/typcache.h"
+
+#ifdef __PGLITE_MULTI_MEMORY__
+#include "pglite_provenance.h"
+#endif
 #include "utils/xml.h"
 
 /*
@@ -99,6 +103,38 @@
  * EEO_NEXT - increment 'op' and jump to correct next step type.
  * EEO_JUMP - jump to the specified step number within the current expression.
  */
+#ifdef __PGLITE_MULTI_MEMORY__
+/*
+ * ExprState steps are backend-private and non-null while the interpreter
+ * runs. Mark at each dispatch so the post-linker sees the fact after the
+ * loop-carried op update. Slot payload pointers may refer to shared pages.
+ */
+#define EEO_PRIVATE_OP()		(op = PGLITE_PRIVATE_POINTER(op))
+#define EEO_FETCH_VAR(slot, attnum) \
+	do { \
+		TupleTableSlot *private_slot = PGLITE_PRIVATE_POINTER(slot); \
+		Datum *private_values = \
+			PGLITE_PRIVATE_POINTER(private_slot->tts_values); \
+		bool *private_isnull = \
+			PGLITE_PRIVATE_POINTER(private_slot->tts_isnull); \
+		Datum *private_value = \
+			PGLITE_PRIVATE_POINTER(private_values + (attnum)); \
+		bool *private_null = \
+			PGLITE_PRIVATE_POINTER(private_isnull + (attnum)); \
+		Datum *private_resvalue = PGLITE_PRIVATE_POINTER(op->resvalue); \
+		bool *private_resnull = PGLITE_PRIVATE_POINTER(op->resnull); \
+		*private_resvalue = *private_value; \
+		*private_resnull = *private_null; \
+	} while (0)
+#else
+#define EEO_PRIVATE_OP()		((void) 0)
+#define EEO_FETCH_VAR(slot, attnum) \
+	do { \
+		*op->resvalue = (slot)->tts_values[attnum]; \
+		*op->resnull = (slot)->tts_isnull[attnum]; \
+	} while (0)
+#endif
+
 #if defined(EEO_USE_COMPUTED_GOTO)
 
 /* struct for jump target -> opcode lookup table */
@@ -116,14 +152,22 @@ static ExprEvalOpLookup reverse_dispatch_table[EEOP_LAST];
 
 #define EEO_SWITCH()
 #define EEO_CASE(name)		CASE_##name:
-#define EEO_DISPATCH()		goto *((void *) op->opcode)
+#define EEO_DISPATCH() \
+	do { \
+		EEO_PRIVATE_OP(); \
+		goto *((void *) op->opcode); \
+	} while (0)
 #define EEO_OPCODE(opcode)	((intptr_t) dispatch_table[opcode])
 
 #else							/* !EEO_USE_COMPUTED_GOTO */
 
 #define EEO_SWITCH()		starteval: switch ((ExprEvalOp) op->opcode)
 #define EEO_CASE(name)		case name:
-#define EEO_DISPATCH()		goto starteval
+#define EEO_DISPATCH() \
+	do { \
+		EEO_PRIVATE_OP(); \
+		goto starteval; \
+	} while (0)
 #define EEO_OPCODE(opcode)	(opcode)
 
 #endif							/* EEO_USE_COMPUTED_GOTO */
@@ -604,6 +648,12 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 	Assert(state != NULL);
 #endif							/* EEO_USE_COMPUTED_GOTO */
 
+#ifdef __PGLITE_MULTI_MEMORY__
+	/* Interpreter control objects are non-null and backend-private. */
+	state = PGLITE_PRIVATE_POINTER(state);
+	econtext = PGLITE_PRIVATE_POINTER(econtext);
+#endif
+
 	/* setup state */
 	op = state->steps;
 	resultslot = state->resultslot;
@@ -687,8 +737,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			 * have an Assert to check that that did happen.
 			 */
 			Assert(attnum >= 0 && attnum < innerslot->tts_nvalid);
-			*op->resvalue = innerslot->tts_values[attnum];
-			*op->resnull = innerslot->tts_isnull[attnum];
+			EEO_FETCH_VAR(innerslot, attnum);
 
 			EEO_NEXT();
 		}
@@ -700,8 +749,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			/* See EEOP_INNER_VAR comments */
 
 			Assert(attnum >= 0 && attnum < outerslot->tts_nvalid);
-			*op->resvalue = outerslot->tts_values[attnum];
-			*op->resnull = outerslot->tts_isnull[attnum];
+			EEO_FETCH_VAR(outerslot, attnum);
 
 			EEO_NEXT();
 		}
@@ -713,8 +761,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			/* See EEOP_INNER_VAR comments */
 
 			Assert(attnum >= 0 && attnum < scanslot->tts_nvalid);
-			*op->resvalue = scanslot->tts_values[attnum];
-			*op->resnull = scanslot->tts_isnull[attnum];
+			EEO_FETCH_VAR(scanslot, attnum);
 
 			EEO_NEXT();
 		}
@@ -726,8 +773,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			/* See EEOP_INNER_VAR comments */
 
 			Assert(attnum >= 0 && attnum < oldslot->tts_nvalid);
-			*op->resvalue = oldslot->tts_values[attnum];
-			*op->resnull = oldslot->tts_isnull[attnum];
+			EEO_FETCH_VAR(oldslot, attnum);
 
 			EEO_NEXT();
 		}
@@ -739,8 +785,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			/* See EEOP_INNER_VAR comments */
 
 			Assert(attnum >= 0 && attnum < newslot->tts_nvalid);
-			*op->resvalue = newslot->tts_values[attnum];
-			*op->resnull = newslot->tts_isnull[attnum];
+			EEO_FETCH_VAR(newslot, attnum);
 
 			EEO_NEXT();
 		}
@@ -2800,17 +2845,45 @@ ExecJustHashInnerVarWithIV(ExprState *state, ExprContext *econtext,
 static pg_attribute_always_inline Datum
 ExecJustHashVarImpl(ExprState *state, TupleTableSlot *slot, bool *isnull)
 {
-	ExprEvalStep *fetchop = &state->steps[0];
-	ExprEvalStep *var = &state->steps[1];
-	ExprEvalStep *hashop = &state->steps[2];
-	FunctionCallInfo fcinfo = hashop->d.hashdatum.fcinfo_data;
-	int			attnum = var->d.var.attnum;
+	ExprEvalStep *fetchop;
+	ExprEvalStep *var;
+	ExprEvalStep *hashop;
+	FunctionCallInfo fcinfo;
+	Datum	   *values;
+	bool	   *nulls;
+	Datum	   *value;
+	bool	   *null;
+	int			attnum;
+
+#ifdef __PGLITE_MULTI_MEMORY__
+	state = PGLITE_PRIVATE_POINTER(state);
+	slot = PGLITE_PRIVATE_POINTER(slot);
+	isnull = PGLITE_PRIVATE_POINTER(isnull);
+#endif
+	fetchop = &state->steps[0];
+	var = &state->steps[1];
+	hashop = &state->steps[2];
+	fcinfo = hashop->d.hashdatum.fcinfo_data;
+	values = slot->tts_values;
+	nulls = slot->tts_isnull;
+#ifdef __PGLITE_MULTI_MEMORY__
+	fcinfo = PGLITE_PRIVATE_POINTER(fcinfo);
+	values = PGLITE_PRIVATE_POINTER(values);
+	nulls = PGLITE_PRIVATE_POINTER(nulls);
+#endif
+	attnum = var->d.var.attnum;
+	value = values + attnum;
+	null = nulls + attnum;
+#ifdef __PGLITE_MULTI_MEMORY__
+	value = PGLITE_PRIVATE_POINTER(value);
+	null = PGLITE_PRIVATE_POINTER(null);
+#endif
 
 	CheckOpSlotCompatibility(fetchop, slot);
 	slot_getsomeattrs(slot, fetchop->d.fetch.last_var);
 
-	fcinfo->args[0].value = slot->tts_values[attnum];
-	fcinfo->args[0].isnull = slot->tts_isnull[attnum];
+	fcinfo->args[0].value = *value;
+	fcinfo->args[0].isnull = *null;
 
 	*isnull = false;
 

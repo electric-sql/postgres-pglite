@@ -25,6 +25,7 @@
 #include <sys/time.h>
 #include <setjmp.h>
 #include <string.h>
+#include <stdint.h>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -34,6 +35,20 @@
 #endif
 
 volatile int is_pglite_active = 0;
+
+/*
+ * Explicit private-pointer identity for the multi-memory transformer. Keep
+ * this out of line so the marker survives ordinary per-translation-unit LLVM
+ * optimization. The post-linker removes release calls after consuming their
+ * provenance; debug transforms retain this check.
+ */
+void *EMSCRIPTEN_KEEPALIVE __attribute__((noinline))
+pgl_private_pointer(void *pointer) {
+	if ((intptr_t) pointer <= 0) {
+		__builtin_trap();
+	}
+	return pointer;
+}
 
 void EMSCRIPTEN_KEEPALIVE clear_setitimer(void) {
     struct itimerval zero = {{0, 0}, {0, 0}};

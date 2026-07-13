@@ -157,6 +157,45 @@ pointer provenance after loads from pointer-bearing structures, especially in
 executor, compression, tuple, and comparison loops. The next step is targeted
 root/field metadata (or an LLVM provenance pass), not more clone entries.
 
+## Phase 2C: checked source provenance and loop specialization
+
+Run the source-provenance build and repeated performance gate from the parent
+PGlite checkout:
+
+```sh
+pnpm wasm:multi-memory:phase2c
+```
+
+The PGlite libc exposes a checked private-pointer identity and the PostgreSQL
+fork uses small `__PGLITE_MULTI_MEMORY__` fences at measured executor hot
+paths. Release transformation consumes and removes these identities. Debug
+transformation can retain their signed-private checks. Parameter-wide facts
+are accepted only when the marker assignment dominates every other read in
+the Binaryen control-flow graph; a Phase 0 conditional-marker test prevents a
+path-local assertion from becoming a function-wide proof.
+
+The source annotations keep shared tuple payloads generic. They specialize
+backend-private expression state, slot control and deformation arrays, and use
+three compact private tuple-deformation loops selected by one payload-tag
+check. Dynamically indexed cells receive their own checked identity instead
+of assuming that arbitrary integer arithmetic preserves a pointer domain. The
+matched classic artifact is produced from the identical source Wasm by
+removing identity calls without applying the multi-memory rewrite.
+
+The cleaned 13 July 2026 result passes the Phase 2C performance target in all
+three independent series. The worst ratios were 1.303x, 1.281x, and 1.264x.
+Taking the conservative maximum per workload gives 1.242x recursive, 1.303x
+indexed aggregate, and 1.212x pgbench-style throughput. Differential SQL
+passes 9/9 cases, both the pre-optimization and `wasm-opt -O3` outputs are
+byte-for-byte deterministic, and Phase 0 remains green. The candidate has
+36,664 direct loads and 91,664 direct stores; 202,486 loads and 63,412 stores
+remain generic. It is 1.414x the matched classic artifact size.
+
+This passes the bounded Phase 2C performance rescue. It does not by itself
+complete Phase 2: the pointer-bearing JavaScript import/view audit and host ABI
+hardening in Phase 2E remain required before the Phase 2F exit checkpoint or
+postmaster work.
+
 The native `pglite-wasm-multi-memory` tool accepts a conventional wasm32
 module with one imported memory. It preserves that private memory as index 0,
 adds `pglite.global_memory` as index 1 and the reserved

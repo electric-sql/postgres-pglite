@@ -95,11 +95,21 @@ pglite-wasm-multi-memory "${OUT}/provenance.wasm" \
   --global-maximum-pages 16 \
   --provenance \
   --private-return-export palloc \
+  --private-identity-export pgl_private_pointer \
   --private-clone-export unknown:0 \
   --private-clone-export loop:0
 node22 "${ROOT}/tests/provenance-tests.mjs" \
   "${OUT}/provenance.multi.wasm" \
   "${OUT}/provenance.report.json"
+
+pglite-wasm-multi-memory "${OUT}/provenance.wasm" \
+  -o "${OUT}/provenance.stripped.wasm" \
+  --report "${OUT}/provenance.stripped.report.json" \
+  --strip-private-identities-only \
+  --private-identity-export pgl_private_pointer
+node22 "${ROOT}/tests/strip-identity-tests.mjs" \
+  "${OUT}/provenance.stripped.wasm" \
+  "${OUT}/provenance.stripped.report.json"
 
 wasm-opt "${ROOT}/tests/capability.wat" \
   -o "${OUT}/capability.wasm" \

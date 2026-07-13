@@ -7,6 +7,11 @@
     (local.get $address)
   )
 
+  (func $private_identity (export "pgl_private_pointer")
+    (param $address i32) (result i32)
+    (local.get $address)
+  )
+
   (func $internal (param $address i32) (result i32)
     (i32.load (local.get $address))
   )
@@ -32,6 +37,31 @@
   )
 
   (func (export "unknown") (param $address i32) (result i32)
+    (i32.load (local.get $address))
+  )
+
+  (func (export "marked") (param $address i32) (result i32)
+    (i32.load (call $private_identity (local.get $address)))
+  )
+
+  (func $marked_parameter (export "marked_parameter")
+    (param $address i32) (result i32)
+    (local.set $address
+      (call $private_identity (local.get $address))
+    )
+    (i32.load (local.get $address))
+  )
+
+  ;; A conditional marker must not classify the parameter for the whole body.
+  (func (export "conditional_marked")
+    (param $address i32) (param $mark i32) (result i32)
+    (if (local.get $mark)
+      (then
+        (local.set $address
+          (call $private_identity (local.get $address))
+        )
+      )
+    )
     (i32.load (local.get $address))
   )
 

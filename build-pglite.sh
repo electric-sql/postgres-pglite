@@ -22,6 +22,17 @@ else
     unset DEBUG
 fi
 
+if [ "${PGLITE_MULTI_MEMORY_PROVENANCE:-false}" = true ]; then
+    echo "pglite: enabling explicit multi-memory provenance markers."
+    PGLITE_CFLAGS="$PGLITE_CFLAGS -D__PGLITE_MULTI_MEMORY__ -I$(pwd)/pglite/src/pglitec"
+    PGLITE_MULTI_MEMORY_RECONFIGURE=true
+    # Make does not track command-line flags. Recompile the fenced source that
+    # consumes the PGlite libc marker and force the final main-module relink.
+    rm -f src/backend/executor/execExprInterp.o
+    rm -f src/backend/executor/execTuples.o
+    rm -f src/backend/pglite.js src/backend/pglite.wasm src/backend/pglite.data
+fi
+
 # PGLITE_OTHER_FLAGS="-sUSE_PTHREADS=0 -fPIC -m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn"
 # PGLITE_CFLAGS="$PGLITE_CFLAGS"
 
@@ -55,7 +66,10 @@ REF_FILE="build-pglite.sh"
 CONFIG_STATUS="config.status"
 RUN_CONFIGURE=false
 
-if [ ! -f "$CONFIG_STATUS" ]; then
+if [ "${PGLITE_MULTI_MEMORY_RECONFIGURE:-false}" = true ]; then
+    echo "multi-memory provenance flags require ./configure."
+    RUN_CONFIGURE=true
+elif [ ! -f "$CONFIG_STATUS" ]; then
     echo "$CONFIG_STATUS does not exist, need to run ./configure"
     RUN_CONFIGURE=true
 elif [ "$REF_FILE" -nt "$CONFIG_STATUS" ]; then
@@ -122,6 +136,13 @@ else
 fi
 
 # Step 2: make and install all
+if [ "${PGLITE_MULTI_MEMORY_PROVENANCE:-false}" = true ]; then
+    # The backend's parallel top-level rule can start its link before noticing
+    # a manually removed subdirectory object, so rebuild the fenced object
+    # explicitly before entering the parallel build.
+    emmake make PORTNAME=emscripten -C src/backend/executor \
+        execExprInterp.o execTuples.o || { echo 'error: rebuilding provenance-marked executor objects' ; exit 20; }
+fi
 emmake make PORTNAME=emscripten -j || { echo 'error: emmake make PORTNAME=emscripten -j' ; exit 21; }
 emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 23; }
 
@@ -149,7 +170,7 @@ PATH=$SAVE_PATH
 emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
 
 # Step 6: make and install pglite
-PGROOT=/pglite
+PGROOT=$INSTALL_FOLDER
 # PG_IMPORTS_DIR=$PGROOT/imports
 PGPRELOAD="\
 --preload-file $(pwd)/pglite/static/PGPASSFILE@/home/postgres/.pgpass \

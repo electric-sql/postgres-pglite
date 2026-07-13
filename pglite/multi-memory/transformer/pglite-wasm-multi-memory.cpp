@@ -19,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -27,6 +28,8 @@
 #include <utility>
 #include <vector>
 
+#include "cfg/cfg-traversal.h"
+#include "cfg/domtree.h"
 #include "ir/find_all.h"
 #include "ir/local-graph.h"
 #include "pass.h"
@@ -41,7 +44,7 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.6.0";
+constexpr const char* ToolVersion = "0.7.0";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
@@ -61,6 +64,7 @@ struct Options {
   std::string scopedImportBase = "scoped_memory";
   std::vector<std::string> inputFeatures;
   std::vector<std::string> privateReturnExports;
+  std::vector<std::string> privateIdentityExports;
   std::vector<std::string> privateCloneExports;
   std::vector<std::string> privateCloneFunctions;
   std::vector<uint64_t> directPrivateFunctionIndices;
@@ -70,6 +74,8 @@ struct Options {
   bool privateOnlyOracle = false;
   bool profileFunctionEntries = false;
   bool provenance = false;
+  bool stripPrivateIdentitiesOnly = false;
+  bool debugProvenanceAssertions = false;
   bool emitText = false;
 };
 
@@ -214,8 +220,11 @@ void usage(std::ostream& out) {
       << "      --direct-private-function-index N  diagnostic direct function\n"
       << "      --provenance                  enable sound direct-access proofs\n"
       << "      --private-return-export NAME  provenance summary (repeatable)\n"
+      << "      --private-identity-export NAME  checked identity marker\n"
       << "      --private-clone-export SPEC   guarded clone NAME:PARAM,...\n"
       << "      --private-clone-function SPEC guarded internal NAME:PARAM,...\n"
+      << "      --strip-private-identities-only  matched classic baseline\n"
+      << "      --debug-provenance-assertions keep checked marker calls\n"
       << "  -S, --emit-text                   emit WAT instead of binary\n"
       << "  -h, --help                        show this help\n"
       << "      --version                     show tool version\n";
@@ -275,10 +284,16 @@ Options parseOptions(int argc, const char** argv) {
       options.provenance = true;
     } else if (arg == "--private-return-export") {
       options.privateReturnExports.push_back(take(arg.c_str()));
+    } else if (arg == "--private-identity-export") {
+      options.privateIdentityExports.push_back(take(arg.c_str()));
     } else if (arg == "--private-clone-export") {
       options.privateCloneExports.push_back(take(arg.c_str()));
     } else if (arg == "--private-clone-function") {
       options.privateCloneFunctions.push_back(take(arg.c_str()));
+    } else if (arg == "--strip-private-identities-only") {
+      options.stripPrivateIdentitiesOnly = true;
+    } else if (arg == "--debug-provenance-assertions") {
+      options.debugProvenanceAssertions = true;
     } else if (arg == "-S" || arg == "--emit-text") {
       options.emitText = true;
     } else if (!arg.empty() && arg[0] == '-') {
@@ -299,9 +314,10 @@ Options parseOptions(int argc, const char** argv) {
     throw std::runtime_error(
       "--inline-private-fast-path and --private-only-oracle are exclusive");
   }
-  if (options.profileFunctionEntries && !options.privateOnlyOracle) {
+  if (options.profileFunctionEntries && !options.privateOnlyOracle &&
+      !options.provenance) {
     throw std::runtime_error(
-      "--profile-function-entries requires --private-only-oracle");
+      "--profile-function-entries requires an oracle or provenance mode");
   }
   if (options.privateOnlyOracle &&
       !options.directPrivateFunctionIndices.empty()) {
@@ -320,6 +336,30 @@ Options parseOptions(int argc, const char** argv) {
       !options.provenance) {
     throw std::runtime_error(
       "provenance summaries and clones require --provenance");
+  }
+  if (!options.privateIdentityExports.empty() && !options.provenance &&
+      !options.stripPrivateIdentitiesOnly) {
+    throw std::runtime_error(
+      "private identities require --provenance or "
+      "--strip-private-identities-only");
+  }
+  if (options.stripPrivateIdentitiesOnly &&
+      (options.provenance || options.privateOnlyOracle ||
+       options.inlinePrivateFastPath || options.profileFunctionEntries ||
+       !options.directPrivateFunctionIndices.empty() ||
+       options.debugProvenanceAssertions)) {
+    throw std::runtime_error(
+      "--strip-private-identities-only is exclusive with transformation "
+      "and profiling modes");
+  }
+  if (options.stripPrivateIdentitiesOnly &&
+      options.privateIdentityExports.empty()) {
+    throw std::runtime_error(
+      "--strip-private-identities-only requires a private identity export");
+  }
+  if (options.debugProvenanceAssertions && !options.provenance) {
+    throw std::runtime_error(
+      "--debug-provenance-assertions requires --provenance");
   }
   return options;
 }
@@ -400,8 +440,11 @@ class Transformer {
   Name currentFunction;
   std::unordered_set<Expression*> generatedDirectOperations;
   std::unordered_set<std::string> privateReturnFunctions;
+  std::unordered_set<std::string> privateIdentityFunctions;
   std::unordered_set<std::string> privateParameters;
+  std::set<std::string> explicitPrivateParameters;
   std::map<std::string, std::string> privateCloneSources;
+  uint64_t removedPrivateIdentityCalls = 0;
 
   static std::string parameterKey(Name function, Index index) {
     return function.toString() + ":" + std::to_string(index);
@@ -978,9 +1021,14 @@ public:
     return privateReturnFunctions.count(function.toString());
   }
 
+  bool isPrivateIdentity(Name function) const {
+    return privateIdentityFunctions.count(function.toString());
+  }
+
   bool hasPrivateParameter(Name function, Index index) const {
     return privateParameters.count(parameterKey(function, index));
   }
+
 
   bool useCurrentFunctionDirectPrivate() const {
     if (options.directPrivateFunctionIndices.empty()) {
@@ -1116,6 +1164,27 @@ public:
       }
       privateReturnFunctions.insert(found->value.toString());
     }
+    for (const auto& exportName : options.privateIdentityExports) {
+      Export* found = nullptr;
+      for (const auto& export_ : module.exports) {
+        if (export_->name.toString() == exportName) {
+          found = export_.get();
+          break;
+        }
+      }
+      if (!found || found->kind != ExternalKind::Function) {
+        throw std::runtime_error("private-identity export is not a function: " +
+                                 exportName);
+      }
+      auto* function = module.getFunction(found->value);
+      if (function->getParams() != Type::i32 ||
+          function->getResults() != Type::i32) {
+        throw std::runtime_error(
+          "private-identity export must have i32 -> i32 signature: " +
+          exportName);
+      }
+      privateIdentityFunctions.insert(found->value.toString());
+    }
   }
 
   void createPrivateClones() {
@@ -1234,6 +1303,87 @@ public:
     }
   }
 
+  void initializeExplicitPrivateParameters() {
+    if (!options.provenance || privateIdentityFunctions.empty()) {
+      return;
+    }
+    for (const auto& function : module.functions) {
+      if (function->imported()) {
+        continue;
+      }
+      /*
+       * A checked identity can classify a parameter at function scope only
+       * when an assignment back to that same parameter dominates every other
+       * read of the parameter. Marker results that do not satisfy this retain
+       * their ordinary expression-local provenance.
+       */
+      struct DominanceCFG
+        : public CFGWalker<DominanceCFG,
+                           UnifiedExpressionVisitor<DominanceCFG>,
+                           std::vector<Expression*>> {
+        void visitExpression(Expression* expression) {
+          if (this->currBasicBlock) {
+            this->currBasicBlock->contents.push_back(expression);
+          }
+        }
+      } cfg;
+      cfg.walkFunctionInModule(function.get(), &module);
+      using BasicBlock = DominanceCFG::BasicBlock;
+      DomTree<BasicBlock> dominators(cfg.basicBlocks);
+      std::unordered_map<Expression*, std::pair<Index, Index>> locations;
+      for (Index blockIndex = 0; blockIndex < cfg.basicBlocks.size();
+           ++blockIndex) {
+        auto* block = cfg.basicBlocks[blockIndex].get();
+        for (Index position = 0; position < block->contents.size(); ++position) {
+          locations.emplace(block->contents[position],
+                            std::make_pair(blockIndex, position));
+        }
+      }
+      auto dominates = [&](Expression* before, Expression* after) {
+        auto beforeLocation = locations.at(before);
+        auto afterLocation = locations.at(after);
+        if (beforeLocation.first == afterLocation.first) {
+          return beforeLocation.second < afterLocation.second;
+        }
+        Index block = afterLocation.first;
+        while (block != DomTree<BasicBlock>::nonsense) {
+          if (block == beforeLocation.first) {
+            return true;
+          }
+          block = dominators.iDoms[block];
+        }
+        return false;
+      };
+
+      for (auto* set : FindAll<LocalSet>(function->body).list) {
+        auto* call = set->value->dynCast<Call>();
+        if (!call || !isPrivateIdentity(call->target) ||
+            call->operands.size() != 1) {
+          continue;
+        }
+        auto* markerGet = call->operands[0]->dynCast<LocalGet>();
+        if (!markerGet || set->index != markerGet->index ||
+            !function->isParam(markerGet->index) ||
+            function->getParams()[markerGet->index] != Type::i32) {
+          continue;
+        }
+        bool dominatesAllReads = true;
+        for (auto* get : FindAll<LocalGet>(function->body).list) {
+          if (get->index == markerGet->index && get != markerGet &&
+              !dominates(set, get)) {
+            dominatesAllReads = false;
+            break;
+          }
+        }
+        if (dominatesAllReads) {
+          auto key = parameterKey(function->name, markerGet->index);
+          explicitPrivateParameters.insert(key);
+          privateParameters.insert(key);
+        }
+      }
+    }
+  }
+
   void inferPrivateParameters() {
     if (!options.provenance) {
       return;
@@ -1346,11 +1496,54 @@ public:
     }
   }
 
+  void removePrivateIdentityCalls(const std::vector<Function*>& originals) {
+    if (privateIdentityFunctions.empty() ||
+        options.debugProvenanceAssertions) {
+      return;
+    }
+    struct Remover : public ExpressionStackWalker<Remover> {
+      const std::unordered_set<std::string>& identities;
+      uint64_t removed = 0;
+
+      explicit Remover(const std::unordered_set<std::string>& identities)
+        : identities(identities) {}
+
+      void visitCall(Call* curr) {
+        if (identities.count(curr->target.toString())) {
+          assert(curr->operands.size() == 1);
+          replaceCurrent(curr->operands[0]);
+          ++removed;
+        }
+      }
+    } remover(privateIdentityFunctions);
+    for (auto* function : originals) {
+      remover.walkFunctionInModule(function, &module);
+    }
+    removedPrivateIdentityCalls = remover.removed;
+  }
+
   void run() {
+    if (options.stripPrivateIdentitiesOnly) {
+      initializeProvenanceSummaries();
+      std::vector<Function*> originals;
+      for (const auto& function : module.functions) {
+        if (!function->imported()) {
+          originals.push_back(function.get());
+        }
+      }
+      removePrivateIdentityCalls(originals);
+      replaceSourceMapURL();
+      if (!WasmValidator().validate(module)) {
+        throw std::runtime_error(
+          "Binaryen validation failed after stripping identity markers");
+      }
+      return;
+    }
     rejectAlreadyTransformed();
     initializeProvenanceSummaries();
     createPrivateClones();
     initializeFunctionStats();
+    initializeExplicitPrivateParameters();
     inferPrivateParameters();
     addGlobalMemory();
 
@@ -1365,6 +1558,7 @@ public:
       Rewriter rewriter(*this, module, *function);
       rewriter.walkFunctionInModule(function, &module);
     }
+    removePrivateIdentityCalls(originals);
     addFunctionEntryProfiling(originals);
     addHelpers();
     audit();
@@ -1392,6 +1586,20 @@ public:
     };
 
     std::ostringstream out;
+    if (options.stripPrivateIdentitiesOnly) {
+      out << "{\"mode\":\"strip-private-identities-only\","
+          << "\"toolVersion\":\"" << ToolVersion << "\","
+          << "\"privateIdentityExports\":[";
+      for (size_t i = 0; i < options.privateIdentityExports.size(); ++i) {
+        if (i) {
+          out << ',';
+        }
+        out << '"' << jsonEscape(options.privateIdentityExports[i]) << '"';
+      }
+      out << "],\"removedPrivateIdentityCalls\":"
+          << removedPrivateIdentityCalls << '}';
+      return out.str();
+    }
     out << '{' << "\"abi\":" << manifestJSON() << ",\"rewritten\":";
     writeMap(out, rewritten);
     out << ",\"directPrivate\":";
@@ -1406,6 +1614,16 @@ public:
       out << '"' << jsonEscape(options.privateReturnExports[i]) << '"';
     }
     out << ']';
+    out << ",\"privateIdentityExports\":[";
+    for (size_t i = 0; i < options.privateIdentityExports.size(); ++i) {
+      if (i) {
+        out << ',';
+      }
+      out << '"' << jsonEscape(options.privateIdentityExports[i]) << '"';
+    }
+    out << ']';
+    out << ",\"removedPrivateIdentityCalls\":"
+        << removedPrivateIdentityCalls;
     out << ",\"privateCloneExports\":[";
     for (size_t i = 0; i < options.privateCloneExports.size(); ++i) {
       if (i) {
@@ -1420,6 +1638,16 @@ public:
         out << ',';
       }
       out << '"' << jsonEscape(options.privateCloneFunctions[i]) << '"';
+    }
+    out << ']';
+    out << ",\"explicitPrivateParameters\":[";
+    bool firstExplicitParameter = true;
+    for (const auto& parameter : explicitPrivateParameters) {
+      if (!firstExplicitParameter) {
+        out << ',';
+      }
+      firstExplicitParameter = false;
+      out << '"' << jsonEscape(parameter) << '"';
     }
     out << ']';
     out << ",\"inferredPrivateParameters\":" << privateParameters.size();
@@ -1592,7 +1820,9 @@ Rewriter::Provenance Rewriter::classify(Expression* expression) {
       }
     }
   } else if (auto* call = expression->dynCast<Call>()) {
-    if (!call->isReturn && transformer.hasPrivateReturn(call->target)) {
+    if (!call->isReturn &&
+        (transformer.hasPrivateReturn(call->target) ||
+         transformer.isPrivateIdentity(call->target))) {
       result = Provenance::Private;
     }
   } else if (auto* binary = expression->dynCast<Binary>()) {
