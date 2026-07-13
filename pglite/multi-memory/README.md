@@ -230,9 +230,46 @@ implementation, and legacy-helper cases for both ordinary and shared Wasm
 memories. All compiler, manifest, test, lint, and formatting tools run in the
 derived Wasm builder container.
 
-Phase 2E is complete. Phase 2F must still rerun the combined correctness,
-debug-assertion, package, determinism, size, startup, and performance exit
-gate; the Phase 2C benchmark is not silently reused as the final Phase 2 result.
+Phase 2E is complete. Its Phase 2C-pinned manifest remains the exact policy
+input to the combined Phase 2F gate rather than allowing that gate to infer
+host safety from signatures.
+
+## Phase 2F: combined exit gate
+
+Run the complete Phase 2 decision from the parent checkout:
+
+```sh
+pnpm wasm:multi-memory:phase2f
+```
+
+The 13 July 2026 result passes. The runner rebuilt and tested transformer
+version 0.8.0, reproduced byte-identical pre- and post-optimization release
+artifacts, passed Phase 0, and passed 9/9 release plus 9/9 debug-assertion
+differential SQL cases. The exact host audit retained all 136 imports, 129
+function imports, 50 pointer-bearing functions, and 84 data-pointer
+parameters. The transformed artifact passed all 57 basic package files (276
+tests passed, one skipped, no type errors) and both Node runtime files (10/10).
+
+The release report classifies 128,328 static operations direct and 265,900
+generic. A separate diagnostic artifact counts the actual selected branch at
+each dereference. Across database setup, recursive execution, an indexed
+aggregate, and pgbench-style transactions it observed 119,959,566 direct and
+718,918 generic accesses: 99.404% direct. This dynamic result explains why the
+sound candidate can pass despite retaining generic fallback at most static
+sites.
+
+Three independent five-pair alternating-process series measured worst ratios
+of 1.276x, 1.275x, and 1.280x against the matched classic artifact. Taking the
+conservative maximum per workload gives 1.228x recursive, 1.280x indexed
+aggregate, and 1.239x pgbench-style throughput, all below the unchanged 1.35x
+limit. The candidate is 1.414x the classic artifact size. Median compile times
+were 14.48-14.59 ms versus 10.48-10.53 ms, and median startup times were
+1308-1329 ms versus 889-897 ms. The measured transform took 57.5 seconds in
+the pinned container.
+
+Phase 2 and Gate C are therefore complete. The multi-memory lowering is sound
+enough and fast enough to proceed to the Phase 3 shared/atomics world rebuild;
+generic dispatch remains the required fallback for every unproved pointer.
 
 The native `pglite-wasm-multi-memory` tool accepts a conventional wasm32
 module with one imported memory. It preserves that private memory as index 0,

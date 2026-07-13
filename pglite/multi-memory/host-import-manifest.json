@@ -1,7 +1,7 @@
 {
   "version": 1,
   "emscriptenVersion": "3.1.74",
-  "wasmSha256": "595c45335e17d9c03670ace06395bbdbbeea3b0d658a52d95bf20b65874791e0",
+  "wasmSha256": "663422174b697043ef7d7941200d0f0f04e3319878cdc615e97905f1225f6c3a",
   "glueSha256": "cd7846e8c692500df20e6cb0d8275c5c0f18ad282d271adb764a5e39a33ae76b",
   "entries": [
     {
@@ -914,9 +914,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        0
-      ],
+      "pointerSizedScalars": [0],
       "returnPointer": "private"
     },
     {
@@ -1014,9 +1012,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        2
-      ],
+      "pointerSizedScalars": [2],
       "returnPointer": "none"
     },
     {
@@ -1039,9 +1035,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        2
-      ],
+      "pointerSizedScalars": [2],
       "returnPointer": "none"
     },
     {
@@ -1162,9 +1156,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        1
-      ],
+      "pointerSizedScalars": [1],
       "returnPointer": "none"
     },
     {
@@ -1275,9 +1267,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        1
-      ],
+      "pointerSizedScalars": [1],
       "returnPointer": "none"
     },
     {
@@ -1300,9 +1290,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        0
-      ],
+      "pointerSizedScalars": [0],
       "returnPointer": "none"
     },
     {
@@ -1360,9 +1348,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        2
-      ],
+      "pointerSizedScalars": [2],
       "returnPointer": "none"
     },
     {
@@ -1385,9 +1371,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        2
-      ],
+      "pointerSizedScalars": [2],
       "returnPointer": "none"
     },
     {
@@ -1406,9 +1390,7 @@
       "signature": "vpi",
       "class": "opaque-indirect",
       "pointers": [],
-      "pointerSizedScalars": [
-        0
-      ],
+      "pointerSizedScalars": [0],
       "returnPointer": "none"
     },
     {
@@ -1425,9 +1407,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        2
-      ],
+      "pointerSizedScalars": [2],
       "returnPointer": "none"
     },
     {
@@ -1450,9 +1430,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        3
-      ],
+      "pointerSizedScalars": [3],
       "returnPointer": "none"
     },
     {
@@ -1637,9 +1615,7 @@
       "signature": "ip",
       "class": "scalar",
       "pointers": [],
-      "pointerSizedScalars": [
-        0
-      ],
+      "pointerSizedScalars": [0],
       "returnPointer": "none"
     },
     {
@@ -1688,9 +1664,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        2
-      ],
+      "pointerSizedScalars": [2],
       "returnPointer": "none"
     },
     {
@@ -1707,9 +1681,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        2
-      ],
+      "pointerSizedScalars": [2],
       "returnPointer": "none"
     },
     {
@@ -1747,9 +1719,7 @@
           "nullable": true
         }
       ],
-      "pointerSizedScalars": [
-        2
-      ],
+      "pointerSizedScalars": [2],
       "returnPointer": "none"
     },
     {
@@ -1772,10 +1742,7 @@
           "nullable": true
         }
       ],
-      "pointerSizedScalars": [
-        2,
-        5
-      ],
+      "pointerSizedScalars": [2, 5],
       "returnPointer": "none"
     },
     {
@@ -1801,9 +1768,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        1
-      ],
+      "pointerSizedScalars": [1],
       "returnPointer": "none"
     },
     {
@@ -1861,9 +1826,7 @@
           "nullable": false
         }
       ],
-      "pointerSizedScalars": [
-        1
-      ],
+      "pointerSizedScalars": [1],
       "returnPointer": "none"
     },
     {

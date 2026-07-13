@@ -44,7 +44,7 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.7.0";
+constexpr const char* ToolVersion = "0.8.0";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
@@ -73,6 +73,7 @@ struct Options {
   bool inlinePrivateFastPath = false;
   bool privateOnlyOracle = false;
   bool profileFunctionEntries = false;
+  bool profileMemoryAccesses = false;
   bool provenance = false;
   bool stripPrivateIdentitiesOnly = false;
   bool debugProvenanceAssertions = false;
@@ -217,6 +218,7 @@ void usage(std::ostream& out) {
       << "      --inline-private-fast-path    direct memory-0 arm at each site\n"
       << "      --private-only-oracle         retain direct memory-0 operations\n"
       << "      --profile-function-entries    import a profiling entry hook\n"
+      << "      --profile-memory-accesses     count direct/generic runtime paths\n"
       << "      --direct-private-function-index N  diagnostic direct function\n"
       << "      --provenance                  enable sound direct-access proofs\n"
       << "      --private-return-export NAME  provenance summary (repeatable)\n"
@@ -277,6 +279,8 @@ Options parseOptions(int argc, const char** argv) {
       options.privateOnlyOracle = true;
     } else if (arg == "--profile-function-entries") {
       options.profileFunctionEntries = true;
+    } else if (arg == "--profile-memory-accesses") {
+      options.profileMemoryAccesses = true;
     } else if (arg == "--direct-private-function-index") {
       options.directPrivateFunctionIndices.push_back(
         parseUnsigned(take(arg.c_str()), arg.c_str()));
@@ -319,6 +323,10 @@ Options parseOptions(int argc, const char** argv) {
     throw std::runtime_error(
       "--profile-function-entries requires an oracle or provenance mode");
   }
+  if (options.profileMemoryAccesses && !options.provenance) {
+    throw std::runtime_error(
+      "--profile-memory-accesses requires --provenance");
+  }
   if (options.privateOnlyOracle &&
       !options.directPrivateFunctionIndices.empty()) {
     throw std::runtime_error(
@@ -346,6 +354,7 @@ Options parseOptions(int argc, const char** argv) {
   if (options.stripPrivateIdentitiesOnly &&
       (options.provenance || options.privateOnlyOracle ||
        options.inlinePrivateFastPath || options.profileFunctionEntries ||
+       options.profileMemoryAccesses ||
        !options.directPrivateFunctionIndices.empty() ||
        options.debugProvenanceAssertions)) {
     throw std::runtime_error(
@@ -388,6 +397,10 @@ class Rewriter : public ExpressionStackWalker<Rewriter> {
                          std::vector<Expression*> operands,
                          Type result,
                          const char* operationName);
+  Expression* withAccessProfile(Expression* operation,
+                                bool direct,
+                                const char* operationName,
+                                Type result);
 
 public:
   Rewriter(Transformer& transformer, Module& module, Function& function)
@@ -445,6 +458,18 @@ class Transformer {
   std::set<std::string> explicitPrivateParameters;
   std::map<std::string, std::string> privateCloneSources;
   uint64_t removedPrivateIdentityCalls = 0;
+  Name memoryAccessProfileHook = Name("__pglite_profile_memory_access");
+
+  static const std::vector<std::string>& memoryAccessProfileKinds() {
+    static const std::vector<std::string> kinds = {
+      "load",           "store",          "atomic-load",
+      "atomic-store",   "atomic-rmw",     "atomic-cmpxchg",
+      "atomic-wait",    "atomic-notify",  "simd-load",
+      "simd-lane-load", "simd-lane-store", "memory-copy",
+      "memory-fill",
+    };
+    return kinds;
+  }
 
   static std::string parameterKey(Name function, Index index) {
     return function.toString() + ":" + std::to_string(index);
@@ -969,6 +994,20 @@ class Transformer {
                   ? "two-domain-generic-private-fast-path"
                   : "two-domain-generic")
         << "\","
+        << "\"memoryAccessProfiling\":"
+        << (options.profileMemoryAccesses ? "true" : "false");
+    if (options.profileMemoryAccesses) {
+      out << ",\"memoryAccessProfileKinds\":[";
+      const auto& kinds = memoryAccessProfileKinds();
+      for (size_t i = 0; i < kinds.size(); ++i) {
+        if (i) {
+          out << ',';
+        }
+        out << '"' << jsonEscape(kinds[i]) << '"';
+      }
+      out << ']';
+    }
+    out << ','
         << "\"features\":\"" << jsonEscape(module.features.toString()) << "\","
         << "\"featureBits\":" << uint32_t(module.features) << ','
         << "\"privateMemory\":\"" << jsonEscape(privateMemory.toString())
@@ -1016,6 +1055,25 @@ public:
   bool usePrivateOnlyOracle() const { return options.privateOnlyOracle; }
 
   bool useProvenance() const { return options.provenance; }
+
+  Expression* makeMemoryAccessProfileHit(Builder& builder,
+                                         bool direct,
+                                         const char* operationName) {
+    if (!options.profileMemoryAccesses) {
+      return nullptr;
+    }
+    const auto& kinds = memoryAccessProfileKinds();
+    auto found = std::find(kinds.begin(), kinds.end(), operationName);
+    if (found == kinds.end()) {
+      throw std::runtime_error(std::string("unknown access profile kind: ") +
+                               operationName);
+    }
+    return builder.makeCall(
+      memoryAccessProfileHook,
+      {builder.makeConst(int32_t(direct ? 0 : 1)),
+       builder.makeConst(int32_t(std::distance(kinds.begin(), found)))},
+      Type::none);
+  }
 
   bool hasPrivateReturn(Name function) const {
     return privateReturnFunctions.count(function.toString());
@@ -1496,6 +1554,23 @@ public:
     }
   }
 
+  void addMemoryAccessProfilingImport() {
+    if (!options.profileMemoryAccesses) {
+      return;
+    }
+    if (module.getFunctionOrNull(memoryAccessProfileHook)) {
+      throw std::runtime_error(
+        "reserved memory-access profile hook name already exists");
+    }
+    auto import = Builder::makeFunction(
+      memoryAccessProfileHook,
+      Signature(Type({Type::i32, Type::i32}), Type::none),
+      {});
+    import->module = Name("pglite");
+    import->base = Name("profile_memory_access");
+    module.addFunction(std::move(import));
+  }
+
   void removePrivateIdentityCalls(const std::vector<Function*>& originals) {
     if (privateIdentityFunctions.empty() ||
         options.debugProvenanceAssertions) {
@@ -1546,6 +1621,7 @@ public:
     initializeExplicitPrivateParameters();
     inferPrivateParameters();
     addGlobalMemory();
+    addMemoryAccessProfilingImport();
 
     std::vector<Function*> originals;
     for (const auto& function : module.functions) {
@@ -1869,6 +1945,19 @@ bool Rewriter::provesPrivate(const HelperSpec& spec,
          classify(operands[1]) == Provenance::Private;
 }
 
+Expression* Rewriter::withAccessProfile(Expression* operation,
+                                        bool direct,
+                                        const char* operationName,
+                                        Type result) {
+  Builder builder(*getModule());
+  auto* hit = transformer.makeMemoryAccessProfileHit(
+    builder, direct, operationName);
+  if (!hit) {
+    return operation;
+  }
+  return builder.makeBlock({hit, operation}, result);
+}
+
 void Rewriter::replaceWithHelper(Expression* original,
                                  const HelperSpec& spec,
                                  std::vector<Expression*> operands,
@@ -1882,6 +1971,11 @@ void Rewriter::replaceWithHelper(Expression* original,
                           provenDirect ? "constant-local-flow" : nullptr);
   if (diagnosticDirect || provenDirect) {
     transformer.keepPrivateOracleOperation(original);
+    auto* profiled = withAccessProfile(
+      original, true, operationName, result);
+    if (profiled != original) {
+      replaceCurrent(profiled);
+    }
     return;
   }
   Builder builder(*getModule());
@@ -1889,7 +1983,8 @@ void Rewriter::replaceWithHelper(Expression* original,
   if (!transformer.useInlinePrivateFastPath() ||
       spec.kind == HelperKind::MemoryCopy ||
       spec.kind == HelperKind::MemoryFill) {
-    replaceCurrent(builder.makeCall(helper, operands, result));
+    auto* call = builder.makeCall(helper, operands, result);
+    replaceCurrent(withAccessProfile(call, false, operationName, result));
     return;
   }
 
@@ -1922,6 +2017,10 @@ void Rewriter::replaceWithHelper(Expression* original,
   auto* sharedCall = builder.makeCall(helper, sharedOperands, result);
   auto* privateOperation = transformer.makeInlinePrivateOperation(
     spec, builder, std::move(privateOperands));
+  auto* profiledShared =
+    withAccessProfile(sharedCall, false, operationName, result);
+  auto* profiledPrivate =
+    withAccessProfile(privateOperation, true, operationName, result);
   // A signed-positive test recognizes exactly the valid private-pointer
   // interval [1, 0x7fffffff]. Zero and both tagged domains are non-positive
   // and take the generic helper, retaining canonical null/tag/aperture traps.
@@ -1931,8 +2030,8 @@ void Rewriter::replaceWithHelper(Expression* original,
     builder.makeConst(int32_t(0)));
   auto* dispatch = builder.makeIf(
     privateCondition,
-    privateOperation,
-    sharedCall,
+    profiledPrivate,
+    profiledShared,
     result);
   prefix.push_back(dispatch);
   replaceCurrent(builder.makeBlock(prefix, result));

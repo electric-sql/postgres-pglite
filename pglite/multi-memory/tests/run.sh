@@ -103,6 +103,33 @@ node22 "${ROOT}/tests/provenance-tests.mjs" \
   "${OUT}/provenance.report.json"
 
 pglite-wasm-multi-memory "${OUT}/provenance.wasm" \
+  -o "${OUT}/provenance.debug.wasm" \
+  --report "${OUT}/provenance.debug.report.json" \
+  --global-initial-pages 2 \
+  --global-maximum-pages 16 \
+  --provenance \
+  --debug-provenance-assertions \
+  --private-return-export palloc \
+  --private-identity-export pgl_private_pointer
+node22 "${ROOT}/tests/debug-provenance-tests.mjs" \
+  "${OUT}/provenance.debug.wasm" \
+  "${OUT}/provenance.debug.report.json"
+
+pglite-wasm-multi-memory "${OUT}/provenance.wasm" \
+  -o "${OUT}/provenance.profile.wasm" \
+  --report "${OUT}/provenance.profile.report.json" \
+  --global-initial-pages 2 \
+  --global-maximum-pages 16 \
+  --provenance \
+  --inline-private-fast-path \
+  --profile-memory-accesses \
+  --private-return-export palloc \
+  --private-identity-export pgl_private_pointer
+node22 "${ROOT}/tests/memory-access-profile-tests.mjs" \
+  "${OUT}/provenance.profile.wasm" \
+  "${OUT}/provenance.profile.report.json"
+
+pglite-wasm-multi-memory "${OUT}/provenance.wasm" \
   -o "${OUT}/provenance.stripped.wasm" \
   --report "${OUT}/provenance.stripped.report.json" \
   --strip-private-identities-only \
