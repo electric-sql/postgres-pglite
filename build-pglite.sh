@@ -139,7 +139,11 @@ fi
 if [ "${PGLITE_MULTI_MEMORY_PROVENANCE:-false}" = true ]; then
     # The backend's parallel top-level rule can start its link before noticing
     # a manually removed subdirectory object, so rebuild the fenced object
-    # explicitly before entering the parallel build.
+    # explicitly before entering the parallel build. A clean configure has not
+    # yet materialized lwlocknames.h and the other generated includes consumed
+    # by these objects, so establish that normal top-level prerequisite first.
+    emmake make PORTNAME=emscripten -C src/backend generated-headers \
+        || { echo 'error: generating headers for provenance-marked executor objects' ; exit 19; }
     emmake make PORTNAME=emscripten -C src/backend/executor \
         execExprInterp.o execTuples.o || { echo 'error: rebuilding provenance-marked executor objects' ; exit 20; }
 fi

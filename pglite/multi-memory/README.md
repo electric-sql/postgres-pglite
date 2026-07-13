@@ -196,6 +196,44 @@ complete Phase 2: the pointer-bearing JavaScript import/view audit and host ABI
 hardening in Phase 2E remain required before the Phase 2F exit checkpoint or
 postmaster work.
 
+## Phase 2E: host ABI hardening
+
+After Phase 2C has produced its exact candidate, run:
+
+```sh
+pnpm wasm:multi-memory:phase2e
+```
+
+The checked manifest is pinned to both the optimized Wasm and generated
+Emscripten glue hashes. Its generator reads the actual Wasm import section and
+the glue's Emscripten signatures, but does not assume that signature type `p`
+always means a data pointer: every pointer-width parameter is explicitly
+classified as a data pointer, size, handle, function pointer, or opaque table
+argument. Any added, removed, or retyped import, stale policy, duplicate
+classification, or hash change fails the gate.
+
+The current candidate has 136 imports and 129 imported functions. Fifty
+functions carry 84 data-pointer parameters. The complete function split is 22
+scalar, 57 opaque indirect-call, 12 private-only Emscripten, and 38 tagged
+memory-aware imports. The tagged group includes filesystem, vectored I/O,
+socket, name-service, and other operations whose buffers cannot safely be
+assumed private. Postmaster instantiation fails unless each has an explicit
+memory-aware implementation; the private-only group is wrapped with a tag
+guard before unchanged memory-0 glue can execute.
+
+The TypeScript host layer owns independently refreshing typed-array families
+for every bound memory, unsigned tag/aperture/range decoding, tagged UTF-8 and
+value helpers, memory-aware host adapters, private-only guards, exact-manifest
+auditing, and fail-closed import hardening. Its tests cover private, global,
+reserved scoped, null, boundary, growth, string/value, unknown-import, missing
+implementation, and legacy-helper cases for both ordinary and shared Wasm
+memories. All compiler, manifest, test, lint, and formatting tools run in the
+derived Wasm builder container.
+
+Phase 2E is complete. Phase 2F must still rerun the combined correctness,
+debug-assertion, package, determinism, size, startup, and performance exit
+gate; the Phase 2C benchmark is not silently reused as the final Phase 2 result.
+
 The native `pglite-wasm-multi-memory` tool accepts a conventional wasm32
 module with one imported memory. It preserves that private memory as index 0,
 adds `pglite.global_memory` as index 1 and the reserved
