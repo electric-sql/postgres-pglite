@@ -8,7 +8,8 @@ ARG PNPM_VERSION=9.7.0
 ARG TARGETARCH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends cmake git ninja-build \
+    && apt-get install -y --no-install-recommends \
+      cmake git jq libipc-run-perl ninja-build \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --filter=blob:none --no-checkout \

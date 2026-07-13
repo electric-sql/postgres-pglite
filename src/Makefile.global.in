@@ -425,8 +425,13 @@ ld_library_path_var = LD_LIBRARY_PATH
 # with_temp_install_extra is for individual ports to define if they
 # need something more here. If not defined then the expansion does
 # nothing.
+# PGLITE: an executable-compatible test provider overrides only server
+# lifecycle programs while retaining the temporary installation and all
+# upstream test recipes.  The empty case expands to the native path exactly.
+pglite_test_provider_path = $(if $(PGLITE_TEST_PROVIDER),$(PGLITE_TEST_PROVIDER)/bin:)
+pglite_test_provider_bindir = $(if $(PGLITE_TEST_PROVIDER),$(PGLITE_TEST_PROVIDER)/bin,)
 with_temp_install = \
-	PATH="$(abs_top_builddir)/tmp_install$(bindir):$(CURDIR):$$PATH" \
+	PATH="$(pglite_test_provider_path)$(abs_top_builddir)/tmp_install$(bindir):$(CURDIR):$$PATH" \
 	$(call add_to_path,$(strip $(ld_library_path_var)),$(abs_top_builddir)/tmp_install$(libdir)) \
 	INITDB_TEMPLATE='$(abs_top_builddir)'/tmp_install/initdb-template \
 	$(with_temp_install_extra)
@@ -708,7 +713,7 @@ pg_regress_check = \
     $(top_builddir)/src/test/regress/pg_regress \
     --temp-instance=./tmp_check \
     --inputdir=$(srcdir) \
-    --bindir= \
+    --bindir=$(pglite_test_provider_bindir) \
     $(TEMP_CONF) \
     $(pg_regress_locale_flags) $(EXTRA_REGRESS_OPTS)
 pg_regress_installcheck = \
@@ -724,7 +729,7 @@ pg_isolation_regress_check = \
     $(top_builddir)/src/test/isolation/pg_isolation_regress \
     --temp-instance=./tmp_check_iso \
     --inputdir=$(srcdir) --outputdir=output_iso \
-    --bindir= \
+    --bindir=$(pglite_test_provider_bindir) \
     $(TEMP_CONF) \
     $(pg_regress_locale_flags) $(EXTRA_REGRESS_OPTS)
 pg_isolation_regress_installcheck = \

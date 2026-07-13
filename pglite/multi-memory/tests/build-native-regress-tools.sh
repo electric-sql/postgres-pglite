@@ -32,6 +32,10 @@ if [[ -f "${OUT}/manifest.json" && \
       -x "${BUILD}/src/bin/psql/psql" && \
       -x "${BUILD}/src/bin/scripts/pg_isready" && \
       -x "${BUILD}/src/bin/pgbench/pgbench" && \
+      -x "${BUILD}/src/bin/pg_ctl/pg_ctl" && \
+      -x "${BUILD}/src/bin/initdb/initdb" && \
+      -x "${BUILD}/src/backend/postgres" && \
+      -f "${BUILD}/src/test/perl/Makefile" && \
       -f "${SOURCE}/src/test/regress/parallel_schedule" ]] && \
    node22 - "${OUT}/manifest.json" "${REVISION}" \
      "${HOST_PLATFORM}" "${ARCHITECTURE}" <<'NODE'
@@ -80,15 +84,11 @@ git -C "${PG_ROOT}" archive --format=tar "${REVISION}" \
     --prefix="${INSTALL}" \
     --without-icu \
     --without-readline \
-    --without-zlib
+    --without-zlib \
+    --enable-tap-tests
 )
 
-make -j"${JOBS}" -C "${BUILD}/src/interfaces/libpq" all
-make -j"${JOBS}" -C "${BUILD}/src/test/regress" pg_regress
-make -j"${JOBS}" -C "${BUILD}/src/test/isolation" all
-make -j"${JOBS}" -C "${BUILD}/src/bin/psql" all
-make -j"${JOBS}" -C "${BUILD}/src/bin/scripts" all
-make -j"${JOBS}" -C "${BUILD}/src/bin/pgbench" all
+make -j"${JOBS}" -C "${BUILD}" all
 
 export LD_LIBRARY_PATH="${BUILD}/src/interfaces/libpq${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 test "$("${BUILD}/src/test/regress/pg_regress" --version)" = \
@@ -124,6 +124,16 @@ fs.writeFileSync(output, `${JSON.stringify({
     'isolationtester',
     'createdb',
     'dropdb',
+    'initdb',
+    'postgres',
+    'pg_ctl',
+    'pg_dump',
+    'pg_restore',
+    'pg_basebackup',
+    'pg_controldata',
+    'pg_resetwal',
+    'pg_rewind',
+    'TAP/Perl PostgreSQL::Test',
   ],
   sourceIsolation: 'git-archive',
 }, null, 2)}\n`)

@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "profile": "node-multi-memory-phase7",
+  "revisionPolicy": "provider-config-exact-head",
+  "states": ["SUPPORTED", "UNSUPPORTED", "BLOCKED"],
+  "capabilities": {
+    "core-regression": {
+      "state": "SUPPORTED",
+      "scope": "src/test/regress and src/test/isolation through temporary-cluster mode"
+    },
+    "tap-basic-lifecycle": {
+      "state": "SUPPORTED",
+      "scope": "single primary clusters using initdb, postgres, pg_ctl and native client utilities"
+    },
+    "replication": {
+      "state": "BLOCKED",
+      "reason": "WAL sender/receiver and multi-cluster lifecycle have not completed the Phase 7 gate"
+    },
+    "dynamic-modules": {
+      "state": "BLOCKED",
+      "reason": "only modules present in the test-only static registry are executable"
+    },
+    "ssl-gss-ldap": {
+      "state": "UNSUPPORTED",
+      "reason": "the pinned Phase 7 native and Wasm builds are configured without these external authentication capabilities"
+    },
+    "native-child-pids": {
+      "state": "UNSUPPORTED",
+      "reason": "backend PIDs are PostgreSQL process-registry IDs rather than host OS PIDs"
+    },
+    "pg-upgrade": {
+      "state": "UNSUPPORTED",
+      "reason": "the provider exposes one PG18 PGlite artifact and no older executable-compatible artifact"
+    },
+    "platform-locales": {
+      "state": "UNSUPPORTED",
+      "reason": "the artifact exposes its packaged libc/ICU locale inventory rather than the host inventory"
+    }
+  }
+}
