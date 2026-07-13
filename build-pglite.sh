@@ -4,7 +4,11 @@
 # $INSTALL_PREFIX is expected to point to the installation folder of various libraries built to wasm (see pglite-builder)
 #############
 
-emcc --clear-cache
+if [ "${PGLITE_INCREMENTAL:-false}" != true ]; then
+    emcc --clear-cache
+else
+    echo "pglite: reusing the configured object graph for an incremental build."
+fi
 
 # final output folder
 INSTALL_FOLDER=${INSTALL_FOLDER:-"/pglite"}
@@ -22,7 +26,7 @@ if [ "${PGLITE_SHARED_MEMORY:-false}" = true ]; then
 
     # Feature flags are recorded on every object. Never reuse the ordinary
     # single-user object graph for a shared-memory link.
-    if [ -f Makefile ]; then
+    if [ -f Makefile ] && [ "${PGLITE_INCREMENTAL:-false}" != true ]; then
         emmake make clean || { echo 'error: cleaning ordinary Wasm objects for shared build' ; exit 8; }
     fi
 fi
@@ -48,6 +52,13 @@ if [ "${PGLITE_MULTI_MEMORY_PROVENANCE:-false}" = true ]; then
     rm -f src/backend/pglite.js src/backend/pglite.wasm src/backend/pglite.data
 fi
 
+if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
+    echo "pglite: enabling the Worker-backed EXEC_BACKEND portability layer."
+    PGLITE_CFLAGS="$PGLITE_CFLAGS -D__PGLITE_POSTMASTER__ \
+-I$(pwd)/pglite/src/pglitec -include $(pwd)/pglite/src/pglitec/pglitec.h"
+    PGLITE_POSTMASTER_RECONFIGURE=true
+fi
+
 # PGLITE_OTHER_FLAGS="-sUSE_PTHREADS=0 -fPIC -m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn"
 # PGLITE_CFLAGS="$PGLITE_CFLAGS"
 
@@ -69,6 +80,13 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Dpoll=pgl_poll \
 -Dshmget=pgl_shmget -Dshmat=pgl_shmat -Dshmdt=pgl_shmdt -Dshmctl=pgl_shmctl \
 -Dlongjmp=pgl_longjmp -Dsiglongjmp=pgl_siglongjmp"
+if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
+    PGLITE_CFLAGS="$PGLITE_CFLAGS \
+-Dgetpid=pgl_getpid -Dkill=pgl_kill -Dwaitpid=pgl_waitpid \
+-Dsetitimer=pgl_setitimer -Dsigprocmask=pgl_sigprocmask \
+-Dsocket=pgl_socket -Dbind=pgl_bind -Dlisten=pgl_listen \
+-Daccept=pgl_accept -Dclose=pgl_close"
+fi
 # we don't want to override sigsetjmp and setjmp!
 # -Dsigsetjmp=pgl_sigsetjmp -Dsiglongjmp=pgl_siglongjmp \
 # -Dsetjmp=pgl_setjmp -Dlongjmp=pgl_longjmp"
@@ -82,7 +100,8 @@ CONFIG_STATUS="config.status"
 RUN_CONFIGURE=false
 
 if [ "${PGLITE_MULTI_MEMORY_RECONFIGURE:-false}" = true ] ||
-   [ "${PGLITE_SHARED_MEMORY_RECONFIGURE:-false}" = true ]; then
+   [ "${PGLITE_SHARED_MEMORY_RECONFIGURE:-false}" = true ] ||
+   [ "${PGLITE_POSTMASTER_RECONFIGURE:-false}" = true ]; then
     echo "multi-memory/shared build flags require ./configure."
     RUN_CONFIGURE=true
 elif [ ! -f "$CONFIG_STATUS" ]; then
@@ -149,6 +168,72 @@ if [ "$RUN_CONFIGURE" = true ]; then
     CFLAGS=${PGLITE_CFLAGS} emconfigure ./configure $CONFIGURE_PARAMS || { echo 'error: emconfigure failed' ; exit 11; }
 else
     echo "Warning: configure has not been run because RUN_CONFIGURE=${RUN_CONFIGURE}"
+fi
+
+# Prepare the final main-module link. The backend-only path uses the already
+# installed PostgreSQL data and extension set while rebuilding just the core
+# objects and generated module.
+PGROOT=$INSTALL_FOLDER
+PGPRELOAD="\
+--preload-file $(pwd)/pglite/static/PGPASSFILE@/home/postgres/.pgpass \
+--preload-file $(pwd)/pglite/static/empty@/pglite/bin/initdb \
+--preload-file $(pwd)/pglite/static/empty@/pglite/bin/pg_dump \
+--preload-file $(pwd)/pglite/static/empty@/pglite/bin/postgres \
+--preload-file $PGROOT/share/postgresql@/pglite/share/postgresql \
+--preload-file $PGROOT/lib/postgresql@/pglite/lib/postgresql \
+--preload-file $(pwd)/pglite/static/password@/pglite/password \
+--preload-file $(pwd)/pglite/static/empty@/pglite/pgstdin \
+--preload-file $(pwd)/pglite/static/empty@/pglite/pgstdout \
+--preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a \
+--preload-file $(pwd)/pglite/static/minimal-icu/76.1@/pglite/icu"
+
+PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
+POSTGRES_PGLITE_FLAGS="\
+-sSTACK_SIZE=8MB \
+-sINITIAL_MEMORY=128MB \
+-sIMPORTED_MEMORY=1 \
+-sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
+-sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
+$PGPRELOAD \
+-lnodefs.js -lidbfs.js"
+
+if [ "${PGLITE_PROFILING_FUNCS:-false}" = true ]; then
+    echo "pglite: preserving optimized Wasm function names for profiling."
+    POSTGRES_PGLITE_FLAGS="$POSTGRES_PGLITE_FLAGS --profiling-funcs"
+    rm -f src/backend/pglite.js src/backend/pglite.wasm src/backend/pglite.data
+fi
+
+if [ "${PGLITE_BACKEND_ONLY:-false}" = true ]; then
+    if [ "${PGLITE_CLEAN_BACKEND:-false}" = true ]; then
+        emmake make PORTNAME=emscripten -C src/backend clean || exit 51
+        emmake make PORTNAME=emscripten -C src/common clean || exit 52
+        emmake make PORTNAME=emscripten -C src/port clean || exit 53
+        # src/backend/utils/Makefile removes the generated inputs but leaves
+        # this cross-directory stamp behind, so force its normal prerequisite
+        # rule to materialize the headers and symlinks again.
+        rm -f src/include/nodes/header-stamp
+        rm -f src/include/utils/header-stamp
+    fi
+    emmake make PORTNAME=emscripten -C src/backend generated-headers || exit 54
+    if [ "${PGLITE_MULTI_MEMORY_PROVENANCE:-false}" = true ]; then
+        emmake make PORTNAME=emscripten -C src/backend/executor \
+            execExprInterp.o execTuples.o || exit 55
+    fi
+    # The direct pglite target consumes these archives but, unlike the normal
+    # top-level build, has no submake rule that orders their construction.
+    emmake make PORTNAME=emscripten -C src/port \
+        -j"${PGLITE_BUILD_JOBS:-}" all || exit 56
+    emmake make PORTNAME=emscripten -C src/common \
+        -j"${PGLITE_BUILD_JOBS:-}" all || exit 57
+    # /install is image-local, so rematerialize the Emscripten export list in
+    # every backend-only container invocation from the persisted install tree.
+    emmake make PORTNAME=emscripten -C src/backend \
+        pglite-exported-functions || exit 58
+    POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" \
+        emmake make PORTNAME=emscripten -C src/backend \
+        -j"${PGLITE_BUILD_JOBS:-}" pglite || exit 59
+    emmake make PORTNAME=emscripten -C src/backend install-pglite || exit 60
+    exit 0
 fi
 
 # Step 2: make and install all
@@ -221,42 +306,6 @@ fi
 
 # Step 5: get exported functions
 emmake make PORTNAME=emscripten -j"${PGLITE_BUILD_JOBS:-}" -C src/backend pglite-exported-functions || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
-
-# Step 6: make and install pglite
-PGROOT=$INSTALL_FOLDER
-# PG_IMPORTS_DIR=$PGROOT/imports
-PGPRELOAD="\
---preload-file $(pwd)/pglite/static/PGPASSFILE@/home/postgres/.pgpass \
---preload-file $(pwd)/pglite/static/empty@/pglite/bin/initdb \
---preload-file $(pwd)/pglite/static/empty@/pglite/bin/pg_dump \
---preload-file $(pwd)/pglite/static/empty@/pglite/bin/postgres \
---preload-file $PGROOT/share/postgresql@/pglite/share/postgresql \
---preload-file $PGROOT/lib/postgresql@/pglite/lib/postgresql \
---preload-file $(pwd)/pglite/static/password@/pglite/password \
---preload-file $(pwd)/pglite/static/empty@/pglite/pgstdin \
---preload-file $(pwd)/pglite/static/empty@/pglite/pgstdout \
---preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a \
---preload-file $(pwd)/pglite/static/minimal-icu/76.1@/pglite/icu"
-
-PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
-
-# -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
-POSTGRES_PGLITE_FLAGS="\
--sSTACK_SIZE=8MB \
--sINITIAL_MEMORY=128MB \
--sIMPORTED_MEMORY=1 \
--sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
--sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
-$PGPRELOAD \
--lnodefs.js -lidbfs.js"
-
-if [ "${PGLITE_PROFILING_FUNCS:-false}" = true ]; then
-    echo "pglite: preserving optimized Wasm function names for profiling."
-    POSTGRES_PGLITE_FLAGS="$POSTGRES_PGLITE_FLAGS --profiling-funcs"
-    # Make does not track command-line flag changes. Force only the final main
-    # module to relink; all PostgreSQL and dependency objects remain reusable.
-    rm -f src/backend/pglite.js src/backend/pglite.wasm src/backend/pglite.data
-fi
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" emmake make PORTNAME=emscripten -C src/backend/ -j"${PGLITE_BUILD_JOBS:-}" pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }

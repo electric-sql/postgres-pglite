@@ -26,21 +26,45 @@
 #include "postgres.h"
 
 #include <fcntl.h>
+#include <limits.h>
 #include <semaphore.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
 #include "miscadmin.h"
+#include "port/atomics.h"
 #include "storage/ipc.h"
 #include "storage/pg_sema.h"
 #include "storage/shmem.h"
 
+#ifdef __PGLITE_POSTMASTER__
+#include "pglitec.h"
+#endif
 
 /* see file header comment */
-#if defined(USE_NAMED_POSIX_SEMAPHORES) && defined(EXEC_BACKEND)
+#if defined(USE_NAMED_POSIX_SEMAPHORES) && defined(EXEC_BACKEND) && \
+	!defined(__PGLITE_POSTMASTER__)
 #error cannot use named POSIX semaphores with EXEC_BACKEND
 #endif
+
+#ifdef __PGLITE_POSTMASTER__
+
+/*
+ * PGlite Workers cannot share Emscripten's process-local sem_t state.  Keep
+ * the semaphore words in PostgreSQL shared memory and let pglite libc map the
+ * blocking operation to the Worker host.  The multi-memory transform routes
+ * these atomic accesses to the memory selected by the tagged semaphore
+ * pointer.
+ */
+typedef struct PGSemaphoreData
+{
+	pg_atomic_uint32 count;
+	pg_atomic_uint32 wake_sequence;
+	char		pad[PG_CACHE_LINE_SIZE - 2 * sizeof(pg_atomic_uint32)];
+} PGSemaphoreData;
+
+#else
 
 typedef union SemTPadded
 {
@@ -56,9 +80,11 @@ typedef struct PGSemaphoreData
 
 #define PG_SEM_REF(x)	(&(x)->sem_padded.pgsem)
 
+#endif						/* __PGLITE_POSTMASTER__ */
+
 #define IPCProtection	(0600)	/* access/modify by user only */
 
-#ifdef USE_NAMED_POSIX_SEMAPHORES
+#if defined(USE_NAMED_POSIX_SEMAPHORES) && !defined(__PGLITE_POSTMASTER__)
 static sem_t **mySemPointers;	/* keep track of created semaphores */
 #else
 static PGSemaphore sharedSemas; /* array of PGSemaphoreData in shared memory */
@@ -71,7 +97,16 @@ static int	nextSemKey;			/* next name to try */
 static void ReleaseSemaphores(int status, Datum arg);
 
 
-#ifdef USE_NAMED_POSIX_SEMAPHORES
+#ifdef __PGLITE_POSTMASTER__
+
+static void
+PosixSemaphoreCreate(PGSemaphore sema)
+{
+	pg_atomic_init_u32(&sema->count, 1);
+	pg_atomic_init_u32(&sema->wake_sequence, 0);
+}
+
+#elif defined(USE_NAMED_POSIX_SEMAPHORES)
 
 /*
  * PosixSemaphoreCreate
@@ -143,6 +178,7 @@ PosixSemaphoreCreate(sem_t *sem)
 /*
  * PosixSemaphoreKill	- removes a semaphore
  */
+#ifndef __PGLITE_POSTMASTER__
 static void
 PosixSemaphoreKill(sem_t *sem)
 {
@@ -156,6 +192,7 @@ PosixSemaphoreKill(sem_t *sem)
 		elog(LOG, "sem_destroy failed: %m");
 #endif
 }
+#endif
 
 
 /*
@@ -164,7 +201,7 @@ PosixSemaphoreKill(sem_t *sem)
 Size
 PGSemaphoreShmemSize(int maxSemas)
 {
-#ifdef USE_NAMED_POSIX_SEMAPHORES
+#if defined(USE_NAMED_POSIX_SEMAPHORES) && !defined(__PGLITE_POSTMASTER__)
 	/* No shared memory needed in this case */
 	return 0;
 #else
@@ -209,7 +246,7 @@ PGReserveSemaphores(int maxSemas)
 				 errmsg("could not stat data directory \"%s\": %m",
 						DataDir)));
 
-#ifdef USE_NAMED_POSIX_SEMAPHORES
+#if defined(USE_NAMED_POSIX_SEMAPHORES) && !defined(__PGLITE_POSTMASTER__)
 	mySemPointers = (sem_t **) malloc(maxSemas * sizeof(sem_t *));
 	if (mySemPointers == NULL)
 		elog(PANIC, "out of memory");
@@ -238,6 +275,7 @@ PGReserveSemaphores(int maxSemas)
 static void
 ReleaseSemaphores(int status, Datum arg)
 {
+#ifndef __PGLITE_POSTMASTER__
 	int			i;
 
 #ifdef USE_NAMED_POSIX_SEMAPHORES
@@ -250,6 +288,7 @@ ReleaseSemaphores(int status, Datum arg)
 	for (i = 0; i < numSems; i++)
 		PosixSemaphoreKill(PG_SEM_REF(sharedSemas + i));
 #endif
+#endif
 }
 
 /*
@@ -261,7 +300,9 @@ PGSemaphore
 PGSemaphoreCreate(void)
 {
 	PGSemaphore sema;
+#ifndef __PGLITE_POSTMASTER__
 	sem_t	   *newsem;
+#endif
 
 	/* Can't do this in a backend, because static state is postmaster's */
 	Assert(!IsUnderPostmaster);
@@ -269,7 +310,10 @@ PGSemaphoreCreate(void)
 	if (numSems >= maxSems)
 		elog(PANIC, "too many semaphores created");
 
-#ifdef USE_NAMED_POSIX_SEMAPHORES
+#ifdef __PGLITE_POSTMASTER__
+	sema = &sharedSemas[numSems];
+	PosixSemaphoreCreate(sema);
+#elif defined(USE_NAMED_POSIX_SEMAPHORES)
 	newsem = PosixSemaphoreCreate();
 	/* Remember new sema for ReleaseSemaphores */
 	mySemPointers[numSems] = newsem;
@@ -293,9 +337,13 @@ PGSemaphoreCreate(void)
 void
 PGSemaphoreReset(PGSemaphore sema)
 {
-#ifdef __PGLITE__
-    sem_trywait(PG_SEM_REF(sema));
-    return;
+#ifdef __PGLITE_POSTMASTER__
+	pg_atomic_write_u32(&sema->count, 0);
+	pg_atomic_fetch_add_u32(&sema->wake_sequence, 1);
+	(void) pgl_futex_wake(&sema->wake_sequence, INT_MAX);
+#elif defined(__PGLITE__)
+	sem_trywait(PG_SEM_REF(sema));
+	return;
 #else
 	/*
 	 * There's no direct API for this in POSIX, so we have to ratchet the
@@ -323,6 +371,28 @@ PGSemaphoreReset(PGSemaphore sema)
 void
 PGSemaphoreLock(PGSemaphore sema)
 {
+#ifdef __PGLITE_POSTMASTER__
+	for (;;)
+	{
+		uint32		count = pg_atomic_read_u32(&sema->count);
+
+		while (count > 0)
+		{
+			if (pg_atomic_compare_exchange_u32(&sema->count, &count,
+										   count - 1))
+				return;
+		}
+
+		count = pg_atomic_read_u32(&sema->wake_sequence);
+		if (pg_atomic_read_u32(&sema->count) == 0)
+		{
+			if (pgl_futex_wait(&sema->wake_sequence, count, -1) < 0 &&
+				errno != EAGAIN && errno != EINTR && errno != ETIMEDOUT)
+				elog(FATAL, "PGlite semaphore wait failed: %m");
+		}
+		pgl_dispatch_pending_signals();
+	}
+#else
 	int			errStatus;
 
 	/* See notes in sysv_sema.c's implementation of PGSemaphoreLock. */
@@ -333,6 +403,7 @@ PGSemaphoreLock(PGSemaphore sema)
 
 	if (errStatus < 0)
 		elog(FATAL, "sem_wait failed: %m");
+#endif
 }
 
 /*
@@ -343,6 +414,12 @@ PGSemaphoreLock(PGSemaphore sema)
 void
 PGSemaphoreUnlock(PGSemaphore sema)
 {
+#ifdef __PGLITE_POSTMASTER__
+	pg_atomic_fetch_add_u32(&sema->count, 1);
+	pg_atomic_fetch_add_u32(&sema->wake_sequence, 1);
+	if (pgl_futex_wake(&sema->wake_sequence, 1) < 0)
+		elog(FATAL, "PGlite semaphore wake failed: %m");
+#else
 	int			errStatus;
 
 	/*
@@ -358,6 +435,7 @@ PGSemaphoreUnlock(PGSemaphore sema)
 
 	if (errStatus < 0)
 		elog(FATAL, "sem_post failed: %m");
+#endif
 }
 
 /*
@@ -368,6 +446,16 @@ PGSemaphoreUnlock(PGSemaphore sema)
 bool
 PGSemaphoreTryLock(PGSemaphore sema)
 {
+#ifdef __PGLITE_POSTMASTER__
+	uint32		count = pg_atomic_read_u32(&sema->count);
+
+	while (count > 0)
+	{
+		if (pg_atomic_compare_exchange_u32(&sema->count, &count, count - 1))
+			return true;
+	}
+	return false;
+#else
 	int			errStatus;
 
 	/*
@@ -389,4 +477,5 @@ PGSemaphoreTryLock(PGSemaphore sema)
 	}
 
 	return true;
+#endif
 }

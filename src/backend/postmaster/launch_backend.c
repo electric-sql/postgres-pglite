@@ -53,6 +53,10 @@
 #include "tcop/backend_startup.h"
 #include "utils/memutils.h"
 
+#ifdef __PGLITE_POSTMASTER__
+#include "pglitec.h"
+#endif
+
 #ifdef EXEC_BACKEND
 #include "nodes/queryjumble.h"
 #include "storage/pg_shmem.h"
@@ -387,6 +391,10 @@ internal_forkexec(const char *child_kind, int child_slot,
 	argv[3] = NULL;
 
 	/* Fire off execv in child */
+#ifdef __PGLITE_POSTMASTER__
+	pid = pgl_spawn_backend(child_kind, tmpfilename,
+						client_sock ? client_sock->sock : PGINVALID_SOCKET);
+#else
 	if ((pid = fork_process()) == 0)
 	{
 		if (execv(postgres_exec_path, argv) < 0)
@@ -398,6 +406,7 @@ internal_forkexec(const char *child_kind, int child_slot,
 			exit(1);
 		}
 	}
+#endif
 
 	return pid;					/* Parent returns pid, or -1 on fork failure */
 }

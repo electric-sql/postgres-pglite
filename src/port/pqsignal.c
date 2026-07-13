@@ -53,6 +53,9 @@
 #ifndef FRONTEND
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
+#if defined(__PGLITE_POSTMASTER__) && !defined(FRONTEND)
+#include "pglitec.h"
+#endif
 #endif
 
 #ifdef PG_SIGNAL_COUNT			/* Windows */
@@ -143,7 +146,11 @@ pqsignal(int signo, pqsigfunc func)
 	if (signo == SIGCHLD)
 		act.sa_flags |= SA_NOCLDSTOP;
 #endif
+#if defined(__PGLITE_POSTMASTER__) && !defined(FRONTEND)
+	if (pgl_sigaction(signo, &act, NULL) < 0)
+#else
 	if (sigaction(signo, &act, NULL) < 0)
+#endif
 		Assert(false);			/* probably indicates coding error */
 #else
 	/* Forward to Windows native signal system. */

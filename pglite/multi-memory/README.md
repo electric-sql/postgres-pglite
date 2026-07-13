@@ -322,6 +322,31 @@ Phase 6 gate. Phase 3 therefore validates the shared/atomics build, lowering,
 loader, extension, and applicable single-backend regression paths without
 claiming the future multi-session transport gate.
 
+## Phase 4: process portability
+
+Run the postmaster-profile source build and Worker portability gate from the
+parent PGlite checkout:
+
+```sh
+pnpm wasm:multi-memory:phase4
+```
+
+The runner builds PostgreSQL with the shared/atomics and source-provenance
+profiles, enables the compile-time-fenced `EXEC_BACKEND` portability layer,
+and performs all source compilation inside the pinned Docker image. It then
+transforms the exact generated artifact twice, checks deterministic output,
+optimizes it, and audits the three-memory imports plus the process, signal,
+timer, futex, and socket exports.
+
+Two real Node Workers instantiate that generated module with independent
+shared private memories, one global memory, and scoped memory aliased to
+private. The gate invokes the generated process callbacks, checks per-instance
+function tables and global/private memory behavior, and mounts one NODEFS
+directory in both Workers to verify temporary backend-parameter transport. It
+also runs the package typecheck/build, focused Control SAB, signal, semaphore,
+latch, timer, connection-ring, and virtual-socket tests, and zero-warning
+lint. Machine-readable results are written under `.out/phase4/`.
+
 The native `pglite-wasm-multi-memory` tool accepts a conventional wasm32
 module with one imported memory. It preserves that private memory as index 0,
 adds `pglite.global_memory` as index 1 and the reserved

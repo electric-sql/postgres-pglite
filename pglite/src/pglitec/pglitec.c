@@ -26,6 +26,11 @@
 #include <setjmp.h>
 #include <string.h>
 #include <stdint.h>
+#include <signal.h>
+#include <poll.h>
+#include <sys/wait.h>
+
+#include "pglitec.h"
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -153,6 +158,242 @@ pgl_pclose(FILE* stream) {
         return pglite_pclose(stream);
     }
     return pclose(stream);
+}
+
+/* ========== Postmaster process host ========== */
+
+typedef pid_t (*pglite_spawn_backend_t)(const char *, const char *, int);
+typedef pid_t (*pglite_getpid_t)(void);
+typedef int (*pglite_kill_t)(pid_t, int);
+typedef pid_t (*pglite_waitpid_t)(pid_t, int *, int);
+typedef int (*pglite_timer_t)(double, double);
+typedef uint32_t (*pglite_signal_poll_t)(void);
+typedef void (*pglite_signal_mask_t)(uint32_t);
+typedef int (*pglite_futex_wait_t)(void *, uint32_t, double);
+typedef int (*pglite_futex_wake_t)(void *, int);
+typedef int (*pglite_socket_t)(int, int, int);
+typedef int (*pglite_bind_t)(int, const struct sockaddr *, socklen_t);
+typedef int (*pglite_listen_t)(int, int);
+typedef int (*pglite_accept_t)(int, struct sockaddr *, socklen_t *);
+typedef int (*pglite_close_t)(int);
+typedef ssize_t (*pglite_recv_t)(int, void *, size_t, int);
+typedef ssize_t (*pglite_send_t)(int, const void *, size_t, int);
+typedef int (*pglite_poll_t)(struct pollfd *, nfds_t, int);
+
+static pglite_spawn_backend_t pglite_spawn_backend = NULL;
+static pglite_getpid_t pglite_getpid = NULL;
+static pglite_kill_t pglite_kill = NULL;
+static pglite_waitpid_t pglite_waitpid = NULL;
+static pglite_timer_t pglite_timer = NULL;
+static pglite_signal_poll_t pglite_signal_poll = NULL;
+static pglite_signal_mask_t pglite_signal_mask = NULL;
+static pglite_futex_wait_t pglite_futex_wait = NULL;
+static pglite_futex_wake_t pglite_futex_wake = NULL;
+static pglite_socket_t pglite_socket = NULL;
+static pglite_bind_t pglite_bind = NULL;
+static pglite_listen_t pglite_listen = NULL;
+static pglite_accept_t pglite_accept = NULL;
+static pglite_close_t pglite_close = NULL;
+static pglite_recv_t pglite_recv = NULL;
+static pglite_send_t pglite_send = NULL;
+static pglite_poll_t pglite_poll = NULL;
+static struct sigaction pglite_signal_actions[NSIG];
+static sigset_t pglite_blocked_signals;
+
+void EMSCRIPTEN_KEEPALIVE
+pgl_set_process_host(pglite_spawn_backend_t spawn_backend,
+					 pglite_getpid_t get_process_id,
+					 pglite_kill_t send_signal,
+					 pglite_waitpid_t wait_process) {
+	pglite_spawn_backend = spawn_backend;
+	pglite_getpid = get_process_id;
+	pglite_kill = send_signal;
+	pglite_waitpid = wait_process;
+}
+
+void EMSCRIPTEN_KEEPALIVE
+pgl_set_signal_host(pglite_signal_poll_t poll_signals,
+					pglite_signal_mask_t set_signal_mask,
+					pglite_timer_t set_timer) {
+	pglite_signal_poll = poll_signals;
+	pglite_signal_mask = set_signal_mask;
+	pglite_timer = set_timer;
+}
+
+void EMSCRIPTEN_KEEPALIVE
+pgl_set_futex_host(pglite_futex_wait_t wait_futex,
+				   pglite_futex_wake_t wake_futex) {
+	pglite_futex_wait = wait_futex;
+	pglite_futex_wake = wake_futex;
+}
+
+void EMSCRIPTEN_KEEPALIVE
+pgl_set_socket_host(pglite_socket_t create_socket,
+					pglite_bind_t bind_socket,
+					pglite_listen_t listen_socket,
+					pglite_accept_t accept_socket,
+					pglite_close_t close_socket,
+					pglite_recv_t receive_socket,
+					pglite_send_t send_socket,
+					pglite_poll_t poll_sockets) {
+	pglite_socket = create_socket;
+	pglite_bind = bind_socket;
+	pglite_listen = listen_socket;
+	pglite_accept = accept_socket;
+	pglite_close = close_socket;
+	pglite_recv = receive_socket;
+	pglite_send = send_socket;
+	pglite_poll = poll_sockets;
+}
+
+pid_t EMSCRIPTEN_KEEPALIVE
+pgl_spawn_backend(const char *child_kind, const char *parameter_file,
+				  int client_socket) {
+	if (pglite_spawn_backend == NULL) {
+		errno = ENOSYS;
+		return -1;
+	}
+	return pglite_spawn_backend(child_kind, parameter_file, client_socket);
+}
+
+pid_t EMSCRIPTEN_KEEPALIVE
+pgl_getpid(void) {
+	if (pglite_getpid == NULL)
+		return getpid();
+	return pglite_getpid();
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_kill(pid_t pid, int signal_number) {
+	if (pglite_kill == NULL) {
+		errno = ESRCH;
+		return -1;
+	}
+	return pglite_kill(pid, signal_number);
+}
+
+pid_t EMSCRIPTEN_KEEPALIVE
+pgl_waitpid(pid_t pid, int *status, int options) {
+	if (pglite_waitpid == NULL) {
+		errno = ECHILD;
+		return -1;
+	}
+	return pglite_waitpid(pid, status, options);
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_setitimer(int which, const struct itimerval *value,
+			  struct itimerval *old_value) {
+	double delay_ms;
+	double interval_ms;
+
+	if (which != ITIMER_REAL || value == NULL || pglite_timer == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (old_value != NULL)
+		memset(old_value, 0, sizeof(*old_value));
+	delay_ms = value->it_value.tv_sec * 1000.0 +
+		value->it_value.tv_usec / 1000.0;
+	interval_ms = value->it_interval.tv_sec * 1000.0 +
+		value->it_interval.tv_usec / 1000.0;
+	return pglite_timer(delay_ms, interval_ms);
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_sigaction(int signal_number, const struct sigaction *action,
+			  struct sigaction *old_action) {
+	if (signal_number <= 0 || signal_number >= NSIG) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (old_action != NULL)
+		*old_action = pglite_signal_actions[signal_number];
+	if (action != NULL)
+		pglite_signal_actions[signal_number] = *action;
+	return 0;
+}
+
+static uint32_t
+pgl_signal_set_mask(const sigset_t *set) {
+	uint32_t mask = 0;
+	int signal_number;
+
+	for (signal_number = 1; signal_number <= 31; signal_number++) {
+		if (sigismember(set, signal_number) == 1)
+			mask |= ((uint32_t) 1) << (signal_number - 1);
+	}
+	return mask;
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_sigprocmask(int how, const sigset_t *set, sigset_t *old_set) {
+	int signal_number;
+
+	if (old_set != NULL)
+		*old_set = pglite_blocked_signals;
+	if (set == NULL)
+		return 0;
+	for (signal_number = 1; signal_number < NSIG; signal_number++) {
+		int member = sigismember(set, signal_number);
+
+		if (member < 0)
+			continue;
+		if (how == SIG_SETMASK) {
+			if (member)
+				sigaddset(&pglite_blocked_signals, signal_number);
+			else
+				sigdelset(&pglite_blocked_signals, signal_number);
+		} else if (how == SIG_BLOCK && member) {
+			sigaddset(&pglite_blocked_signals, signal_number);
+		} else if (how == SIG_UNBLOCK && member) {
+			sigdelset(&pglite_blocked_signals, signal_number);
+		}
+	}
+	if (how != SIG_SETMASK && how != SIG_BLOCK && how != SIG_UNBLOCK) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (pglite_signal_mask != NULL)
+		pglite_signal_mask(pgl_signal_set_mask(&pglite_blocked_signals));
+	return 0;
+}
+
+void EMSCRIPTEN_KEEPALIVE
+pgl_dispatch_pending_signals(void) {
+	uint32_t pending;
+	int signal_number;
+
+	if (pglite_signal_poll == NULL)
+		return;
+	pending = pglite_signal_poll();
+	for (signal_number = 1; signal_number <= 31; signal_number++) {
+		void (*handler)(int);
+
+		if ((pending & (((uint32_t) 1) << (signal_number - 1))) == 0)
+			continue;
+		handler = pglite_signal_actions[signal_number].sa_handler;
+		if (handler != SIG_DFL && handler != SIG_IGN && handler != NULL)
+			handler(signal_number);
+	}
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_futex_wait(void *address, uint32_t expected, double timeout_ms) {
+	if (pglite_futex_wait == NULL) {
+		errno = ENOSYS;
+		return -1;
+	}
+	return pglite_futex_wait(address, expected, timeout_ms);
+}
+
+int EMSCRIPTEN_KEEPALIVE
+pgl_futex_wake(void *address, int count) {
+	if (pglite_futex_wake == NULL) {
+		errno = ENOSYS;
+		return -1;
+	}
+	return pglite_futex_wake(address, count);
 }
 
 /* ========== User related functions ==========
@@ -466,6 +707,10 @@ int EMSCRIPTEN_KEEPALIVE pgl_getsockname(int __fd, struct sockaddr * __addr,
 */
 
 ssize_t EMSCRIPTEN_KEEPALIVE pgl_recv(int __fd, void *__buf, size_t __n, int __flags) {
+	if (pglite_recv != NULL)
+		return pglite_recv(__fd, __buf, __n, __flags);
+	if (pgl_read == NULL)
+		return recv(__fd, __buf, __n, __flags);
 	ssize_t got = pgl_read(__buf, __n);
 	return got;
 }
@@ -475,22 +720,67 @@ ssize_t EMSCRIPTEN_KEEPALIVE pgl_recv(int __fd, void *__buf, size_t __n, int __f
 */
 
 ssize_t EMSCRIPTEN_KEEPALIVE pgl_send(int __fd, const void *__buf, size_t __n, int __flags) {
+	if (pglite_send != NULL)
+		return pglite_send(__fd, __buf, __n, __flags);
+	if (pgl_write == NULL)
+		return send(__fd, __buf, __n, __flags);
 	ssize_t wrote = pgl_write(__buf, __n);
 	return wrote;
 }
 
 int EMSCRIPTEN_KEEPALIVE pgl_connect(int socket, const struct sockaddr *address, socklen_t address_len) {
+	#ifdef __PGLITE_POSTMASTER__
+	return connect(socket, address, address_len);
+	#else
 	// dummy
 	return 0;
+	#endif
 }
 
-struct pollfd {
-    int   fd;         /* file descriptor */
-    short events;     /* requested events */
-	short revents;    /* returned events */
-};
+int EMSCRIPTEN_KEEPALIVE pgl_socket(int domain, int type, int protocol) {
+	if (pglite_socket != NULL)
+		return pglite_socket(domain, type, protocol);
+	return socket(domain, type, protocol);
+}
 
-int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout) {
-    // dummy
+int EMSCRIPTEN_KEEPALIVE pgl_bind(int socket_fd, const struct sockaddr *address,
+								  socklen_t address_len) {
+	if (pglite_bind != NULL)
+		return pglite_bind(socket_fd, address, address_len);
+	return bind(socket_fd, address, address_len);
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_listen(int socket_fd, int backlog) {
+	if (pglite_listen != NULL)
+		return pglite_listen(socket_fd, backlog);
+	return listen(socket_fd, backlog);
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_accept(int socket_fd, struct sockaddr *address,
+									socklen_t *address_len) {
+	if (pglite_accept != NULL)
+		return pglite_accept(socket_fd, address, address_len);
+	return accept(socket_fd, address, address_len);
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_close(int fd) {
+	int result;
+
+	if (pglite_close == NULL)
+		return close(fd);
+	result = pglite_close(fd);
+	if (result == PGL_SOCKET_NOT_HANDLED)
+		return close(fd);
+	return result;
+}
+
+int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], nfds_t nfds, int timeout) {
+	#ifdef __PGLITE_POSTMASTER__
+	if (pglite_poll != NULL)
+		return pglite_poll(fds, nfds, timeout);
+	return poll(fds, nfds, timeout);
+	#else
+	// The single-user input pump reports its one emulated socket as ready.
 	return nfds;
+	#endif
 }
