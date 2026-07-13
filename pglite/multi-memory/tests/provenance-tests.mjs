@@ -30,18 +30,26 @@ for (const [address, value] of [
   [104, 2],
   [128, 3],
   [144, 4],
+  [176, 6],
+  [180, 7],
 ]) {
   privateView.setInt32(address, value, true)
 }
 globalView.setInt32(160, 5, true)
+globalView.setInt32(164, 8, true)
 
 assert.equal(instance.exports.constant(), 1)
 assert.equal(instance.exports.stack(), 2)
 assert.equal(instance.exports.allocator_and_internal(), 3)
 assert.equal(instance.exports.got(), 4)
 assert.equal(instance.exports.unknown(0x800000a0), 5)
+assert.equal(instance.exports.unknown(176), 6)
+assert.equal(instance.exports.loop(176, 2), 13)
+assert.equal(instance.exports.loop(0x800000a0, 2), 13)
 assert.equal(report.abi.profile, 'two-domain-provenance')
 assert.equal(report.privateReturnExports[0], 'palloc')
+assert.equal(report.privateCloneExports[0], 'unknown:0')
+assert.equal(report.privateCloneExports[1], 'loop:0')
 assert.ok(report.inferredPrivateParameters >= 1)
 assert.ok(report.directPrivate.load >= 4)
 assert.ok(report.rewritten.load >= 1)

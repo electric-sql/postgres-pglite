@@ -94,7 +94,9 @@ pglite-wasm-multi-memory "${OUT}/provenance.wasm" \
   --global-initial-pages 2 \
   --global-maximum-pages 16 \
   --provenance \
-  --private-return-export palloc
+  --private-return-export palloc \
+  --private-clone-export unknown:0 \
+  --private-clone-export loop:0
 node22 "${ROOT}/tests/provenance-tests.mjs" \
   "${OUT}/provenance.multi.wasm" \
   "${OUT}/provenance.report.json"

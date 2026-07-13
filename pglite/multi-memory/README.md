@@ -131,14 +131,31 @@ table-referenced functions retain unknown parameters. The allocator manifest
 is validated against the exact module's export table and deliberately excludes
 ShmemAlloc, DSM, DSA, and `shm_toc` allocators.
 
-On the current release artifact this proves 126,473 of 395,210 static memory
-operations (32.0%) direct and leaves 268,737 generic. Differential SQL passes,
-but the workload result is still 3.795x worst case: 3.423x recursive, 3.795x
-indexed aggregate, and 1.513x pgbench-style. Static coverage therefore does not
+On the current release artifact this proves 127,735 of 395,210 static memory
+operations (32.3%) direct and leaves 267,475 generic. Differential SQL passes,
+but the workload result is still 3.260x worst case: 2.939x recursive, 3.260x
+indexed aggregate, and 1.428x pgbench-style. Static coverage therefore does not
 predict useful dynamic coverage. The residual hot report shows that loop-heavy
 `memcpy`, `memset`, comparison, compression, executor, and tuple paths remain
 generic. The next work is sound function-boundary hoisting/private clones for
 those ranked bimodal functions, not more unprofiled static-site coverage.
+
+The Phase 2D experiment adds input-hash-pinned, function-boundary private
+clones for 37 ranked functions. Each original entry checks its declared pointer
+parameters once and enters the private clone only when every pointer has the
+private tag; null or tagged values retain the generic body. Run it with:
+
+```sh
+pnpm wasm:multi-memory:phase2d
+```
+
+The fresh result is 3.089x worst case: 2.665x recursive, 3.089x indexed
+aggregate, and 1.395x pgbench-style, at 1.028x artifact size. This is a real but
+insufficient improvement. A separate sound inline-private fallback reached
+1.872x worst case but inflated the artifact to 1.442x. The remaining blocker is
+pointer provenance after loads from pointer-bearing structures, especially in
+executor, compression, tuple, and comparison loops. The next step is targeted
+root/field metadata (or an LLVM provenance pass), not more clone entries.
 
 The native `pglite-wasm-multi-memory` tool accepts a conventional wasm32
 module with one imported memory. It preserves that private memory as index 0,

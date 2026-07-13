@@ -41,7 +41,7 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.5.0";
+constexpr const char* ToolVersion = "0.6.0";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
@@ -61,6 +61,8 @@ struct Options {
   std::string scopedImportBase = "scoped_memory";
   std::vector<std::string> inputFeatures;
   std::vector<std::string> privateReturnExports;
+  std::vector<std::string> privateCloneExports;
+  std::vector<std::string> privateCloneFunctions;
   std::vector<uint64_t> directPrivateFunctionIndices;
   uint64_t globalInitialPages = UINT64_MAX;
   uint64_t globalMaximumPages = UINT64_MAX;
@@ -212,6 +214,8 @@ void usage(std::ostream& out) {
       << "      --direct-private-function-index N  diagnostic direct function\n"
       << "      --provenance                  enable sound direct-access proofs\n"
       << "      --private-return-export NAME  provenance summary (repeatable)\n"
+      << "      --private-clone-export SPEC   guarded clone NAME:PARAM,...\n"
+      << "      --private-clone-function SPEC guarded internal NAME:PARAM,...\n"
       << "  -S, --emit-text                   emit WAT instead of binary\n"
       << "  -h, --help                        show this help\n"
       << "      --version                     show tool version\n";
@@ -271,6 +275,10 @@ Options parseOptions(int argc, const char** argv) {
       options.provenance = true;
     } else if (arg == "--private-return-export") {
       options.privateReturnExports.push_back(take(arg.c_str()));
+    } else if (arg == "--private-clone-export") {
+      options.privateCloneExports.push_back(take(arg.c_str()));
+    } else if (arg == "--private-clone-function") {
+      options.privateCloneFunctions.push_back(take(arg.c_str()));
     } else if (arg == "-S" || arg == "--emit-text") {
       options.emitText = true;
     } else if (!arg.empty() && arg[0] == '-') {
@@ -301,14 +309,17 @@ Options parseOptions(int argc, const char** argv) {
       "--private-only-oracle and --direct-private-function-index are exclusive");
   }
   if (options.provenance &&
-      (options.privateOnlyOracle || options.inlinePrivateFastPath ||
+      (options.privateOnlyOracle ||
        !options.directPrivateFunctionIndices.empty())) {
     throw std::runtime_error(
-      "--provenance is exclusive with diagnostic and inline profiles");
+      "--provenance is exclusive with diagnostic profiles");
   }
-  if (!options.privateReturnExports.empty() && !options.provenance) {
+  if ((!options.privateReturnExports.empty() ||
+       !options.privateCloneExports.empty() ||
+       !options.privateCloneFunctions.empty()) &&
+      !options.provenance) {
     throw std::runtime_error(
-      "--private-return-export requires --provenance");
+      "provenance summaries and clones require --provenance");
   }
   return options;
 }
@@ -390,6 +401,7 @@ class Transformer {
   std::unordered_set<Expression*> generatedDirectOperations;
   std::unordered_set<std::string> privateReturnFunctions;
   std::unordered_set<std::string> privateParameters;
+  std::map<std::string, std::string> privateCloneSources;
 
   static std::string parameterKey(Name function, Index index) {
     return function.toString() + ":" + std::to_string(index);
@@ -903,7 +915,9 @@ class Transformer {
         << (!options.directPrivateFunctionIndices.empty()
               ? "profile-guided-private-oracle"
               : options.provenance
-              ? "two-domain-provenance"
+              ? (options.inlinePrivateFastPath
+                   ? "two-domain-provenance-private-fast-path"
+                   : "two-domain-provenance")
               : options.privateOnlyOracle
               ? (options.profileFunctionEntries
                    ? "private-only-oracle-function-profile"
@@ -1104,6 +1118,122 @@ public:
     }
   }
 
+  void createPrivateClones() {
+    std::unordered_set<std::string> clonedFunctions;
+    Builder builder(module);
+    std::vector<std::pair<std::string, bool>> specs;
+    for (const auto& spec : options.privateCloneExports) {
+      specs.emplace_back(spec, true);
+    }
+    for (const auto& spec : options.privateCloneFunctions) {
+      specs.emplace_back(spec, false);
+    }
+    for (const auto& [spec, byExport] : specs) {
+      auto separator = spec.find(':');
+      if (separator == std::string::npos || separator == 0 ||
+          separator + 1 == spec.size()) {
+        throw std::runtime_error(
+          "private clone must use NAME:PARAM,... syntax: " + spec);
+      }
+      auto exportName = spec.substr(0, separator);
+      Function* original = nullptr;
+      if (byExport) {
+        Export* export_ = nullptr;
+        for (const auto& candidate : module.exports) {
+          if (candidate->name.toString() == exportName) {
+            export_ = candidate.get();
+            break;
+          }
+        }
+        if (!export_ || export_->kind != ExternalKind::Function) {
+          throw std::runtime_error("private-clone export is not a function: " +
+                                   exportName);
+        }
+        original = module.getFunction(export_->value);
+      } else {
+        original = module.getFunctionOrNull(Name(exportName));
+        if (!original) {
+          throw std::runtime_error("private-clone function does not exist: " +
+                                   exportName);
+        }
+      }
+      if (original->imported()) {
+        throw std::runtime_error("cannot clone imported function: " +
+                                 exportName);
+      }
+      if (!clonedFunctions.insert(original->name.toString()).second) {
+        throw std::runtime_error("function has multiple private clone specs: " +
+                                 exportName);
+      }
+
+      std::vector<Index> pointerParameters;
+      std::string parameters = spec.substr(separator + 1);
+      size_t start = 0;
+      while (start < parameters.size()) {
+        auto end = parameters.find(',', start);
+        auto text = parameters.substr(start, end - start);
+        auto index = parseUnsigned(text, "--private-clone-export");
+        if (index >= original->getParams().size() ||
+            original->getParams()[index] != Type::i32) {
+          throw std::runtime_error("private clone parameter is not i32: " +
+                                   spec);
+        }
+        pointerParameters.push_back(index);
+        if (end == std::string::npos) {
+          break;
+        }
+        start = end + 1;
+      }
+      std::sort(pointerParameters.begin(), pointerParameters.end());
+      if (std::adjacent_find(pointerParameters.begin(),
+                             pointerParameters.end()) !=
+          pointerParameters.end()) {
+        throw std::runtime_error("duplicate private clone parameter: " + spec);
+      }
+
+      auto cloneName = Name(std::string("__pglite_private_clone_") +
+                            std::to_string(privateCloneSources.size()));
+      auto cloneBody =
+        ExpressionManipulator::copy(original->body, module);
+      auto clone = Builder::makeFunction(
+        cloneName,
+        Signature(original->getParams(), original->getResults()),
+        std::vector<Type>(original->vars),
+        cloneBody);
+      clone->setExplicitName(cloneName);
+      clone->noFullInline = true;
+      clone->noPartialInline = true;
+      module.addFunction(std::move(clone));
+      privateCloneSources.emplace(
+        cloneName.toString(), byExport ? exportName : "@" + exportName);
+      for (auto index : pointerParameters) {
+        privateParameters.insert(parameterKey(cloneName, index));
+      }
+
+      std::vector<Expression*> operands;
+      for (Index index = 0; index < original->getParams().size(); ++index) {
+        operands.push_back(
+          builder.makeLocalGet(index, original->getParams()[index]));
+      }
+      Expression* condition = nullptr;
+      for (auto index : pointerParameters) {
+        auto* positive = builder.makeBinary(
+          GtSInt32,
+          builder.makeLocalGet(index, Type::i32),
+          builder.makeConst(int32_t(0)));
+        condition = condition
+                      ? builder.makeBinary(AndInt32, condition, positive)
+                      : positive;
+      }
+      auto* privateCall = builder.makeCall(
+        cloneName, operands, original->getResults());
+      original->body = builder.makeIf(condition,
+                                      privateCall,
+                                      original->body,
+                                      original->getResults());
+    }
+  }
+
   void inferPrivateParameters() {
     if (!options.provenance) {
       return;
@@ -1218,8 +1348,9 @@ public:
 
   void run() {
     rejectAlreadyTransformed();
-    initializeFunctionStats();
     initializeProvenanceSummaries();
+    createPrivateClones();
+    initializeFunctionStats();
     inferPrivateParameters();
     addGlobalMemory();
 
@@ -1275,6 +1406,22 @@ public:
       out << '"' << jsonEscape(options.privateReturnExports[i]) << '"';
     }
     out << ']';
+    out << ",\"privateCloneExports\":[";
+    for (size_t i = 0; i < options.privateCloneExports.size(); ++i) {
+      if (i) {
+        out << ',';
+      }
+      out << '"' << jsonEscape(options.privateCloneExports[i]) << '"';
+    }
+    out << ']';
+    out << ",\"privateCloneFunctions\":[";
+    for (size_t i = 0; i < options.privateCloneFunctions.size(); ++i) {
+      if (i) {
+        out << ',';
+      }
+      out << '"' << jsonEscape(options.privateCloneFunctions[i]) << '"';
+    }
+    out << ']';
     out << ",\"inferredPrivateParameters\":" << privateParameters.size();
     out << ",\"allowlisted\":";
     writeMap(out, allowlisted);
@@ -1294,6 +1441,14 @@ public:
       }
       out << "{\"name\":\"" << jsonEscape(name)
           << "\",\"wasmFunctionIndex\":" << stat.wasmFunctionIndex
+          << ",\"privateCloneOf\":";
+      auto cloneSource = privateCloneSources.find(name);
+      if (cloneSource == privateCloneSources.end()) {
+        out << "null";
+      } else {
+        out << '"' << jsonEscape(cloneSource->second) << '"';
+      }
+      out
           << ",\"accessClassification\":\""
           << (options.privateOnlyOracle ||
                   std::find(options.directPrivateFunctionIndices.begin(),
@@ -1380,7 +1535,12 @@ Rewriter::Provenance Rewriter::classify(Expression* expression) {
     return cached->second;
   }
   if (!provenanceActive.insert(expression).second) {
-    return Provenance::Unknown;
+    // Use a coinductive private hypothesis for loop-carried local cycles. Any
+    // non-private entry, assignment, or default root still joins the complete
+    // reaching-definition set to Unknown. This lets p = p + constant retain a
+    // private parameter's provenance without accepting a cycle rooted in an
+    // unknown parameter or zero-initialized local.
+    return Provenance::Private;
   }
 
   auto join = [](Provenance left, Provenance right) {

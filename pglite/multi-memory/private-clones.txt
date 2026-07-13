@@ -1,0 +1,42 @@
+# Guarded private clones for this exact release artifact. Internal Binaryen
+# names are link-specific, so the runner rejects a different input hash.
+input-sha256 7243b49ca87c2dcf06f18bfe4fab0cec75fa994ffd0b577638d3d6b5851ccba7
+
+export memcpy:0,1
+export memset:0
+export memcmp:0,1
+export strlen:0
+export strncmp:0,1
+export pg_strtok:0
+export slot_getsomeattrs_int:0
+export FunctionCall2Coll:0
+export pfree:0
+export HeapTupleSatisfiesVisibility:0,1
+export MemoryContextReset:0
+export LWLockAcquire:0
+
+function 2852:0,1,2 # ExecInterpExpr
+function 10677:0,2 # pglz_compress; strategy may be null
+function 10413:0 # qsort_interruptible
+function 2977:0 # ExecScan
+function 127:0,1,2,3,4 # fill_val
+function 10792:0 # pg_comp_crc32c_sb8
+function 2192:0,1,2 # compare_scalars
+function 3248:0 # ExecRecursiveUnion
+function 525:0 # heapgettup_pagemode
+function 137:0,1,2 # heap_form_minimal_tuple
+function 3006:0,1 # ExecStoreMinimalTuple
+function 125:0,1,2 # heap_compute_data_size
+function 10247:0 # AllocSetAlloc
+function 9994:0,1 # hash_search_with_hash_value
+function 786:0,1,2 # _bt_compare
+function 10520:0,1 # tuplestore_puttuple_common
+function 10678:0,2 # pglz_decompress
+function 3121:0 # ExecAgg
+function 5581:0 # LWLockDisownInternal
+function 129:0,2 # nocachegetattr
+function 5583:0 # LWLockReleaseInternal
+function 10827:0 # pg_qsort
+function 5650:0 # pg_checksum_page
+function 2149:0,1,2 # core_yylex
+function 2189:0 # compute_scalar_stats

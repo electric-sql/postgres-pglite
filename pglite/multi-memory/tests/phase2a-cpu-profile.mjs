@@ -14,16 +14,21 @@ const [cpuProfile, transformReport] = await Promise.all([
 const statByIndex = new Map(
   transformReport.functions.map((entry) => [entry.wasmFunctionIndex, entry]),
 )
+const statByName = new Map(
+  transformReport.functions.map((entry) => [entry.name, entry]),
+)
 const modules = new Map()
 for (const node of cpuProfile.nodes) {
   const match = /^wasm-function\[(\d+)\]$/.exec(node.callFrame.functionName)
-  if (!match || !node.callFrame.url.startsWith('wasm:')) continue
+  const namedStat = statByName.get(node.callFrame.functionName)
+  if ((!match && !namedStat) || !node.callFrame.url.startsWith('wasm:'))
+    continue
   const module = modules.get(node.callFrame.url) ?? {
     hits: 0,
     functions: new Map(),
   }
   const hits = node.hitCount ?? 0
-  const index = Number(match[1])
+  const index = match ? Number(match[1]) : namedStat.wasmFunctionIndex
   module.hits += hits
   module.functions.set(index, (module.functions.get(index) ?? 0) + hits)
   modules.set(node.callFrame.url, module)

@@ -34,4 +34,27 @@
   (func (export "unknown") (param $address i32) (result i32)
     (i32.load (local.get $address))
   )
+
+  (func (export "loop") (param $address i32) (param $count i32) (result i32)
+    (local $sum i32)
+    (block $done
+      (loop $next
+        (br_if $done (i32.eqz (local.get $count)))
+        (local.set $sum
+          (i32.add
+            (local.get $sum)
+            (i32.load (local.get $address))
+          )
+        )
+        (local.set $address
+          (i32.add (local.get $address) (i32.const 4))
+        )
+        (local.set $count
+          (i32.sub (local.get $count) (i32.const 1))
+        )
+        (br $next)
+      )
+    )
+    (local.get $sum)
+  )
 )
