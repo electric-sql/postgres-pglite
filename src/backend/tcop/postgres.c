@@ -5015,7 +5015,7 @@ void
 PostgresMain(const char *dbname, const char *username)
 {
 #ifndef __PGLITE__
-	sigjmp_buf	local_sigjmp_buf;
+	sigjmp_buf	postgresmain_sigjmp_buf;
 #endif
 
 	/* Reset the state consumed by the extracted PostgresMainLoopOnce(). */
