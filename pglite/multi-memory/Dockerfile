@@ -8,8 +8,7 @@ ARG PNPM_VERSION=9.7.0
 ARG TARGETARCH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-      cmake git jq libipc-run-perl ninja-build \
+    && apt-get install -y --no-install-recommends cmake git ninja-build \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --filter=blob:none --no-checkout \
@@ -60,6 +59,12 @@ RUN case "${TARGETARCH}" in \
     && ln -s /opt/node24/bin/node /usr/local/bin/node24 \
     && /opt/node22/bin/npm install --global --prefix /opt/node22 \
       "pnpm@${PNPM_VERSION}"
+
+# Keep host regression/TAP tooling in the image, late enough that changing it
+# does not invalidate the expensive native Binaryen build above.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends jq libipc-run-perl \
+    && rm -rf /var/lib/apt/lists/*
 
 LABEL org.opencontainers.image.title="PGlite multi-memory build and test tools" \
       org.opencontainers.image.binaryen-revision="${BINARYEN_COMMIT}" \
