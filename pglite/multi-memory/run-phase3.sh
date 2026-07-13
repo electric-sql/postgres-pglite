@@ -33,6 +33,7 @@ docker run --rm \
     PGLITE_SHARED_MEMORY=true \
     PGLITE_MULTI_MEMORY_PROVENANCE=true \
     PGLITE_SKIP_THIRD_PARTY_EXTENSIONS=true \
+    PGLITE_WITH_REGRESSION_TESTS=true \
     PGLITE_BUILD_JOBS=4 \
     INSTALL_FOLDER=/phase3/source-build \
       ./build-pglite.sh

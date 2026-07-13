@@ -181,6 +181,30 @@ PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist \
     ARCHIVE_DIR="$INSTALL_FOLDER/extensions" || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }
 # the above will also create a file with the imports that each extension needs - we pass these as input in the next step for emscripten to keep alive
 
+# Phase 3's upstream regression gate loads the core regress module directly
+# through $libdir. Keep this opt-in so the ordinary PGlite artifact does not
+# acquire test-only code, while still using the normal extension-import export
+# path for the shared test build.
+if [ "${PGLITE_WITH_REGRESSION_TESTS:-false}" = true ]; then
+    REGRESS_DIR="src/test/regress"
+    REGRESS_IMPORTS_DIR="$INSTALL_FOLDER/include/postgresql/emscripten/extension/imports"
+    emmake make PORTNAME=emscripten -C "$REGRESS_DIR" regress.so || \
+        { echo 'error: building core regression side module' ; exit 33; }
+    mkdir -p "$INSTALL_FOLDER/lib/postgresql" "$REGRESS_IMPORTS_DIR"
+    install -m 755 "$REGRESS_DIR/regress.so" \
+        "$INSTALL_FOLDER/lib/postgresql/regress.so"
+    "$LLVM_NM" --undefined-only "$REGRESS_DIR/regress.o" \
+        | awk '{print $2}' \
+        | sed '/^$/d' \
+        | sort -u > "$REGRESS_DIR/regress.undef.txt"
+    "$LLVM_NM" --defined-only "$REGRESS_DIR/regress.o" \
+        | awk '$2 ~ /^[TDB]$/ {print $3}' \
+        | sed '/^$/d' \
+        | sort -u > "$REGRESS_DIR/regress.defs.txt"
+    comm -23 "$REGRESS_DIR/regress.undef.txt" "$REGRESS_DIR/regress.defs.txt" \
+        > "$REGRESS_IMPORTS_DIR/regress.imports"
+fi
+
 # Step 4: make and dist other extensions. Phase 3 deliberately validates the
 # complete core dependency/PostgreSQL/contrib world first; dynamic third-party
 # side modules remain separately gated.

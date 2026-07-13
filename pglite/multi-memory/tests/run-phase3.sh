@@ -180,11 +180,15 @@ fs.writeFileSync(output, `${JSON.stringify({
   postgresqlRebuilt: true,
   sharedSideModulesAudited: Number(sideModules),
   pthreadRuntime: false,
+  regressionSideModule: true,
   sourceBoundary: 'pglite libc plus fenced PostgreSQL annotations',
 }, null, 2)}\n`)
 NODE
 
+"${MM_ROOT}/tests/run-phase3-regress.sh" "${REPO_ROOT}"
+
 node22 "${MM_ROOT}/tests/phase3-summary.mjs" \
   "${OUT}/artifact-audit.json" "${OUT}/differential.json" \
   "${OUT}/global-allocation.json" "${OUT}/build-audit.json" \
+  "${OUT}/pg-regress/phase3-pg-regress.json" \
   "${OUT}/summary.json"

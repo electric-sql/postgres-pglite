@@ -298,17 +298,29 @@ bulk, and atomic accesses. Every generated core/contrib side module is audited
 for a shared memory import, and `pgcrypto.so` is loaded by the SQL differential
 corpus. No tracked release artifact is replaced by this gate.
 
-The 13 July 2026 build/lowering POC gate passes from a clean rebuild on an
-Apple Silicon host. Docker selected the explicit `emscripten/emsdk:3.1.74-arm64`
-builder base; both the dependency builder and derived tools image inspect as
+The 13 July 2026 Phase 3 gate passes from a clean rebuild on an Apple Silicon
+host. Docker selected the explicit `emscripten/emsdk:3.1.74-arm64` builder
+base; both the dependency builder and derived tools image inspect as
 `linux/arm64`, and the builder reports `aarch64` at runtime. The Wasm target and
-flags are unchanged. The gate rewrote 250,397 operations, audited 50 shared
+flags are unchanged. The gate rewrote 250,408 operations, audited 50 shared
 core/contrib side modules, passed the tagged global allocation test, and passed
 9/9 matched-classic differential SQL cases including `pgcrypto`. The optimized
-candidate is 13,687,920 bytes versus 9,785,130 bytes for the matched classic
-artifact. This is the Phase 3 POC gate, not the full phase exit: the design's
-explicit `pg_regress` requirement remains open until the regression harness is
-available.
+candidate is 13,689,309 bytes versus 9,786,351 bytes for the matched classic
+artifact.
+
+The same container builds exact-revision native ARM64 `libpq`, `psql`, and
+`pg_regress` from a clean `git archive`, installs the regression-only shared
+module into the test artifact, and runs a 12-test upstream corpus through the
+TCP frontend. `test_setup`, the character types, integer types, OID, and both
+floating-point tests all pass. The profile is deliberately serialized and
+excludes streaming `COPY FROM STDIN`: a diagnostic flattened run of all 230
+core tests reached that operation in `bit`, where today's synchronous
+single-thread PGlite input pump necessarily observes EOF before the client can
+send later `CopyData` frames. Worker-backed full-duplex connection rings solve
+that boundary in Phase 4/5; the unmodified concurrent core schedule remains the
+Phase 6 gate. Phase 3 therefore validates the shared/atomics build, lowering,
+loader, extension, and applicable single-backend regression paths without
+claiming the future multi-session transport gate.
 
 The native `pglite-wasm-multi-memory` tool accepts a conventional wasm32
 module with one imported memory. It preserves that private memory as index 0,
