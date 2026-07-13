@@ -114,6 +114,32 @@ not pass Phase 2 or authorize production use. The sound provenance candidate
 must reproduce the improvement while retaining generic access at every
 unproved site.
 
+## Phase 2B: conservative provenance
+
+Run the first sound specialization tranche from the parent checkout:
+
+```sh
+pnpm wasm:multi-memory:phase2b
+```
+
+The analysis uses Binaryen reaching definitions for locals, private constants,
+select/phi agreement, valid constant pointer arithmetic, Emscripten's private
+stack and memory-base imports, private `GOT.mem` cell addresses, validated
+allocator-return summaries, and fixed-point private-parameter propagation
+through functions that have only known direct callers. Exported or
+table-referenced functions retain unknown parameters. The allocator manifest
+is validated against the exact module's export table and deliberately excludes
+ShmemAlloc, DSM, DSA, and `shm_toc` allocators.
+
+On the current release artifact this proves 126,473 of 395,210 static memory
+operations (32.0%) direct and leaves 268,737 generic. Differential SQL passes,
+but the workload result is still 3.795x worst case: 3.423x recursive, 3.795x
+indexed aggregate, and 1.513x pgbench-style. Static coverage therefore does not
+predict useful dynamic coverage. The residual hot report shows that loop-heavy
+`memcpy`, `memset`, comparison, compression, executor, and tuple paths remain
+generic. The next work is sound function-boundary hoisting/private clones for
+those ranked bimodal functions, not more unprofiled static-site coverage.
+
 The native `pglite-wasm-multi-memory` tool accepts a conventional wasm32
 module with one imported memory. It preserves that private memory as index 0,
 adds `pglite.global_memory` as index 1 and the reserved

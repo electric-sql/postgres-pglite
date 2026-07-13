@@ -22,10 +22,13 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "ir/find_all.h"
+#include "ir/local-graph.h"
 #include "pass.h"
 #include "wasm-builder.h"
 #include "wasm-features.h"
@@ -38,7 +41,7 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.4.0";
+constexpr const char* ToolVersion = "0.5.0";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
@@ -57,12 +60,14 @@ struct Options {
   std::string globalImportBase = "global_memory";
   std::string scopedImportBase = "scoped_memory";
   std::vector<std::string> inputFeatures;
+  std::vector<std::string> privateReturnExports;
   std::vector<uint64_t> directPrivateFunctionIndices;
   uint64_t globalInitialPages = UINT64_MAX;
   uint64_t globalMaximumPages = UINT64_MAX;
   bool inlinePrivateFastPath = false;
   bool privateOnlyOracle = false;
   bool profileFunctionEntries = false;
+  bool provenance = false;
   bool emitText = false;
 };
 
@@ -205,6 +210,8 @@ void usage(std::ostream& out) {
       << "      --private-only-oracle         retain direct memory-0 operations\n"
       << "      --profile-function-entries    import a profiling entry hook\n"
       << "      --direct-private-function-index N  diagnostic direct function\n"
+      << "      --provenance                  enable sound direct-access proofs\n"
+      << "      --private-return-export NAME  provenance summary (repeatable)\n"
       << "  -S, --emit-text                   emit WAT instead of binary\n"
       << "  -h, --help                        show this help\n"
       << "      --version                     show tool version\n";
@@ -260,6 +267,10 @@ Options parseOptions(int argc, const char** argv) {
     } else if (arg == "--direct-private-function-index") {
       options.directPrivateFunctionIndices.push_back(
         parseUnsigned(take(arg.c_str()), arg.c_str()));
+    } else if (arg == "--provenance") {
+      options.provenance = true;
+    } else if (arg == "--private-return-export") {
+      options.privateReturnExports.push_back(take(arg.c_str()));
     } else if (arg == "-S" || arg == "--emit-text") {
       options.emitText = true;
     } else if (!arg.empty() && arg[0] == '-') {
@@ -289,25 +300,52 @@ Options parseOptions(int argc, const char** argv) {
     throw std::runtime_error(
       "--private-only-oracle and --direct-private-function-index are exclusive");
   }
+  if (options.provenance &&
+      (options.privateOnlyOracle || options.inlinePrivateFastPath ||
+       !options.directPrivateFunctionIndices.empty())) {
+    throw std::runtime_error(
+      "--provenance is exclusive with diagnostic and inline profiles");
+  }
+  if (!options.privateReturnExports.empty() && !options.provenance) {
+    throw std::runtime_error(
+      "--private-return-export requires --provenance");
+  }
   return options;
 }
 
 class Transformer;
 
 class Rewriter : public ExpressionStackWalker<Rewriter> {
+  enum class Provenance { Null, Private, Global, Scoped, Unknown };
+
   Transformer& transformer;
+  Module& module;
+  Function& function;
+  LocalGraph localGraph;
   std::map<std::string, Index> operandTemps;
+  std::unordered_map<Expression*, Provenance> provenanceCache;
+  std::unordered_set<Expression*> provenanceActive;
 
   void requirePrivate(Name memory, const char* operation);
   Index memoryNestingDepth();
   Index getOperandTemp(Index depth, Index position, Type type);
+  Provenance classify(Expression* expression);
+  bool provesPrivate(const HelperSpec& spec,
+                     const std::vector<Expression*>& operands);
   void replaceWithHelper(Expression* original,
                          const HelperSpec& spec,
                          std::vector<Expression*> operands,
-                         Type result);
+                         Type result,
+                         const char* operationName);
 
 public:
-  explicit Rewriter(Transformer& transformer) : transformer(transformer) {}
+  Rewriter(Transformer& transformer, Module& module, Function& function)
+    : transformer(transformer), module(module), function(function),
+      localGraph(&function, &module) {}
+
+  bool expressionIsPrivate(Expression* expression) {
+    return classify(expression) == Provenance::Private;
+  }
 
   void visitLoad(Load* curr);
   void visitStore(Store* curr);
@@ -332,6 +370,8 @@ class Transformer {
     uint64_t expressionCount = 0;
     uint64_t expressionShapeHash = 1469598103934665603ULL;
     std::map<std::string, uint64_t> operations;
+    std::map<std::string, uint64_t> directPrivateOperations;
+    std::map<std::string, uint64_t> genericOperations;
   };
 
   Module& module;
@@ -343,10 +383,17 @@ class Transformer {
   std::vector<std::pair<Name, HelperSpec>> helperSpecs;
   std::map<std::string, uint64_t> rewritten;
   std::map<std::string, uint64_t> directPrivate;
+  std::map<std::string, uint64_t> directPrivateProofs;
   std::map<std::string, uint64_t> allowlisted;
   std::map<std::string, FunctionStat> functionStats;
   Name currentFunction;
   std::unordered_set<Expression*> generatedDirectOperations;
+  std::unordered_set<std::string> privateReturnFunctions;
+  std::unordered_set<std::string> privateParameters;
+
+  static std::string parameterKey(Name function, Index index) {
+    return function.toString() + ":" + std::to_string(index);
+  }
 
   Expression* local(Builder& builder, Index index, Type type) {
     return builder.makeLocalGet(index, type);
@@ -855,6 +902,8 @@ class Transformer {
         << "\"profile\":\""
         << (!options.directPrivateFunctionIndices.empty()
               ? "profile-guided-private-oracle"
+              : options.provenance
+              ? "two-domain-provenance"
               : options.privateOnlyOracle
               ? (options.profileFunctionEntries
                    ? "private-only-oracle-function-profile"
@@ -909,6 +958,16 @@ public:
 
   bool usePrivateOnlyOracle() const { return options.privateOnlyOracle; }
 
+  bool useProvenance() const { return options.provenance; }
+
+  bool hasPrivateReturn(Name function) const {
+    return privateReturnFunctions.count(function.toString());
+  }
+
+  bool hasPrivateParameter(Name function, Index index) const {
+    return privateParameters.count(parameterKey(function, index));
+  }
+
   bool useCurrentFunctionDirectPrivate() const {
     if (options.directPrivateFunctionIndices.empty()) {
       return false;
@@ -956,12 +1015,20 @@ public:
     return name;
   }
 
-  void countRewrite(const std::string& name) {
-    ++functionStats[currentFunction.toString()].operations[name];
-    if (options.privateOnlyOracle || useCurrentFunctionDirectPrivate()) {
+  void countAccess(const std::string& name,
+                   bool direct,
+                   const char* proof = nullptr) {
+    auto& stat = functionStats[currentFunction.toString()];
+    ++stat.operations[name];
+    if (direct) {
       ++directPrivate[name];
+      ++stat.directPrivateOperations[name];
+      if (proof) {
+        ++directPrivateProofs[proof];
+      }
     } else {
       ++rewritten[name];
+      ++stat.genericOperations[name];
     }
   }
   void countAllowlist(const std::string& name) { ++allowlisted[name]; }
@@ -1015,6 +1082,107 @@ public:
     }
   }
 
+  void initializeProvenanceSummaries() {
+    for (const auto& exportName : options.privateReturnExports) {
+      Export* found = nullptr;
+      for (const auto& export_ : module.exports) {
+        if (export_->name.toString() == exportName) {
+          found = export_.get();
+          break;
+        }
+      }
+      if (!found || found->kind != ExternalKind::Function) {
+        throw std::runtime_error("private-return export is not a function: " +
+                                 exportName);
+      }
+      auto* function = module.getFunction(found->value);
+      if (function->getResults() != Type::i32) {
+        throw std::runtime_error("private-return export must return i32: " +
+                                 exportName);
+      }
+      privateReturnFunctions.insert(found->value.toString());
+    }
+  }
+
+  void inferPrivateParameters() {
+    if (!options.provenance) {
+      return;
+    }
+    std::unordered_set<std::string> externallyCallable;
+    for (const auto& export_ : module.exports) {
+      if (export_->kind == ExternalKind::Function) {
+        externallyCallable.insert(export_->value.toString());
+      }
+    }
+    for (const auto& function : module.functions) {
+      if (function->imported()) {
+        continue;
+      }
+      for (auto* ref : FindAll<RefFunc>(function->body).list) {
+        externallyCallable.insert(ref->func.toString());
+      }
+    }
+    for (const auto& segment : module.elementSegments) {
+      for (auto* expression : segment->data) {
+        for (auto* ref : FindAll<RefFunc>(expression).list) {
+          externallyCallable.insert(ref->func.toString());
+        }
+      }
+    }
+
+    struct CallSite {
+      Function* caller;
+      Call* call;
+    };
+    std::unordered_map<std::string, std::vector<CallSite>> callsByTarget;
+    for (const auto& caller : module.functions) {
+      if (caller->imported()) {
+        continue;
+      }
+      for (auto* call : FindAll<Call>(caller->body).list) {
+        callsByTarget[call->target.toString()].push_back(
+          {caller.get(), call});
+      }
+    }
+
+    bool changed;
+    do {
+      changed = false;
+      for (const auto& target : module.functions) {
+        auto name = target->name.toString();
+        if (target->imported() || externallyCallable.count(name)) {
+          continue;
+        }
+        auto calls = callsByTarget.find(name);
+        if (calls == callsByTarget.end() || calls->second.empty()) {
+          continue;
+        }
+        for (Index index = 0; index < target->getParams().size(); ++index) {
+          if (target->getParams()[index] != Type::i32 ||
+              hasPrivateParameter(target->name, index)) {
+            continue;
+          }
+          bool allPrivate = true;
+          for (const auto& site : calls->second) {
+            if (index >= site.call->operands.size()) {
+              allPrivate = false;
+              break;
+            }
+            Rewriter analyzer(*this, module, *site.caller);
+            if (!analyzer.expressionIsPrivate(site.call->operands[index])) {
+              allPrivate = false;
+              break;
+            }
+          }
+          if (allPrivate) {
+            privateParameters.insert(parameterKey(target->name, index));
+            changed = true;
+          }
+        }
+      }
+    } while (changed);
+  }
+
   void addFunctionEntryProfiling(const std::vector<Function*>& originals) {
     if (!options.profileFunctionEntries) {
       return;
@@ -1051,6 +1219,8 @@ public:
   void run() {
     rejectAlreadyTransformed();
     initializeFunctionStats();
+    initializeProvenanceSummaries();
+    inferPrivateParameters();
     addGlobalMemory();
 
     std::vector<Function*> originals;
@@ -1061,7 +1231,7 @@ public:
     }
     for (auto* function : originals) {
       currentFunction = function->name;
-      Rewriter rewriter(*this);
+      Rewriter rewriter(*this, module, *function);
       rewriter.walkFunctionInModule(function, &module);
     }
     addFunctionEntryProfiling(originals);
@@ -1095,6 +1265,17 @@ public:
     writeMap(out, rewritten);
     out << ",\"directPrivate\":";
     writeMap(out, directPrivate);
+    out << ",\"directPrivateProofs\":";
+    writeMap(out, directPrivateProofs);
+    out << ",\"privateReturnExports\":[";
+    for (size_t i = 0; i < options.privateReturnExports.size(); ++i) {
+      if (i) {
+        out << ',';
+      }
+      out << '"' << jsonEscape(options.privateReturnExports[i]) << '"';
+    }
+    out << ']';
+    out << ",\"inferredPrivateParameters\":" << privateParameters.size();
     out << ",\"allowlisted\":";
     writeMap(out, allowlisted);
     out << ",\"functions\":[";
@@ -1120,6 +1301,7 @@ public:
                             stat.wasmFunctionIndex) !=
                     options.directPrivateFunctionIndices.end()
                 ? "diagnostic-direct-private"
+                : options.provenance ? "mixed-provenance"
                 : "generic")
           << "\""
           << ",\"expressionCount\":" << stat.expressionCount
@@ -1128,6 +1310,10 @@ public:
           << ",\"staticMemoryOperations\":" << total
           << ",\"operations\":";
       writeMap(out, stat.operations);
+      out << ",\"directPrivateOperations\":";
+      writeMap(out, stat.directPrivateOperations);
+      out << ",\"genericOperations\":";
+      writeMap(out, stat.genericOperations);
       out << '}';
     }
     out << ']';
@@ -1185,12 +1371,126 @@ Index Rewriter::getOperandTemp(Index depth, Index position, Type type) {
   return temp;
 }
 
+Rewriter::Provenance Rewriter::classify(Expression* expression) {
+  if (!expression || expression->type != Type::i32) {
+    return Provenance::Unknown;
+  }
+  auto cached = provenanceCache.find(expression);
+  if (cached != provenanceCache.end()) {
+    return cached->second;
+  }
+  if (!provenanceActive.insert(expression).second) {
+    return Provenance::Unknown;
+  }
+
+  auto join = [](Provenance left, Provenance right) {
+    return left == right ? left : Provenance::Unknown;
+  };
+  Provenance result = Provenance::Unknown;
+  if (auto* constant = expression->dynCast<Const>()) {
+    uint32_t value = constant->value.geti32();
+    if (value == 0) {
+      result = Provenance::Null;
+    } else if ((value & 0x80000000U) == 0) {
+      result = Provenance::Private;
+    } else if ((value & 0xc0000000U) == 0x80000000U) {
+      result = Provenance::Global;
+    } else if ((value & 0xc0000000U) == 0xc0000000U) {
+      result = Provenance::Scoped;
+    }
+  } else if (auto* get = expression->dynCast<LocalGet>()) {
+    const auto& sets = localGraph.getSets(get);
+    if (!sets.empty()) {
+      std::optional<Provenance> joined;
+      for (auto* set : sets) {
+        Provenance source = Provenance::Unknown;
+        if (set) {
+          source = classify(set->value);
+        } else if (function.isParam(get->index) &&
+                   transformer.hasPrivateParameter(function.name, get->index)) {
+          source = Provenance::Private;
+        } else if (!function.isParam(get->index)) {
+          source = Provenance::Null;
+        }
+        joined = joined ? join(*joined, source) : source;
+      }
+      result = *joined;
+    }
+  } else if (auto* set = expression->dynCast<LocalSet>()) {
+    result = classify(set->value);
+  } else if (auto* get = expression->dynCast<GlobalGet>()) {
+    auto* global = module.getGlobalOrNull(get->name);
+    if (global) {
+      if (global->imported() &&
+          ((global->module == Name("env") &&
+            (global->base == Name("__stack_pointer") ||
+             global->base == Name("__memory_base"))) ||
+           global->module == Name("GOT.mem"))) {
+        result = Provenance::Private;
+      } else if (!global->imported() && !global->mutable_ && global->init) {
+        result = classify(global->init);
+      }
+    }
+  } else if (auto* call = expression->dynCast<Call>()) {
+    if (!call->isReturn && transformer.hasPrivateReturn(call->target)) {
+      result = Provenance::Private;
+    }
+  } else if (auto* binary = expression->dynCast<Binary>()) {
+    auto left = classify(binary->left);
+    auto right = classify(binary->right);
+    bool leftConstant = binary->left->is<Const>();
+    bool rightConstant = binary->right->is<Const>();
+    if (binary->op == AddInt32) {
+      if (left == Provenance::Private && rightConstant) {
+        result = Provenance::Private;
+      } else if (right == Provenance::Private && leftConstant) {
+        result = Provenance::Private;
+      }
+    } else if (binary->op == SubInt32 && left == Provenance::Private &&
+               rightConstant) {
+      result = Provenance::Private;
+    }
+  } else if (auto* select = expression->dynCast<Select>()) {
+    result = join(classify(select->ifTrue), classify(select->ifFalse));
+  } else if (auto* block = expression->dynCast<Block>()) {
+    if (!block->list.empty()) {
+      result = classify(block->list.back());
+    }
+  } else if (auto* iff = expression->dynCast<If>()) {
+    if (iff->ifFalse) {
+      result = join(classify(iff->ifTrue), classify(iff->ifFalse));
+    }
+  }
+
+  provenanceActive.erase(expression);
+  provenanceCache.emplace(expression, result);
+  return result;
+}
+
+bool Rewriter::provesPrivate(const HelperSpec& spec,
+                             const std::vector<Expression*>& operands) {
+  if (!transformer.useProvenance()) {
+    return false;
+  }
+  if (classify(operands[0]) != Provenance::Private) {
+    return false;
+  }
+  return spec.kind != HelperKind::MemoryCopy ||
+         classify(operands[1]) == Provenance::Private;
+}
+
 void Rewriter::replaceWithHelper(Expression* original,
                                  const HelperSpec& spec,
                                  std::vector<Expression*> operands,
-                                 Type result) {
-  if (transformer.usePrivateOnlyOracle() ||
-      transformer.useCurrentFunctionDirectPrivate()) {
+                                 Type result,
+                                 const char* operationName) {
+  bool diagnosticDirect = transformer.usePrivateOnlyOracle() ||
+                          transformer.useCurrentFunctionDirectPrivate();
+  bool provenDirect = provesPrivate(spec, operands);
+  transformer.countAccess(operationName,
+                          diagnosticDirect || provenDirect,
+                          provenDirect ? "constant-local-flow" : nullptr);
+  if (diagnosticDirect || provenDirect) {
     transformer.keepPrivateOracleOperation(original);
     return;
   }
@@ -1258,8 +1558,11 @@ void Rewriter::visitLoad(Load* curr) {
   spec.offset = curr->offset.addr;
   spec.align = curr->align.addr;
   spec.type = curr->type;
-  transformer.countRewrite(curr->isAtomic ? "atomic-load" : "load");
-  replaceWithHelper(curr, spec, {curr->ptr}, curr->type);
+  replaceWithHelper(curr,
+                    spec,
+                    {curr->ptr},
+                    curr->type,
+                    curr->isAtomic ? "atomic-load" : "load");
 }
 
 void Rewriter::visitStore(Store* curr) {
@@ -1272,8 +1575,11 @@ void Rewriter::visitStore(Store* curr) {
   spec.align = curr->align.addr;
   spec.type = Type::none;
   spec.valueType = curr->valueType;
-  transformer.countRewrite(curr->isAtomic ? "atomic-store" : "store");
-  replaceWithHelper(curr, spec, {curr->ptr, curr->value}, Type::none);
+  replaceWithHelper(curr,
+                    spec,
+                    {curr->ptr, curr->value},
+                    Type::none,
+                    curr->isAtomic ? "atomic-store" : "store");
 }
 
 void Rewriter::visitAtomicRMW(AtomicRMW* curr) {
@@ -1285,8 +1591,8 @@ void Rewriter::visitAtomicRMW(AtomicRMW* curr) {
   spec.align = curr->bytes;
   spec.type = curr->type;
   spec.rmwOp = curr->op;
-  transformer.countRewrite("atomic-rmw");
-  replaceWithHelper(curr, spec, {curr->ptr, curr->value}, curr->type);
+  replaceWithHelper(
+    curr, spec, {curr->ptr, curr->value}, curr->type, "atomic-rmw");
 }
 
 void Rewriter::visitAtomicCmpxchg(AtomicCmpxchg* curr) {
@@ -1297,9 +1603,12 @@ void Rewriter::visitAtomicCmpxchg(AtomicCmpxchg* curr) {
   spec.offset = curr->offset.addr;
   spec.align = curr->bytes;
   spec.type = curr->type;
-  transformer.countRewrite("atomic-cmpxchg");
   replaceWithHelper(
-    curr, spec, {curr->ptr, curr->expected, curr->replacement}, curr->type);
+    curr,
+    spec,
+    {curr->ptr, curr->expected, curr->replacement},
+    curr->type,
+    "atomic-cmpxchg");
 }
 
 void Rewriter::visitAtomicWait(AtomicWait* curr) {
@@ -1311,9 +1620,12 @@ void Rewriter::visitAtomicWait(AtomicWait* curr) {
   spec.align = spec.bytes;
   spec.type = Type::i32;
   spec.valueType = curr->expectedType;
-  transformer.countRewrite("atomic-wait");
   replaceWithHelper(
-    curr, spec, {curr->ptr, curr->expected, curr->timeout}, Type::i32);
+    curr,
+    spec,
+    {curr->ptr, curr->expected, curr->timeout},
+    Type::i32,
+    "atomic-wait");
 }
 
 void Rewriter::visitAtomicNotify(AtomicNotify* curr) {
@@ -1324,8 +1636,11 @@ void Rewriter::visitAtomicNotify(AtomicNotify* curr) {
   spec.offset = curr->offset.addr;
   spec.align = 4;
   spec.type = Type::i32;
-  transformer.countRewrite("atomic-notify");
-  replaceWithHelper(curr, spec, {curr->ptr, curr->notifyCount}, Type::i32);
+  replaceWithHelper(curr,
+                    spec,
+                    {curr->ptr, curr->notifyCount},
+                    Type::i32,
+                    "atomic-notify");
 }
 
 void Rewriter::visitAtomicFence(AtomicFence*) {
@@ -1341,8 +1656,7 @@ void Rewriter::visitSIMDLoad(SIMDLoad* curr) {
   spec.align = curr->align.addr;
   spec.type = Type::v128;
   spec.simdLoadOp = curr->op;
-  transformer.countRewrite("simd-load");
-  replaceWithHelper(curr, spec, {curr->ptr}, Type::v128);
+  replaceWithHelper(curr, spec, {curr->ptr}, Type::v128, "simd-load");
 }
 
 void Rewriter::visitSIMDLoadStoreLane(SIMDLoadStoreLane* curr) {
@@ -1356,9 +1670,11 @@ void Rewriter::visitSIMDLoadStoreLane(SIMDLoadStoreLane* curr) {
   spec.simdLaneOp = curr->op;
   spec.lane = curr->index;
   spec.laneStore = curr->isStore();
-  transformer.countRewrite(spec.laneStore ? "simd-lane-store"
-                                          : "simd-lane-load");
-  replaceWithHelper(curr, spec, {curr->ptr, curr->vec}, curr->type);
+  replaceWithHelper(curr,
+                    spec,
+                    {curr->ptr, curr->vec},
+                    curr->type,
+                    spec.laneStore ? "simd-lane-store" : "simd-lane-load");
 }
 
 void Rewriter::visitMemoryCopy(MemoryCopy* curr) {
@@ -1367,9 +1683,11 @@ void Rewriter::visitMemoryCopy(MemoryCopy* curr) {
   HelperSpec spec;
   spec.kind = HelperKind::MemoryCopy;
   spec.type = Type::none;
-  transformer.countRewrite("memory-copy");
-  replaceWithHelper(
-    curr, spec, {curr->dest, curr->source, curr->size}, Type::none);
+  replaceWithHelper(curr,
+                    spec,
+                    {curr->dest, curr->source, curr->size},
+                    Type::none,
+                    "memory-copy");
 }
 
 void Rewriter::visitMemoryFill(MemoryFill* curr) {
@@ -1377,9 +1695,11 @@ void Rewriter::visitMemoryFill(MemoryFill* curr) {
   HelperSpec spec;
   spec.kind = HelperKind::MemoryFill;
   spec.type = Type::none;
-  transformer.countRewrite("memory-fill");
-  replaceWithHelper(
-    curr, spec, {curr->dest, curr->value, curr->size}, Type::none);
+  replaceWithHelper(curr,
+                    spec,
+                    {curr->dest, curr->value, curr->size},
+                    Type::none,
+                    "memory-fill");
 }
 
 void Rewriter::visitMemoryInit(MemoryInit* curr) {

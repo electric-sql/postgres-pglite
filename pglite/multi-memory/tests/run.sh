@@ -84,6 +84,21 @@ node22 "${ROOT}/tests/runtime-tests.mjs" \
   "${OUT}/opcodes.multi.wasm" \
   "${OUT}/report.json"
 
+wasm-opt "${ROOT}/tests/provenance.wat" \
+  -o "${OUT}/provenance.wasm" \
+  --all-features \
+  --emit-target-features
+pglite-wasm-multi-memory "${OUT}/provenance.wasm" \
+  -o "${OUT}/provenance.multi.wasm" \
+  --report "${OUT}/provenance.report.json" \
+  --global-initial-pages 2 \
+  --global-maximum-pages 16 \
+  --provenance \
+  --private-return-export palloc
+node22 "${ROOT}/tests/provenance-tests.mjs" \
+  "${OUT}/provenance.multi.wasm" \
+  "${OUT}/provenance.report.json"
+
 wasm-opt "${ROOT}/tests/capability.wat" \
   -o "${OUT}/capability.wasm" \
   --all-features \
@@ -118,6 +133,12 @@ expect_failure invalid-global-limits 'invalid global memory limits' \
     -o "${OUT}/must-not-exist.wasm" \
     --global-initial-pages 17 \
     --global-maximum-pages 16
+expect_failure invalid-private-return-export \
+  'private-return export is not a function' \
+  pglite-wasm-multi-memory "${OUT}/provenance.wasm" \
+    -o "${OUT}/must-not-exist.wasm" \
+    --provenance \
+    --private-return-export missing
 
 node "${ROOT}/tests/capability-tests.mjs" \
   "${OUT}/capability.wasm" \
