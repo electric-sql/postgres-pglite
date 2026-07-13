@@ -65,6 +65,29 @@
     (i32.load (local.get $address))
   )
 
+  ;; A value branch and the fallthrough are both incoming values for the
+  ;; block. The branch loads a tagged global pointer from a private container;
+  ;; the fallthrough is certainly private. The outer load must therefore stay
+  ;; dynamically routed.
+  (func (export "block_address_join")
+    (param $container i32) (param $choose_global i32) (result i32)
+    (local.set $container
+      (call $private_identity (local.get $container))
+    )
+    (i32.load
+      (block $address (result i32)
+        (if (local.get $choose_global)
+          (then
+            (br $address
+              (i32.load (local.get $container))
+            )
+          )
+        )
+        (i32.add (local.get $container) (i32.const 4))
+      )
+    )
+  )
+
   (func (export "loop") (param $address i32) (param $count i32) (result i32)
     (local $sum i32)
     (block $done
@@ -86,5 +109,23 @@
       )
     )
     (local.get $sum)
+  )
+
+  ;; Reassigning an unknown pointer in a loop can leave a LocalGraph query
+  ;; with only a closed reaching-definition cycle. The cycle is not a private
+  ;; provenance root: this must still route a tagged global pointer.
+  (func (export "unrooted_pointer_cycle")
+    (param $address i32) (param $count i32) (result i32)
+    (loop $next
+      (local.set $address
+        (i32.add (local.get $address) (i32.const 4))
+      )
+      (br_if $next
+        (local.tee $count
+          (i32.sub (local.get $count) (i32.const 1))
+        )
+      )
+    )
+    (i32.load (local.get $address))
   )
 )

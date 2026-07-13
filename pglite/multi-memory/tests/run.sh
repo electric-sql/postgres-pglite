@@ -84,6 +84,17 @@ node22 "${ROOT}/tests/runtime-tests.mjs" \
   "${OUT}/opcodes.multi.wasm" \
   "${OUT}/report.json"
 
+pglite-wasm-multi-memory "${OUT}/opcodes.wasm" \
+  -o "${OUT}/opcodes.inline.wasm" \
+  --report "${OUT}/report.inline.json" \
+  --global-initial-pages 2 \
+  --global-maximum-pages 16 \
+  --inline-private-fast-path
+node22 "${ROOT}/tests/runtime-tests.mjs" \
+  "${OUT}/opcodes.wasm" \
+  "${OUT}/opcodes.inline.wasm" \
+  "${OUT}/report.inline.json"
+
 wasm-opt "${ROOT}/tests/provenance.wat" \
   -o "${OUT}/provenance.wasm" \
   --all-features \

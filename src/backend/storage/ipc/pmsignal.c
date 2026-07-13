@@ -354,7 +354,14 @@ PostmasterIsAliveInternal(void)
 	postmaster_possibly_dead = false;
 #endif
 
-#ifndef WIN32
+#ifdef __PGLITE_POSTMASTER__
+	/*
+	 * PGlite EXEC_BACKEND Workers do not inherit an OS pipe.  The process
+	 * host's signal-zero lookup is the equivalent generation-checked parent
+	 * liveness query in the shared Control SAB.
+	 */
+	return pgl_kill(PostmasterPid, 0) == 0;
+#elif !defined(WIN32)
 	{
 		char		c;
 		ssize_t		rc;

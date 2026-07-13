@@ -7,12 +7,17 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #define PGL_SOCKET_NOT_HANDLED (-2)
+
+int pgl_find_other_exec(const char *argv0, const char *target,
+						const char *version_string, char *result,
+						size_t result_size);
 
 pid_t pgl_spawn_backend(const char *child_kind, const char *parameter_file,
 						int client_socket);
@@ -35,6 +40,17 @@ int pgl_accept(int socket_fd, struct sockaddr *address,
 			   socklen_t *address_len);
 int pgl_close(int fd);
 int pgl_poll(struct pollfd *fds, nfds_t nfds, int timeout);
+void pgl_set_shmem_host(int (*ensure_capacity)(uint32_t));
+ssize_t pgl_fd_read(int fd, void *buffer, size_t length);
+ssize_t pgl_fd_write(int fd, const void *buffer, size_t length);
+ssize_t pgl_fd_pread(int fd, void *buffer, size_t length, off_t offset);
+ssize_t pgl_fd_pwrite(int fd, const void *buffer, size_t length, off_t offset);
+ssize_t pgl_fd_readv(int fd, const struct iovec *iov, int iovcnt);
+ssize_t pgl_fd_writev(int fd, const struct iovec *iov, int iovcnt);
+ssize_t pgl_fd_preadv(int fd, const struct iovec *iov, int iovcnt,
+					  off_t offset);
+ssize_t pgl_fd_pwritev(int fd, const struct iovec *iov, int iovcnt,
+					   off_t offset);
 
 #ifdef __cplusplus
 }

@@ -54,6 +54,8 @@ transform() {
     "${FEATURES[@]}" \
     --provenance \
     --inline-private-fast-path \
+    --global-initial-pages 2 \
+    --global-maximum-pages 16384 \
     --private-identity-export pgl_private_pointer \
     "${SUMMARIES[@]}"
 }

@@ -44,12 +44,16 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.8.0";
+constexpr const char* ToolVersion = "0.8.3";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
+constexpr const char* ScopedMemoryKeepalive =
+  "__pglite_scoped_memory_keepalive";
 constexpr uint64_t PrivateAperture = uint64_t(1) << 31;
 constexpr uint64_t GlobalAperture = uint64_t(1) << 30;
+constexpr uint64_t GlobalPointerTag = uint64_t(1) << 31;
+constexpr uint64_t Memory32Size = uint64_t(1) << 32;
 
 struct Options {
   std::string input;
@@ -398,10 +402,13 @@ class Rewriter : public ExpressionStackWalker<Rewriter> {
   std::map<std::string, Index> operandTemps;
   std::unordered_map<Expression*, Provenance> provenanceCache;
   std::unordered_set<Expression*> provenanceActive;
+  std::unordered_map<Expression*, bool> privateRootCache;
+  std::unordered_set<Expression*> privateRootActive;
 
   void requirePrivate(Name memory, const char* operation);
   Index memoryNestingDepth();
   Index getOperandTemp(Index depth, Index position, Type type);
+  bool hasPrivateRoot(Expression* expression);
   Provenance classify(Expression* expression);
   bool provesPrivate(const HelperSpec& spec,
                      const std::vector<Expression*>& operands);
@@ -522,6 +529,68 @@ class Transformer {
     return builder.makeIf(
       builder.makeBinary(EqInt32, tag, builder.makeConst(uint32_t(0xc0000000))),
       builder.makeUnreachable());
+  }
+
+  Expression* effectivePointer(Builder& builder,
+                               Index ptrIndex,
+                               uint64_t offset) {
+    return builder.makeBinary(
+      AddInt32,
+      local(builder, ptrIndex, Type::i32),
+      builder.makeConst(uint32_t(offset)));
+  }
+
+  Expression* effectiveOffsetTrap(Builder& builder,
+                                  Index ptrIndex,
+                                  uint64_t offset) {
+    if (offset >= Memory32Size) {
+      return builder.makeUnreachable();
+    }
+    return builder.makeIf(
+      builder.makeBinary(
+        GtUInt32,
+        local(builder, ptrIndex, Type::i32),
+        builder.makeConst(uint32_t(Memory32Size - 1 - offset))),
+      builder.makeUnreachable());
+  }
+
+  Expression* effectiveNullTrap(Builder& builder,
+                                Index ptrIndex,
+                                uint64_t offset) {
+    return builder.makeIf(
+      builder.makeUnary(EqZInt32,
+                        effectivePointer(builder, ptrIndex, offset)),
+      builder.makeUnreachable());
+  }
+
+  Expression* effectiveReservedTagTrap(Builder& builder,
+                                       Index ptrIndex,
+                                       uint64_t offset) {
+    auto* tag = builder.makeBinary(
+      AndInt32,
+      effectivePointer(builder, ptrIndex, offset),
+      builder.makeConst(uint32_t(0xc0000000)));
+    return builder.makeIf(
+      builder.makeBinary(EqInt32, tag, builder.makeConst(uint32_t(0xc0000000))),
+      builder.makeUnreachable());
+  }
+
+  Expression* effectiveIsGlobal(Builder& builder,
+                                Index ptrIndex,
+                                uint64_t offset) {
+    return builder.makeBinary(
+      LtSInt32,
+      effectivePointer(builder, ptrIndex, offset),
+      builder.makeConst(int32_t(0)));
+  }
+
+  Expression* effectiveMaskedGlobalPointer(Builder& builder,
+                                           Index ptrIndex,
+                                           uint64_t offset) {
+    return builder.makeBinary(
+      AndInt32,
+      effectivePointer(builder, ptrIndex, offset),
+      builder.makeConst(uint32_t(0x3fffffff)));
   }
 
   Expression* fixedRangeTrap(Builder& builder,
@@ -689,6 +758,46 @@ class Transformer {
       }
       return operands;
     };
+
+    // LLVM normally leaves the tagged C pointer in the dynamic address, but
+    // it may fold an absolute address into a memory instruction's unsigned
+    // immediate.  In that case the immediate is part of the logical tagged
+    // pointer: dispatching or null-checking only the zero base would select
+    // memory 0 or trap incorrectly.  Canonicalize tagged immediates to a
+    // checked memory32 effective address, then issue the selected operation
+    // with offset zero.  Small structure-field immediates retain the original
+    // base-pointer null policy and fast path.
+    if (spec.offset >= GlobalPointerTag) {
+      HelperSpec normalized = spec;
+      normalized.offset = 0;
+      auto* privateOp = makeDirectOperation(
+        normalized,
+        builder,
+        privateMemory,
+        makeOperands(effectivePointer(builder, 0, spec.offset)),
+        PrivateAperture,
+        false);
+      auto* globalOp = makeDirectOperation(
+        normalized,
+        builder,
+        globalMemory,
+        makeOperands(
+          effectiveMaskedGlobalPointer(builder, 0, spec.offset)),
+        GlobalAperture,
+        true);
+      auto* dispatch = builder.makeIf(
+        effectiveIsGlobal(builder, 0, spec.offset),
+        globalOp,
+        privateOp,
+        spec.type);
+      return builder.makeBlock(
+        {effectiveOffsetTrap(builder, 0, spec.offset),
+         effectiveNullTrap(builder, 0, spec.offset),
+         effectiveReservedTagTrap(builder, 0, spec.offset),
+         dispatch},
+        spec.type);
+    }
+
     auto* privateOp = makeDirectOperation(
       spec,
       builder,
@@ -896,16 +1005,27 @@ class Transformer {
     };
     addMemoryImport(globalMemory, options.globalImportBase);
     addMemoryImport(scopedMemory, options.scopedImportBase);
-    // The scoped import is reserved in v1 and therefore has no dereferences
-    // yet. Keep it observable so Binaryen's -O3 module DCE cannot remove the
-    // third ABI memory before the host aliases it to private memory.
-    module.addExport(
-      Builder::makeExport(scopedMemory, scopedMemory, ExternalKind::Memory));
     module.features.setMultiMemory();
     if (privateMem->shared) {
       module.features.setAtomics();
     }
     module.hasFeaturesSection = true;
+  }
+
+  void addScopedMemoryKeepalive() {
+    // The scoped import is reserved in v1 and therefore has no ordinary
+    // dereferences yet. Keep it reachable through a function export so
+    // Binaryen's module DCE retains the third ABI memory. Emscripten's
+    // dynamic-link relocation glue handles function exports, but does not
+    // handle an added memory export.
+    Name name(ScopedMemoryKeepalive);
+    Builder builder(module);
+    auto function = Builder::makeFunction(
+      name, Signature(Type::none, Type::i32), {},
+      builder.makeMemorySize(scopedMemory));
+    function->setExplicitName(name);
+    module.addFunction(std::move(function));
+    module.addExport(Builder::makeExport(name, name, ExternalKind::Function));
   }
 
   void rejectAlreadyTransformed() {
@@ -972,7 +1092,8 @@ class Transformer {
 
     for (const auto& function : module.functions) {
       if (function->imported() ||
-          function->name.toString().rfind(HelperPrefix, 0) == 0) {
+          function->name.toString().rfind(HelperPrefix, 0) == 0 ||
+          function->name == Name(ScopedMemoryKeepalive)) {
         continue;
       }
       Auditor auditor(privateMemory, generatedDirectOperations);
@@ -1656,6 +1777,7 @@ public:
     removePrivateIdentityCalls(originals);
     addFunctionEntryProfiling(originals);
     addHelpers();
+    addScopedMemoryKeepalive();
     audit();
     replaceSourceMapURL();
     addManifest();
@@ -1849,6 +1971,104 @@ Index Rewriter::getOperandTemp(Index depth, Index position, Type type) {
   return temp;
 }
 
+bool Rewriter::hasPrivateRoot(Expression* expression) {
+  if (!expression || expression->type != Type::i32) {
+    return false;
+  }
+  auto cached = privateRootCache.find(expression);
+  if (cached != privateRootCache.end()) {
+    return cached->second;
+  }
+  if (!privateRootActive.insert(expression).second) {
+    // A cycle is not evidence by itself. The caller will keep walking the
+    // other reaching definitions, where a real parameter, constant, stack,
+    // allocator, or checked-identity root must be found.
+    return false;
+  }
+
+  bool result = false;
+  if (auto* constant = expression->dynCast<Const>()) {
+    uint32_t value = constant->value.geti32();
+    result = value != 0 && (value & 0x80000000U) == 0;
+  } else if (auto* get = expression->dynCast<LocalGet>()) {
+    const auto& sets = localGraph.getSets(get);
+    for (auto* set : sets) {
+      if (set) {
+        result |= hasPrivateRoot(set->value);
+      } else if (function.isParam(get->index) &&
+                 transformer.hasPrivateParameter(function.name, get->index)) {
+        result = true;
+      }
+    }
+  } else if (auto* set = expression->dynCast<LocalSet>()) {
+    result = hasPrivateRoot(set->value);
+  } else if (auto* get = expression->dynCast<GlobalGet>()) {
+    auto* global = module.getGlobalOrNull(get->name);
+    if (global) {
+      if (global->imported() &&
+          ((global->module == Name("env") &&
+            (global->base == Name("__stack_pointer") ||
+             global->base == Name("__memory_base"))) ||
+           global->module == Name("GOT.mem"))) {
+        result = true;
+      } else if (!global->imported() && !global->mutable_ && global->init) {
+        result = hasPrivateRoot(global->init);
+      }
+    }
+  } else if (auto* call = expression->dynCast<Call>()) {
+    result = !call->isReturn &&
+             (transformer.hasPrivateReturn(call->target) ||
+              transformer.isPrivateIdentity(call->target));
+  } else if (auto* binary = expression->dynCast<Binary>()) {
+    bool leftConstant = binary->left->is<Const>();
+    bool rightConstant = binary->right->is<Const>();
+    if (binary->op == AddInt32) {
+      if (rightConstant) {
+        result = hasPrivateRoot(binary->left);
+      } else if (leftConstant) {
+        result = hasPrivateRoot(binary->right);
+      } else {
+        result = hasPrivateRoot(binary->left) ||
+                 hasPrivateRoot(binary->right);
+      }
+    } else if (binary->op == SubInt32 && rightConstant) {
+      result = hasPrivateRoot(binary->left);
+    }
+  } else if (auto* select = expression->dynCast<Select>()) {
+    result = hasPrivateRoot(select->ifTrue) ||
+             hasPrivateRoot(select->ifFalse);
+  } else if (auto* block = expression->dynCast<Block>()) {
+    if (!block->list.empty()) {
+      result = hasPrivateRoot(block->list.back());
+      for (auto* branch : FindAll<Break>(block).list) {
+        if (branch->name == block->name && branch->value) {
+          result |= hasPrivateRoot(branch->value);
+        }
+      }
+      for (auto* branch : FindAll<Switch>(block).list) {
+        bool targetsBlock = branch->default_ == block->name;
+        if (!targetsBlock) {
+          targetsBlock = std::find(branch->targets.begin(),
+                                   branch->targets.end(),
+                                   block->name) != branch->targets.end();
+        }
+        if (targetsBlock && branch->value) {
+          result |= hasPrivateRoot(branch->value);
+        }
+      }
+    }
+  } else if (auto* iff = expression->dynCast<If>()) {
+    if (iff->ifFalse) {
+      result = hasPrivateRoot(iff->ifTrue) ||
+               hasPrivateRoot(iff->ifFalse);
+    }
+  }
+
+  privateRootActive.erase(expression);
+  privateRootCache.emplace(expression, result);
+  return result;
+}
+
 Rewriter::Provenance Rewriter::classify(Expression* expression) {
   if (!expression || expression->type != Type::i32) {
     return Provenance::Unknown;
@@ -1940,11 +2160,48 @@ Rewriter::Provenance Rewriter::classify(Expression* expression) {
   } else if (auto* block = expression->dynCast<Block>()) {
     if (!block->list.empty()) {
       result = classify(block->list.back());
+
+      // A result-valued block can produce its value either by falling through
+      // its final expression or through any branch targeting the block.  It is
+      // unsound to classify only the fallthrough value: LLVM commonly lowers
+      // a conditional address choice to `br $block <address>` followed by a
+      // different fallthrough address.  Join every incoming value before
+      // allowing a direct-memory proof.
+      for (auto* branch : FindAll<Break>(block).list) {
+        if (branch->name == block->name) {
+          result = branch->value
+                     ? join(result, classify(branch->value))
+                     : Provenance::Unknown;
+        }
+      }
+      for (auto* branch : FindAll<Switch>(block).list) {
+        bool targetsBlock = branch->default_ == block->name;
+        if (!targetsBlock) {
+          targetsBlock = std::find(branch->targets.begin(),
+                                   branch->targets.end(),
+                                   block->name) != branch->targets.end();
+        }
+        if (targetsBlock) {
+          result = branch->value
+                     ? join(result, classify(branch->value))
+                     : Provenance::Unknown;
+        }
+      }
     }
   } else if (auto* iff = expression->dynCast<If>()) {
     if (iff->ifFalse) {
       result = join(classify(iff->ifTrue), classify(iff->ifFalse));
     }
+  }
+
+  // The coinductive hypothesis above preserves useful loop-carried private
+  // pointers, but a closed local cycle has no provenance at all. Binaryen's
+  // LocalGraph can expose just that cycle after a parameter is reassigned,
+  // omitting the function-entry value at a later use. Requiring a concrete
+  // private root prevents such a cycle from turning an unknown or shared
+  // pointer into a direct memory-0 access.
+  if (result == Provenance::Private && !hasPrivateRoot(expression)) {
+    result = Provenance::Unknown;
   }
 
   provenanceActive.erase(expression);
@@ -1954,6 +2211,12 @@ Rewriter::Provenance Rewriter::classify(Expression* expression) {
 
 bool Rewriter::provesPrivate(const HelperSpec& spec,
                              const std::vector<Expression*>& operands) {
+  // A large unsigned memory immediate can contain the tag itself while the
+  // dynamic base remains a small positive index.  Provenance of that base is
+  // not provenance of the full effective address.
+  if (spec.offset >= GlobalPointerTag) {
+    return false;
+  }
   if (!transformer.useProvenance()) {
     return false;
   }
@@ -1982,8 +2245,10 @@ void Rewriter::replaceWithHelper(Expression* original,
                                  std::vector<Expression*> operands,
                                  Type result,
                                  const char* operationName) {
-  bool diagnosticDirect = transformer.usePrivateOnlyOracle() ||
-                          transformer.useCurrentFunctionDirectPrivate();
+  bool taggedImmediate = spec.offset >= GlobalPointerTag;
+  bool diagnosticDirect = !taggedImmediate &&
+                          (transformer.usePrivateOnlyOracle() ||
+                           transformer.useCurrentFunctionDirectPrivate());
   bool provenDirect = provesPrivate(spec, operands);
   transformer.countAccess(operationName,
                           diagnosticDirect || provenDirect,
@@ -2000,6 +2265,7 @@ void Rewriter::replaceWithHelper(Expression* original,
   Builder builder(*getModule());
   auto helper = transformer.helperFor(spec);
   if (!transformer.useInlinePrivateFastPath() ||
+      taggedImmediate ||
       spec.kind == HelperKind::MemoryCopy ||
       spec.kind == HelperKind::MemoryFill) {
     auto* call = builder.makeCall(helper, operands, result);

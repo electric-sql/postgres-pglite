@@ -192,9 +192,9 @@ static void disable_statement_timeout(void);
 
 /* these must be volatile to ensure state is preserved across longjmp: */
 #ifdef __PGLITE__
-extern bool send_ready_for_query;
+extern volatile bool send_ready_for_query;
 #else
-bool send_ready_for_query = false;
+volatile bool send_ready_for_query = false;
 #endif
 
 static volatile bool idle_in_transaction_timeout_enabled = false;
@@ -5018,10 +5018,11 @@ PostgresMain(const char *dbname, const char *username)
 #ifndef __PGLITE__
 	sigjmp_buf	local_sigjmp_buf;
 #endif
-	/* these must be volatile to ensure state is preserved across longjmp: */
-	volatile bool send_ready_for_query = true;
-	volatile bool idle_in_transaction_timeout_enabled = false;
-	volatile bool idle_session_timeout_enabled = false;
+
+	/* Reset the state consumed by the extracted PostgresMainLoopOnce(). */
+	send_ready_for_query = true;
+	idle_in_transaction_timeout_enabled = false;
+	idle_session_timeout_enabled = false;
 
 	Assert(dbname != NULL);
 	Assert(username != NULL);

@@ -925,7 +925,16 @@ read_backend_variables(char *id, void **startup_data, size_t *startup_data_len)
 		exit(1);
 	}
 
+	/*
+	 * PGlite's wasm32 ABI rounds sizeof(BackendParameters) past the flexible
+	 * array offset.  The writer serializes SizeOfBackendParameters(), so read
+	 * that same fixed prefix rather than consuming nonexistent tail padding.
+	 */
+#ifdef __PGLITE_POSTMASTER__
+	if (fread(&param, SizeOfBackendParameters(0), 1, fp) != 1)
+#else
 	if (fread(&param, sizeof(param), 1, fp) != 1)
+#endif
 	{
 		write_stderr("could not read from backend variables file \"%s\": %m\n", id);
 		exit(1);

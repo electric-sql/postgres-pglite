@@ -22,8 +22,13 @@ const { instance } = await WebAssembly.instantiate(await readFile(wasmPath), {
   'GOT.mem': { private_slot: slot },
   pglite: { global_memory: globalMemory, scoped_memory: privateMemory },
 })
-new DataView(privateMemory.buffer).setInt32(176, 6, true)
-new DataView(globalMemory.buffer).setInt32(160, 5, true)
+const privateView = new DataView(privateMemory.buffer)
+const globalView = new DataView(globalMemory.buffer)
+privateView.setInt32(176, 6, true)
+privateView.setUint32(192, 0x800000c0, true)
+privateView.setInt32(196, 11, true)
+globalView.setInt32(160, 5, true)
+globalView.setInt32(192, 12, true)
 
 assert.equal(instance.exports.marked(176), 6)
 assert.throws(
@@ -31,6 +36,8 @@ assert.throws(
   WebAssembly.RuntimeError,
 )
 assert.equal(instance.exports.conditional_marked(0x800000a0, 0), 5)
+assert.equal(instance.exports.block_address_join(192, 0), 11)
+assert.equal(instance.exports.block_address_join(192, 1), 12)
 assert.equal(report.removedPrivateIdentityCalls, 0)
 
 console.log('debug provenance assertions: ok')

@@ -1469,8 +1469,13 @@ getInstallationPaths(const char *argv0)
 
 #ifdef EXEC_BACKEND
 	/* Locate executable backend before we change working directory */
+#ifdef __PGLITE_POSTMASTER__
+	if (pgl_find_other_exec(argv0, "postgres", PG_BACKEND_VERSIONSTR,
+							postgres_exec_path, MAXPGPATH) < 0)
+#else
 	if (find_other_exec(argv0, "postgres", PG_BACKEND_VERSIONSTR,
 						postgres_exec_path) < 0)
+#endif
 		ereport(FATAL,
 				(errmsg("%s: could not locate matching postgres executable",
 						argv0)));
@@ -1868,11 +1873,16 @@ ClosePostmasterPorts(bool am_syslogger)
 	 * do this as early as possible, so that if postmaster dies, others won't
 	 * think that it's still running because we're holding the pipe open.
 	 */
+	/* PGlite children attach in a fresh Worker and do not own this OS fd. */
+#ifdef __PGLITE_POSTMASTER__
+	postmaster_alive_fds[POSTMASTER_FD_OWN] = -1;
+#else
 	if (close(postmaster_alive_fds[POSTMASTER_FD_OWN]) != 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
 				 errmsg_internal("could not close postmaster death monitoring pipe in child process: %m")));
 	postmaster_alive_fds[POSTMASTER_FD_OWN] = -1;
+#endif
 	/* Notify fd.c that we released one pipe FD. */
 	ReleaseExternalFD();
 #endif

@@ -28,6 +28,8 @@ REVISION=$(git -C "${PG_ROOT}" rev-parse HEAD)
 if [[ -f "${OUT}/manifest.json" && \
       -x "${BUILD}/src/test/regress/pg_regress" && \
       -x "${BUILD}/src/bin/psql/psql" && \
+      -x "${BUILD}/src/bin/scripts/pg_isready" && \
+      -x "${BUILD}/src/bin/pgbench/pgbench" && \
       -f "${SOURCE}/src/test/regress/parallel_schedule" ]] && \
    node22 - "${OUT}/manifest.json" "${REVISION}" \
      "${HOST_PLATFORM}" "${ARCHITECTURE}" <<'NODE'
@@ -50,11 +52,15 @@ then
     'pg_regress (PostgreSQL) 18.3'
   test "$("${BUILD}/src/bin/psql/psql" --version)" = \
     'psql (PostgreSQL) 18.3'
+  test "$("${BUILD}/src/bin/scripts/pg_isready" --version)" = \
+    'pg_isready (PostgreSQL) 18.3'
+  test "$("${BUILD}/src/bin/pgbench/pgbench" --version)" = \
+    'pgbench (PostgreSQL) 18.3'
   echo "Reusing exact-revision native ${HOST_PLATFORM} PostgreSQL regression tools"
   exit 0
 fi
 
-rm -rf "${OUT}"
+rm -rf "${SOURCE}" "${BUILD}" "${INSTALL}" "${OUT}/manifest.json"
 mkdir -p "${SOURCE}" "${BUILD}" "${INSTALL}"
 
 # The main source checkout is configured in-place for Emscripten, so its
@@ -76,12 +82,18 @@ git -C "${PG_ROOT}" archive --format=tar "${REVISION}" \
 make -j"${JOBS}" -C "${BUILD}/src/interfaces/libpq" all
 make -j"${JOBS}" -C "${BUILD}/src/test/regress" pg_regress
 make -j"${JOBS}" -C "${BUILD}/src/bin/psql" all
+make -j"${JOBS}" -C "${BUILD}/src/bin/scripts" pg_isready
+make -j"${JOBS}" -C "${BUILD}/src/bin/pgbench" all
 
 export LD_LIBRARY_PATH="${BUILD}/src/interfaces/libpq${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 test "$("${BUILD}/src/test/regress/pg_regress" --version)" = \
   'pg_regress (PostgreSQL) 18.3'
 test "$("${BUILD}/src/bin/psql/psql" --version)" = \
   'psql (PostgreSQL) 18.3'
+test "$("${BUILD}/src/bin/scripts/pg_isready" --version)" = \
+  'pg_isready (PostgreSQL) 18.3'
+test "$("${BUILD}/src/bin/pgbench/pgbench" --version)" = \
+  'pgbench (PostgreSQL) 18.3'
 test "$(uname -m)" = "${ARCHITECTURE}"
 
 node22 - "${OUT}/manifest.json" "${REVISION}" \
@@ -95,7 +107,7 @@ fs.writeFileSync(output, `${JSON.stringify({
   postgresql: '18.3',
   host,
   architecture,
-  tools: ['libpq', 'psql', 'pg_regress'],
+  tools: ['libpq', 'psql', 'pg_isready', 'pgbench', 'pg_regress'],
   sourceIsolation: 'git-archive',
 }, null, 2)}\n`)
 NODE

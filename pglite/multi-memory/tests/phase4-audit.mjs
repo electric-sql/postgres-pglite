@@ -41,10 +41,16 @@ const sourceExports = new Set(
 const candidateExports = new Set(
   WebAssembly.Module.exports(candidate).map(({ name }) => name),
 )
+const candidateExportDescriptors = WebAssembly.Module.exports(candidate)
 for (const name of requiredExports) {
   assert.ok(sourceExports.has(name), `source artifact is missing ${name}`)
   assert.ok(candidateExports.has(name), `candidate artifact is missing ${name}`)
 }
+assert.ok(candidateExports.has('__pglite_scoped_memory_keepalive'))
+assert.deepEqual(
+  candidateExportDescriptors.filter(({ kind }) => kind === 'memory'),
+  [],
+)
 
 const memoryImports = WebAssembly.Module.imports(candidate)
   .filter(({ kind }) => kind === 'memory')

@@ -17,11 +17,17 @@ INSTALL_FOLDER=${INSTALL_FOLDER:-"/pglite"}
 PGLITE_CFLAGS="-m32 -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types"
 PGLITE_WASM_FEATURE_FLAGS=""
 PGLITE_MEMORY_LDFLAGS="-sUSE_PTHREADS=0"
+POSTGRES_PGLITE_INITIAL_MEMORY=${PGLITE_PRIVATE_INITIAL_MEMORY:-128MB}
+POSTGRES_PGLITE_MAXIMUM_MEMORY=${PGLITE_PRIVATE_MAXIMUM_MEMORY:-2GB}
+if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
+    POSTGRES_PGLITE_INITIAL_MEMORY=${PGLITE_PRIVATE_INITIAL_MEMORY:-32MB}
+    POSTGRES_PGLITE_MAXIMUM_MEMORY=${PGLITE_PRIVATE_MAXIMUM_MEMORY:-1GB}
+fi
 if [ "${PGLITE_SHARED_MEMORY:-false}" = true ]; then
     echo "pglite: enabling shared Wasm memory without the Emscripten pthread runtime."
     PGLITE_WASM_FEATURE_FLAGS="-matomics -mbulk-memory"
     PGLITE_CFLAGS="$PGLITE_CFLAGS $PGLITE_WASM_FEATURE_FLAGS"
-    PGLITE_MEMORY_LDFLAGS="$PGLITE_MEMORY_LDFLAGS -sSHARED_MEMORY=1 -sMAXIMUM_MEMORY=2GB"
+    PGLITE_MEMORY_LDFLAGS="$PGLITE_MEMORY_LDFLAGS -sSHARED_MEMORY=1 -sMAXIMUM_MEMORY=${POSTGRES_PGLITE_MAXIMUM_MEMORY}"
     PGLITE_SHARED_MEMORY_RECONFIGURE=true
 
     # Feature flags are recorded on every object. Never reuse the ordinary
@@ -85,7 +91,11 @@ if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
 -Dgetpid=pgl_getpid -Dkill=pgl_kill -Dwaitpid=pgl_waitpid \
 -Dsetitimer=pgl_setitimer -Dsigprocmask=pgl_sigprocmask \
 -Dsocket=pgl_socket -Dbind=pgl_bind -Dlisten=pgl_listen \
--Daccept=pgl_accept -Dclose=pgl_close"
+-Daccept=pgl_accept -Dclose=pgl_close \
+-Dread=pgl_fd_read -Dwrite=pgl_fd_write \
+-Dpread=pgl_fd_pread -Dpwrite=pgl_fd_pwrite \
+-Dreadv=pgl_fd_readv -Dwritev=pgl_fd_writev \
+-Dpreadv=pgl_fd_preadv -Dpwritev=pgl_fd_pwritev"
 fi
 # we don't want to override sigsetjmp and setjmp!
 # -Dsigsetjmp=pgl_sigsetjmp -Dsiglongjmp=pgl_siglongjmp \
@@ -190,7 +200,7 @@ PGPRELOAD="\
 PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
 POSTGRES_PGLITE_FLAGS="\
 -sSTACK_SIZE=8MB \
--sINITIAL_MEMORY=128MB \
+-sINITIAL_MEMORY=${POSTGRES_PGLITE_INITIAL_MEMORY} \
 -sIMPORTED_MEMORY=1 \
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \

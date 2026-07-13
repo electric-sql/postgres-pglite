@@ -16,8 +16,8 @@ const directory = await mkdtemp(join(tmpdir(), 'pglite-phase4-nodefs-'))
 const module = await WebAssembly.compile(
   await import('node:fs').then(({ readFileSync }) => readFileSync(wasmPath)),
 )
-const globalMemory = sharedMemory()
-const privateMemories = [sharedMemory(), sharedMemory()]
+const globalMemory = sharedMemory(2)
+const privateMemories = [sharedMemory(512), sharedMemory(512)]
 const workerPath = new URL('./phase4-artifact-worker.mjs', import.meta.url)
 const workers = privateMemories.map(
   (privateMemory, index) =>
@@ -80,8 +80,8 @@ try {
   await rm(directory, { recursive: true, force: true })
 }
 
-function sharedMemory() {
-  return new WebAssembly.Memory({ initial: 2048, maximum: 32768, shared: true })
+function sharedMemory(initial) {
+  return new WebAssembly.Memory({ initial, maximum: 16384, shared: true })
 }
 
 function message(worker, type) {

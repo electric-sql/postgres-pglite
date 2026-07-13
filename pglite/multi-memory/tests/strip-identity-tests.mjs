@@ -23,6 +23,6 @@ assert.equal(instance.exports.conditional_marked(176, 1), 42)
 const report = JSON.parse(await readFile(reportPath, 'utf8'))
 assert.equal(report.mode, 'strip-private-identities-only')
 assert.equal(report.privateIdentityExports[0], 'pgl_private_pointer')
-assert.equal(report.removedPrivateIdentityCalls, 3)
+assert.equal(report.removedPrivateIdentityCalls, 4)
 
 console.log('private identity stripping: ok')
