@@ -209,7 +209,7 @@ async function runPostgres(args) {
       pgdata,
       address,
       startedAt: new Date(startedAt).toISOString(),
-      serverArgs: args,
+      serverArgs: parsed.serverArgs,
       diagnostics: postmaster.diagnostics(),
     })
     postmasterExit = await postmaster.waitForExit()
@@ -256,7 +256,7 @@ async function runPgCtl(args) {
   }
   if (parsed.action === 'restart') {
     const previous = await readLifecycle(pgdata, false)
-    const serverArgs = previous?.serverArgs ?? []
+    const serverArgs = parsed.options || previous?.serverArgs || []
     const log = parsed.log ?? previous?.log
     await stopServer(pgdata, parsed.mode, parsed.timeout, false)
     await startServer(pgdata, { ...parsed, log, options: serverArgs })
@@ -413,6 +413,7 @@ function parseInitdb(args) {
 function parsePostgres(args) {
   let pgdata
   const startParams = []
+  const serverArgs = []
   const settings = new Map()
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -423,10 +424,12 @@ function parsePostgres(args) {
     } else if (arg === '-c') {
       const value = requiredValue(args, ++i, arg)
       startParams.push('-c', value)
+      serverArgs.push('-c', value)
       recordSetting(settings, value)
     } else if (arg === '-k' || arg === '-p' || arg === '-h') {
       const value = requiredValue(args, ++i, arg)
       startParams.push(arg, value)
+      serverArgs.push(arg, value)
       settings.set(
         arg === '-k' ? 'unix_socket_directories' :
           arg === '-p' ? 'port' : 'listen_addresses',
@@ -434,24 +437,28 @@ function parsePostgres(args) {
       )
     } else if (arg === '-F') {
       startParams.push(arg)
+      serverArgs.push(arg)
     } else if (arg === '-d') {
-      startParams.push(arg, requiredValue(args, ++i, arg))
+      const value = requiredValue(args, ++i, arg)
+      startParams.push(arg, value)
+      serverArgs.push(arg, value)
     } else if (arg.startsWith('--') && arg.includes('=')) {
       startParams.push(arg)
+      serverArgs.push(arg)
       recordSetting(settings, arg.slice(2))
     } else {
       fail(`postgres: unsupported provider option: ${arg}`)
     }
   }
   if (!pgdata) fail('postgres: data directory must be specified with -D')
-  return { pgdata, startParams, settings }
+  return { pgdata, startParams, serverArgs, settings }
 }
 
 function parsePgCtl(args) {
   let pgdata
   let action
   let mode = 'fast'
-  let timeout = 60
+  let timeout = Number.parseInt(process.env.PGCTLTIMEOUT ?? '60', 10)
   let log
   let options = ''
   let silent = false

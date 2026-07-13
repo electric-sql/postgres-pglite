@@ -36,6 +36,8 @@ export PGCTLTIMEOUT=${PGCTLTIMEOUT:-120}
 
 rm -rf "${OUT}/results/raw-${TARGET}" "${OUT}/results/${TARGET}.log"
 mkdir -p "${OUT}/results/raw-${TARGET}"
+"${MM_ROOT}/tests/phase7-provider-lifecycle.sh" \
+  "${PROVIDER}" "${OUT}/results/raw-${TARGET}"
 set +e
 make -C "${NATIVE}/build" -j"${JOBS}" "${TARGET}" \
   2>&1 | tee "${OUT}/results/${TARGET}.log"
