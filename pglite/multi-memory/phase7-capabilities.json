@@ -205,6 +205,34 @@
         "reason": "The complete pg_basebackup replication and recovery suite has not yet completed the Phase 7 gate."
       },
       {
+        "id": "pg-ctl-promotion",
+        "match": "exact",
+        "path": "src/bin/pg_ctl/t/003_promote.pl",
+        "state": "BLOCKED",
+        "reason": "The test creates and promotes a streaming-replication standby; standby promotion has not completed the Phase 7 gate."
+      },
+      {
+        "id": "pg-ctl-logging-collector",
+        "match": "exact",
+        "path": "src/bin/pg_ctl/t/004_logrotate.pl",
+        "state": "UNSUPPORTED",
+        "reason": "The Node provider captures the foreground postmaster stream and deliberately disables PostgreSQL's forked logging collector, so pg_ctl logrotate has no server-side collector to rotate."
+      },
+      {
+        "id": "combine-backup-replication-fixtures",
+        "match": "prefix",
+        "path": "src/bin/pg_combinebackup/t",
+        "state": "BLOCKED",
+        "reason": "The nontrivial pg_combinebackup TAP tests construct full and incremental backups through physical replication and recovery lifecycle that has not completed the Phase 7 gate."
+      },
+      {
+        "id": "combine-backup-cli",
+        "match": "exact",
+        "path": "src/bin/pg_combinebackup/t/001_basic.pl",
+        "state": "SUPPORTED",
+        "reason": "The basic utility option and error-surface test does not require a running server or replication lifecycle."
+      },
+      {
         "id": "rewind-recovery",
         "match": "prefix",
         "path": "src/bin/pg_rewind",

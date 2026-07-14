@@ -65,6 +65,7 @@ if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
     PGLITE_POSTMASTER_RECONFIGURE=true
     # The forced PGlite libc header redirects the dynamic-loader boundary.
     # Make does not otherwise notice a change to this injected header.
+    rm -f src/backend/libpq/auth.o
     rm -f src/backend/utils/fmgr/dfmgr.o
     rm -f src/backend/utils/misc/stack_depth.o
     rm -f src/backend/postmaster/checkpointer.o
@@ -492,6 +493,8 @@ if [ "${PGLITE_BACKEND_ONLY:-false}" = true ]; then
     fi
     emmake make PORTNAME=emscripten -C src/backend generated-headers || exit 54
     if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
+        emmake make PORTNAME=emscripten -C src/backend/libpq \
+            auth.o || exit 64
         emmake make PORTNAME=emscripten -C src/backend/utils/fmgr \
             dfmgr.o || exit 61
         emmake make PORTNAME=emscripten -C src/backend/utils/misc \
@@ -542,6 +545,8 @@ if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
     # deleting it above, before the parallel top-level link can consume it.
     emmake make PORTNAME=emscripten -C src/backend generated-headers \
         || { echo 'error: generating headers for the postmaster loader boundary' ; exit 18; }
+    emmake make PORTNAME=emscripten -C src/backend/libpq auth.o \
+        || { echo 'error: rebuilding the postmaster peer-identity boundary' ; exit 26; }
     emmake make PORTNAME=emscripten -C src/backend/utils/fmgr dfmgr.o \
         || { echo 'error: rebuilding the postmaster loader boundary' ; exit 22; }
     emmake make PORTNAME=emscripten -C src/backend/utils/misc stack_depth.o \

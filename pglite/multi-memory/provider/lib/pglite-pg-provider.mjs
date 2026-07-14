@@ -7,8 +7,9 @@ import {
   openSync,
   readFileSync,
   realpathSync,
+  statSync,
 } from 'node:fs'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { userInfo } from 'node:os'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -48,33 +49,42 @@ async function runInitdb(args) {
   if (existsSync(join(pgdata, 'PG_VERSION'))) {
     fail(`initdb: directory already contains a database system: ${pgdata}`)
   }
-  await mkdir(pgdata, { recursive: true })
+  const modes = dataDirectoryModes(
+    parsed.initdbArgs.includes('--allow-group-access'),
+  )
+  const previousUmask = process.umask(modes.umask)
+  await mkdir(pgdata, { recursive: true, mode: modes.directory })
+  await chmod(pgdata, modes.directory)
 
-  const { PGlite } = await import(
-    pathToFileURL(join(config.repoRoot, 'packages/pglite/dist/index.js')).href
-  )
-  const icuArchive = await readFile(config.icuArchive)
-  const database = await PGlite.create({
-    dataDir: `file://${pgdata}`,
-    icuDataDir: new Blob([icuArchive]),
-    initDbStartParams: parsed.initdbArgs,
-  })
-  await database.close()
-  if (!existsSync(join(pgdata, 'PG_VERSION'))) {
-    fail(`initdb: PGlite did not initialize ${pgdata}`)
+  try {
+    const { PGlite } = await import(
+      pathToFileURL(join(config.repoRoot, 'packages/pglite/dist/index.js')).href
+    )
+    const icuArchive = await readFile(config.icuArchive)
+    const database = await PGlite.create({
+      dataDir: `file://${pgdata}`,
+      icuDataDir: new Blob([icuArchive]),
+      initDbStartParams: parsed.initdbArgs,
+    })
+    await database.close()
+    if (!existsSync(join(pgdata, 'PG_VERSION'))) {
+      fail(`initdb: PGlite did not initialize ${pgdata}`)
+    }
+    await writeFile(
+      join(pgdata, CLUSTER_FILE),
+      `${JSON.stringify(
+        {
+          schema: PROVIDER_SCHEMA,
+          bootstrapSuperuser: parsed.username,
+        },
+        null,
+        2,
+      )}\n`,
+      { mode: modes.file },
+    )
+  } finally {
+    process.umask(previousUmask)
   }
-  await writeFile(
-    join(pgdata, CLUSTER_FILE),
-    `${JSON.stringify(
-      {
-        schema: PROVIDER_SCHEMA,
-        bootstrapSuperuser: parsed.username,
-      },
-      null,
-      2,
-    )}\n`,
-    { mode: 0o600 },
-  )
   console.log(`PGlite PostgreSQL data directory initialized at ${pgdata}`)
 }
 
@@ -93,6 +103,10 @@ async function runPostgres(args) {
     runPostgresDescribe(pgdata, parsed)
     return
   }
+  // PostgreSQL derives its process umask from the data-directory mode.  The
+  // provider process and all of its Worker threads must do the same because
+  // NODEFS applies the host process umask when PostgreSQL creates files.
+  process.umask(dataDirectoryModesForPath(pgdata).umask)
   await removeStaleLifecycle(pgdata)
 
   const fileSettings = readPostgresqlSettings(join(pgdata, 'postgresql.conf'))
@@ -250,6 +264,14 @@ async function runPgCtl(args) {
   if (printVersionOrHelp('pg_ctl', args)) return
   const parsed = parsePgCtl(args)
   const pgdata = canonicalDataDirectory(parsed.pgdata)
+  if (parsed.action === 'initdb') {
+    await runInitdb([
+      '--pgdata',
+      pgdata,
+      ...splitShellWords(parsed.options ?? ''),
+    ])
+    return
+  }
   if (parsed.action === 'start') {
     await startServer(pgdata, parsed)
     return
@@ -258,7 +280,7 @@ async function runPgCtl(args) {
     const previous = await readLifecycle(pgdata, false)
     const serverArgs = parsed.options || previous?.serverArgs || []
     const log = parsed.log ?? previous?.log
-    await stopServer(pgdata, parsed.mode, parsed.timeout, false)
+    await stopServer(pgdata, parsed.mode, parsed.timeout, false, true)
     await startServer(pgdata, { ...parsed, log, options: serverArgs })
     return
   }
@@ -267,6 +289,11 @@ async function runPgCtl(args) {
     return
   }
   if (parsed.action === 'status') {
+    if (!existsSync(pgdata)) {
+      console.log(`pg_ctl: directory ${pgdata} does not exist`)
+      process.exitCode = 4
+      return
+    }
     const state = await readLifecycle(pgdata, false)
     if (state && isProcessAlive(state.pid)) {
       console.log(`pg_ctl: server is running (PID: ${state.pid})`)
@@ -297,16 +324,22 @@ async function startServer(pgdata, options) {
   const logPath = options.log ? resolve(options.log) : undefined
   let output = 'inherit'
   let logDescriptor
-  if (logPath) {
-    await mkdir(dirname(logPath), { recursive: true })
-    logDescriptor = openSync(logPath, 'a')
-    output = logDescriptor
+  const previousUmask = process.umask(dataDirectoryModesForPath(pgdata).umask)
+  let child
+  try {
+    if (logPath) {
+      await mkdir(dirname(logPath), { recursive: true })
+      logDescriptor = openSync(logPath, 'a')
+      output = logDescriptor
+    }
+    child = spawn(join(providerRoot, 'bin', 'postgres'), args, {
+      env: { ...process.env, PGLITE_TEST_PROVIDER: providerRoot },
+      detached: false,
+      stdio: ['ignore', output, output],
+    })
+  } finally {
+    process.umask(previousUmask)
   }
-  const child = spawn(join(providerRoot, 'bin', 'postgres'), args, {
-    env: { ...process.env, PGLITE_TEST_PROVIDER: providerRoot },
-    detached: false,
-    stdio: ['ignore', output, output],
-  })
   let spawnError
   child.once('error', (error) => {
     spawnError = error
@@ -322,6 +355,10 @@ async function startServer(pgdata, options) {
           await writeLifecycle(pgdata, state)
         }
         child.unref()
+        if (!options.silent) {
+          console.log('waiting for server to start.... done')
+          console.log('server started')
+        }
         return
       }
       if (
@@ -365,9 +402,16 @@ async function terminateStartingServer(child, pgdata) {
   await rm(join(pgdata, STATE_FILE), { force: true })
 }
 
-async function stopServer(pgdata, mode, timeout, silent) {
+async function stopServer(
+  pgdata,
+  mode,
+  timeout,
+  silent,
+  allowNotRunning = false,
+) {
   const state = await readLifecycle(pgdata, false)
   if (!state || !isProcessAlive(state.pid)) {
+    if (allowNotRunning) return
     if (!silent)
       console.error('pg_ctl: PID file does not exist or server is not running')
     process.exitCode = 1
@@ -768,10 +812,23 @@ async function readLifecycle(pgdata, required) {
 async function writeLifecycle(pgdata, state) {
   const path = join(pgdata, STATE_FILE)
   const temporary = `${path}.${process.pid}.tmp`
+  const mode = dataDirectoryModesForPath(pgdata).file
   await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, {
-    mode: 0o600,
+    mode,
   })
+  await chmod(temporary, mode)
   await rename(temporary, path)
+}
+
+function dataDirectoryModesForPath(pgdata) {
+  const mode = statSync(pgdata).mode & 0o777
+  return dataDirectoryModes((mode & 0o070) !== 0)
+}
+
+function dataDirectoryModes(groupAccess) {
+  return groupAccess
+    ? { directory: 0o750, file: 0o640, umask: 0o027 }
+    : { directory: 0o700, file: 0o600, umask: 0o077 }
 }
 
 async function readClusterMetadata(pgdata) {
