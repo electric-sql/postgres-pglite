@@ -11,7 +11,9 @@
     "selinux": false,
     "nativeChildPids": false,
     "dynamicSideModules": false,
-    "hostCommandExecution": false
+    "hostCommandExecution": false,
+    "backendOutboundSockets": false,
+    "directIO": false
   },
   "capabilities": {
     "core-regression": {
@@ -21,6 +23,10 @@
     "tap-basic-lifecycle": {
       "state": "SUPPORTED",
       "scope": "single primary clusters using initdb, postgres, pg_ctl and native client utilities"
+    },
+    "backend-outbound-sockets": {
+      "state": "BLOCKED",
+      "reason": "Backend libpq sockets currently provide in-cluster SAB loopback; routing a backend connection to another PGlite postmaster or host endpoint needs a separate outbound socket broker."
     },
     "replication": {
       "state": "BLOCKED",
@@ -51,6 +57,20 @@
     "defaultState": "SUPPORTED",
     "blockedExecution": "record-unless-PGLITE_PHASE7_RUN_BLOCKED=true",
     "rules": [
+      {
+        "id": "dblink-cross-cluster-outbound-socket",
+        "match": "exact",
+        "path": "contrib/dblink/t/001_auth_scram.pl",
+        "state": "BLOCKED",
+        "reason": "The SCRAM TAP test opens node 2's Unix socket from a backend in node 1; backend libpq currently supports in-cluster SAB loopback but not cross-postmaster host socket routing."
+      },
+      {
+        "id": "postgres-fdw-cross-cluster-outbound-socket",
+        "match": "exact",
+        "path": "contrib/postgres_fdw/t/001_auth_scram.pl",
+        "state": "BLOCKED",
+        "reason": "The SCRAM TAP test opens node 2's TCP socket from a backend in node 1; backend libpq currently supports in-cluster SAB loopback but not cross-postmaster host socket routing."
+      },
       {
         "id": "amcheck-pitr-system-command",
         "match": "exact",
@@ -134,6 +154,27 @@
         "path": "src/test/modules/test_oat_hooks",
         "state": "UNSUPPORTED",
         "reason": "The test observes native backend child PIDs, while PGlite backends use process-registry IDs."
+      },
+      {
+        "id": "aio-worker-native-signal",
+        "match": "exact",
+        "path": "src/test/modules/test_aio/t/002_io_workers.pl",
+        "state": "UNSUPPORTED",
+        "reason": "This test passes a synthetic I/O worker process-registry PID to host pg_ctl kill; PGlite Workers are not native child processes addressable by host OS signals."
+      },
+      {
+        "id": "vfs-direct-io",
+        "match": "exact",
+        "path": "src/test/modules/test_misc/t/004_io_direct.pl",
+        "state": "UNSUPPORTED",
+        "reason": "Emscripten filesystem adapters do not expose portable O_DIRECT alignment and host-filesystem semantics; the PGlite VFS contract uses buffered I/O."
+      },
+      {
+        "id": "standalone-single-user-cli",
+        "match": "exact",
+        "path": "src/test/modules/test_misc/t/008_replslot_single_user.pl",
+        "state": "UNSUPPORTED",
+        "reason": "This test invokes postgres --single directly. The Phase 7 provider exercises the multi-session postmaster and Worker backend architecture; the separate single-user PGlite constructor is outside this gate."
       },
       {
         "id": "injection-points-disabled",

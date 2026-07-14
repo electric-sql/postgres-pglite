@@ -101,7 +101,8 @@ if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
 -Dread=pgl_fd_read -Dwrite=pgl_fd_write \
 -Dpread=pgl_fd_pread -Dpwrite=pgl_fd_pwrite \
 -Dreadv=pgl_fd_readv -Dwritev=pgl_fd_writev \
--Dpreadv=pgl_fd_preadv -Dpwritev=pgl_fd_pwritev"
+-Dpreadv=pgl_fd_preadv -Dpwritev=pgl_fd_pwritev \
+-Dgettimeofday=pgl_gettimeofday"
 fi
 # we don't want to override sigsetjmp and setjmp!
 # -Dsigsetjmp=pgl_sigsetjmp -Dsiglongjmp=pgl_siglongjmp \

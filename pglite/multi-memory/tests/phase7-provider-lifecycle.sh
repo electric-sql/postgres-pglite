@@ -24,8 +24,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+set +e
+IO_METHOD_PROBE=$("${PROVIDER}/bin/postgres" -C invalid \
+  -c io_method=invalid 2>&1)
+IO_METHOD_STATUS=$?
+set -e
+test "${IO_METHOD_STATUS}" -eq 1
+grep -q 'Available values: sync, worker' <<<"${IO_METHOD_PROBE}"
+
 "${PROVIDER}/bin/initdb" -D "${PGDATA}" --auth=trust --no-sync \
-  --no-instructions -c track_commit_timestamp=on
+  --no-instructions --data-checksums -c track_commit_timestamp=on
+test "$("${PROVIDER}/bin/postgres" -D "${PGDATA}" -C data_checksums \
+  -c log_min_messages=fatal)" = on
 "${PROVIDER}/bin/pg_ctl" -D "${PGDATA}" -l "${LOG}" \
   -o "-F -k '${SOCKET_DIR}' -p ${PORT}" start
 "${PROVIDER}/bin/pg_ctl" -D "${PGDATA}" status

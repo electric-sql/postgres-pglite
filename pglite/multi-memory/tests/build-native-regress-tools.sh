@@ -35,6 +35,7 @@ if [[ -f "${OUT}/manifest.json" && \
       -x "${BUILD}/src/bin/pg_ctl/pg_ctl" && \
       -x "${BUILD}/src/bin/initdb/initdb" && \
       -x "${BUILD}/src/backend/postgres" && \
+      -x "${INSTALL}/bin/postgres" && \
       -f "${BUILD}/src/test/perl/Makefile" && \
       -f "${BUILD}/contrib/dist.mk" && \
       -f "${SOURCE}/src/test/regress/parallel_schedule" ]] && \
@@ -95,6 +96,7 @@ git -C "${PG_ROOT}" archive --format=tar "${REVISION}" \
 ln -s "${SOURCE}/contrib/dist.mk" "${BUILD}/contrib/dist.mk"
 
 make -j"${JOBS}" -C "${BUILD}" all
+make -C "${BUILD}" install
 
 export LD_LIBRARY_PATH="${BUILD}/src/interfaces/libpq${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 test "$("${BUILD}/src/test/regress/pg_regress" --version)" = \

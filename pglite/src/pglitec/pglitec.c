@@ -518,7 +518,9 @@ typedef uint32_t (*pglite_signal_poll_t) (void);
 typedef void (*pglite_signal_mask_t) (uint32_t);
 typedef int (*pglite_futex_wait_t) (void *, uint32_t, double);
 typedef int (*pglite_futex_wake_t) (void *, int);
+typedef int64_t (*pglite_clock_now_t) (void);
 typedef int (*pglite_socket_t) (int, int, int);
+typedef int (*pglite_connect_t) (int, const struct sockaddr *, socklen_t);
 typedef int (*pglite_bind_t) (int, const struct sockaddr *, socklen_t);
 typedef int (*pglite_listen_t) (int, int);
 typedef int (*pglite_accept_t) (int, struct sockaddr *, socklen_t *);
@@ -536,7 +538,9 @@ static pglite_signal_poll_t pglite_signal_poll = NULL;
 static pglite_signal_mask_t pglite_signal_mask = NULL;
 static pglite_futex_wait_t pglite_futex_wait = NULL;
 static pglite_futex_wake_t pglite_futex_wake = NULL;
+static pglite_clock_now_t pglite_clock_now = NULL;
 static pglite_socket_t pglite_socket = NULL;
+static pglite_connect_t pglite_connect = NULL;
 static pglite_bind_t pglite_bind = NULL;
 static pglite_listen_t pglite_listen = NULL;
 static pglite_accept_t pglite_accept = NULL;
@@ -578,7 +582,49 @@ pgl_set_futex_host(pglite_futex_wait_t wait_futex,
 }
 
 void		EMSCRIPTEN_KEEPALIVE
+pgl_set_clock_host(pglite_clock_now_t realtime_microseconds)
+{
+	pglite_clock_now = realtime_microseconds;
+}
+
+/*
+ * Date.now(), which backs Emscripten's gettimeofday(), only has millisecond
+ * resolution.  PostgreSQL requires a common, higher-resolution wall clock
+ * across backend Workers for statement and statistics timestamps.  Keep the
+ * host callback at the PGlite libc boundary so PostgreSQL sources do not need
+ * to know about JavaScript clocks.
+ */
+int			EMSCRIPTEN_KEEPALIVE
+pgl_gettimeofday(struct timeval *time_value, void *timezone_value)
+{
+	int64_t		microseconds;
+	struct timespec time_spec;
+
+	(void) timezone_value;
+	if (time_value == NULL)
+	{
+		errno = EFAULT;
+		return -1;
+	}
+
+	if (pglite_clock_now != NULL)
+		microseconds = pglite_clock_now();
+	else
+	{
+		if (clock_gettime(CLOCK_REALTIME, &time_spec) != 0)
+			return -1;
+		microseconds = ((int64_t) time_spec.tv_sec * INT64_C(1000000)) +
+			(time_spec.tv_nsec / 1000);
+	}
+
+	time_value->tv_sec = (time_t) (microseconds / INT64_C(1000000));
+	time_value->tv_usec = (suseconds_t) (microseconds % INT64_C(1000000));
+	return 0;
+}
+
+void		EMSCRIPTEN_KEEPALIVE
 pgl_set_socket_host(pglite_socket_t create_socket,
+					pglite_connect_t connect_socket,
 					pglite_bind_t bind_socket,
 					pglite_listen_t listen_socket,
 					pglite_accept_t accept_socket,
@@ -588,6 +634,7 @@ pgl_set_socket_host(pglite_socket_t create_socket,
 					pglite_poll_t poll_sockets)
 {
 	pglite_socket = create_socket;
+	pglite_connect = connect_socket;
 	pglite_bind = bind_socket;
 	pglite_listen = listen_socket;
 	pglite_accept = accept_socket;
@@ -750,6 +797,21 @@ pgl_dispatch_pending_signals(void)
 		if (handler != SIG_DFL && handler != SIG_IGN && handler != NULL)
 			handler(signal_number);
 	}
+}
+
+/*
+ * A native SetLatch() can use the kernel's signal and memory-ordering
+ * guarantees to avoid signaling a process that had not yet advertised that
+ * it was sleeping.  PGlite processes are independent Workers and their
+ * virtual poll sleeps on the process-control SAB, not on the latch word.
+ * Always notify a different Worker after publishing a newly-set latch so a
+ * stale observation of maybe_sleeping cannot turn into a lost wakeup.
+ */
+void		EMSCRIPTEN_KEEPALIVE
+pgl_notify_latch_owner(pid_t owner_pid)
+{
+	if (owner_pid != 0 && owner_pid != pgl_getpid())
+		(void) pgl_kill(owner_pid, SIGURG);
 }
 
 int			EMSCRIPTEN_KEEPALIVE
@@ -1617,6 +1679,30 @@ pgl_getsockopt(int __fd, int __level, int __optname,
 			   void *__restrict __optval,
 			   socklen_t *__restrict __optlen)
 {
+#if defined(__PGLITE_POSTMASTER__)
+	/*
+	 * Virtual connects complete synchronously in the host adapter.  libpq
+	 * follows every successful connect() with SO_ERROR and requires the
+	 * returned integer to be initialized; the old generic success stub left
+	 * stack garbage in optval and made nested dblink/libpq connects fail
+	 * nondeterministically.
+	 */
+	if (__fd >= 0x3c000000 && __level == SOL_SOCKET &&
+		__optname == SO_ERROR)
+	{
+		int			no_error = 0;
+
+		if (__optval == NULL || __optlen == NULL ||
+			*__optlen < sizeof(no_error))
+		{
+			errno = EINVAL;
+			return -1;
+		}
+		memcpy(__optval, &no_error, sizeof(no_error));
+		*__optlen = sizeof(no_error);
+		return 0;
+	}
+#endif
 #if defined(__PGLITE_POSTMASTER__) && defined(SO_PEERCRED)
 	/*
 	 * Node does not expose SO_PEERCRED for an accepted net.Socket.  A virtual
@@ -1692,6 +1778,8 @@ int			EMSCRIPTEN_KEEPALIVE
 pgl_connect(int socket, const struct sockaddr *address, socklen_t address_len)
 {
 #ifdef __PGLITE_POSTMASTER__
+	if (pglite_connect != NULL)
+		return pglite_connect(socket, address, address_len);
 	return connect(socket, address, address_len);
 #else
 	/* dummy */

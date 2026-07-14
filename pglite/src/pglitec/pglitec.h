@@ -46,6 +46,9 @@ int pgl_sigaction(int signal_number, const struct sigaction *action,
 				  struct sigaction *old_action);
 int pgl_sigprocmask(int how, const sigset_t *set, sigset_t *old_set);
 void pgl_dispatch_pending_signals(void);
+void pgl_notify_latch_owner(pid_t owner_pid);
+int pgl_gettimeofday(struct timeval *time_value, void *timezone_value);
+void pgl_set_clock_host(int64_t (*realtime_microseconds)(void));
 #ifdef __PGLITE_POSTMASTER__
 void *pgl_dlopen(const char *filename, int flags);
 void *pgl_dlsym(void *handle, const char *name);

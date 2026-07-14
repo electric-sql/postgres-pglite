@@ -11,7 +11,7 @@ import {
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { userInfo } from 'node:os'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const PROVIDER_SCHEMA = 1
@@ -81,9 +81,17 @@ async function runInitdb(args) {
 async function runPostgres(args) {
   if (printVersionOrHelp('postgres', args)) return
   const parsed = parsePostgres(args)
+  if (parsed.describeSetting && !parsed.pgdata) {
+    runPostgresDescribe(undefined, parsed)
+    return
+  }
   const pgdata = canonicalDataDirectory(parsed.pgdata)
   if (!existsSync(join(pgdata, 'PG_VERSION'))) {
     fail(`postgres: data directory is not initialized: ${pgdata}`)
+  }
+  if (parsed.describeSetting) {
+    runPostgresDescribe(pgdata, parsed)
+    return
   }
   await removeStaleLifecycle(pgdata)
 
@@ -191,11 +199,7 @@ async function runPostgres(args) {
   let reason = 'postmaster-exit'
   let postmasterExit
   try {
-    const readinessSession = await createSessionWhenReady(postmaster, {
-      username: cluster.bootstrapSuperuser,
-      database: 'postgres',
-    })
-    await readinessSession.close()
+    await waitForPostmasterReady(postmaster, pgdata)
     const address = await socket.start()
     await writeLifecycle(pgdata, {
       schema: PROVIDER_SCHEMA,
@@ -327,7 +331,7 @@ async function startServer(pgdata, options) {
         !isProcessAlive(child.pid)
       ) {
         fail(
-          `pg_ctl: server exited before becoming ready${spawnError ? `: ${spawnError.message}` : `; see ${logPath ?? 'stderr'}`}`,
+          `pg_ctl: could not start server: process exited before becoming ready${spawnError ? `: ${spawnError.message}` : `; see ${logPath ?? 'stderr'}`}`,
         )
       }
       await delay(100)
@@ -474,6 +478,7 @@ function parseInitdb(args) {
 
 function parsePostgres(args) {
   let pgdata
+  let describeSetting
   const startParams = []
   const serverArgs = []
   const settings = new Map()
@@ -488,6 +493,11 @@ function parsePostgres(args) {
       startParams.push('-c', value)
       serverArgs.push('-c', value)
       recordSetting(settings, value)
+    } else if (arg === '-C') {
+      if (describeSetting !== undefined) {
+        fail('postgres: -C may only be specified once')
+      }
+      describeSetting = requiredValue(args, ++i, arg)
     } else if (arg === '-k' || arg === '-p' || arg === '-h') {
       const value = requiredValue(args, ++i, arg)
       startParams.push(arg, value)
@@ -515,8 +525,60 @@ function parsePostgres(args) {
       fail(`postgres: unsupported provider option: ${arg}`)
     }
   }
-  if (!pgdata) fail('postgres: data directory must be specified with -D')
-  return { pgdata, startParams, serverArgs, settings }
+  if (!pgdata && describeSetting === undefined) {
+    fail('postgres: data directory must be specified with -D')
+  }
+  return { pgdata, describeSetting, startParams, serverArgs, settings }
+}
+
+function runPostgresDescribe(pgdata, parsed) {
+  // `postgres -C` is an offline, read-only configuration query rather than
+  // server execution.  data_checksums is runtime-computed from pg_control, so
+  // query it with the exact pg_controldata revision built by the regression
+  // harness.  This keeps control-file parsing out of the provider while normal
+  // postgres invocations continue to run exclusively through PGlitePostmaster.
+  const name = parsed.describeSetting.toLowerCase().replaceAll('-', '_')
+  if (name !== 'data_checksums') {
+    const executable = config.postgresExecutable
+    if (!existsSync(executable)) {
+      fail(`postgres: exact-revision executable is missing: ${executable}`)
+    }
+    const args = [
+      ...(pgdata ? ['-D', pgdata] : []),
+      '-C',
+      parsed.describeSetting,
+      ...parsed.serverArgs,
+    ]
+    const result = spawnSync(executable, args, {
+      env: process.env,
+      stdio: 'inherit',
+    })
+    if (result.error) throw result.error
+    if (result.signal) {
+      fail(`postgres: exact-revision -C probe terminated by ${result.signal}`)
+    }
+    process.exitCode = result.status ?? 1
+    return
+  }
+  if (!pgdata) {
+    fail('postgres: data_checksums requires a data directory')
+  }
+  const executable = join(
+    config.postgresBuild,
+    'src/bin/pg_controldata/pg_controldata',
+  )
+  if (!existsSync(executable)) {
+    fail(`postgres: pg_controldata is missing: ${executable}`)
+  }
+  const output = execFileSync(executable, [pgdata], {
+    encoding: 'utf8',
+    env: process.env,
+  })
+  const match = /^Data page checksum version:\s*(\d+)\s*$/m.exec(output)
+  if (!match) {
+    fail('postgres: pg_controldata did not report a checksum version')
+  }
+  console.log(Number.parseInt(match[1], 10) === 0 ? 'off' : 'on')
 }
 
 function parsePgCtl(args) {
@@ -795,6 +857,8 @@ function validateConfig(value) {
     value.artifact?.glue,
     value.artifact?.data,
     value.resultsRoot,
+    value.postgresBuild,
+    value.postgresExecutable,
   ]) {
     assert.equal(typeof path, 'string', 'provider config path is missing')
   }
@@ -826,18 +890,34 @@ function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds))
 }
 
-async function createSessionWhenReady(postmaster, options) {
+async function waitForPostmasterReady(postmaster, pgdata) {
   const deadline = Date.now() + 60_000
-  let lastError
+  const exited = postmaster.waitForExit().then((result) => ({ result }))
   while (Date.now() < deadline) {
     try {
-      return await postmaster.createSession(options)
+      // PostgreSQL publishes startup state in the eighth line of
+      // postmaster.pid.  This is the same readiness source used by pg_ctl and
+      // remains valid when a test deliberately installs an HBA policy that
+      // rejects the bootstrap superuser.
+      const lines = (await readFile(join(pgdata, 'postmaster.pid'), 'utf8'))
+        .trimEnd()
+        .split('\n')
+      const status = lines[7]?.trim()
+      if (status === 'ready' || status === 'standby') return
     } catch (error) {
-      lastError = error
-      await delay(100)
+      if (error?.code !== 'ENOENT') throw error
+    }
+    const outcome = await Promise.race([
+      exited,
+      delay(100).then(() => undefined),
+    ])
+    if (outcome) {
+      throw new Error(
+        `PGlite postmaster exited before becoming ready (${outcome.result.exitKind}, ${outcome.result.exitCode})`,
+      )
     }
   }
-  throw lastError ?? new Error('PGlite postmaster did not become ready')
+  throw new Error('PGlite postmaster did not become ready within 60 seconds')
 }
 
 function fail(message) {

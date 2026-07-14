@@ -74,6 +74,7 @@ const config = {
     pgRoot,
     'pglite/multi-memory/tests/phase6-nodefs-factory.mjs',
   ),
+  postgresExecutable: join(native, 'install/bin/postgres'),
   privateMaximumMemory: 1024 * 1024 * 1024,
   globalMaximumMemory: 1024 * 1024 * 1024,
   resultsRoot,
@@ -93,6 +94,7 @@ for (const path of [
   config.artifact.data,
   config.icuArchive,
   config.workerFilesystemModule,
+  config.postgresExecutable,
   psql,
 ]) {
   assert.equal(typeof path, 'string')

@@ -309,6 +309,20 @@ SetLatch(Latch *latch)
 	latch->is_set = true;
 
 	pg_memory_barrier();
+#ifdef __PGLITE_POSTMASTER__
+	/*
+	 * PGlite's libc bridge supplies the cross-Worker wakeup semantics.  It
+	 * must not rely on maybe_sleeping: WebAssembly Workers wait on the host
+	 * process-control SAB rather than a kernel object coupled to this latch,
+	 * so a stale false value here would otherwise lose the only notification.
+	 */
+	owner_pid = latch->owner_pid;
+	if (owner_pid != 0 && owner_pid != MyProcPid)
+	{
+		pgl_notify_latch_owner(owner_pid);
+		return;
+	}
+#endif
 	if (!latch->maybe_sleeping)
 		return;
 
