@@ -1,2 +1,0 @@
-*.c whitespace=space-before-tab,trailing-space,tab-in-indent
-*.cpp whitespace=space-before-tab,trailing-space,tab-in-indent

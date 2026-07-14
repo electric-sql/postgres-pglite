@@ -474,7 +474,7 @@ build_regression_test_modules() {
             --module "$module_name" "${module_objects[@]}"
         )
     done
-    node22 pglite/multi-memory/tools/generate-static-test-modules.mjs \
+    node22 pglite/tests/postmaster/generate-static-test-modules.mjs \
         --output-dir "$STATIC_TEST_DIR" \
         --llvm-nm "$LLVM_NM" \
         "${STATIC_MODULE_ARGS[@]}" || \
@@ -484,7 +484,7 @@ build_regression_test_modules() {
         -o "$STATIC_TEST_DIR/static-test-modules.o" || \
         { echo 'error: compiling static regression module registry' ; exit 37; }
     emcc $PGLITE_CFLAGS -c \
-        pglite/multi-memory/tools/static-libpq-encoding.c \
+        pglite/tests/postmaster/static-libpq-encoding.c \
         -o "$STATIC_TEST_DIR/static-libpq-encoding.o" || \
         { echo 'error: compiling the static libpq encoding adapter' ; exit 41; }
     PGLITE_STATIC_TEST_OBJECTS="$(tr '\n' ' ' < "$STATIC_TEST_DIR/objects.rsp") $STATIC_TEST_DIR/static-test-modules.o $STATIC_TEST_DIR/static-libpq-encoding.o $(pwd)/src/interfaces/libpq/libpq.a"
@@ -582,17 +582,17 @@ PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist \
     ARCHIVE_DIR="$INSTALL_FOLDER/extensions" || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }
 # the above will also create a file with the imports that each extension needs - we pass these as input in the next step for emscripten to keep alive
 
-# Phase 3's upstream regression gate loads the core regress module directly
-# through $libdir. Keep this opt-in so the ordinary PGlite artifact does not
-# acquire test-only code, while still using the normal extension-import export
-# path for the shared test build.
+# The upstream regression suite loads the core regress module directly through
+# $libdir. Keep this opt-in so the ordinary PGlite artifact does not acquire
+# test-only code, while still using the normal extension-import export path for
+# the shared test build.
 if [ "${PGLITE_WITH_REGRESSION_TESTS:-false}" = true ]; then
     build_regression_test_modules
 fi
 
-# Step 4: make and dist other extensions. Phase 3 deliberately validates the
-# complete core dependency/PostgreSQL/contrib world first; dynamic third-party
-# side modules remain separately gated.
+# Step 4: make and dist other extensions. The postmaster integration suite
+# validates the core dependency/PostgreSQL/contrib world separately; dynamic
+# third-party side modules remain separately gated.
 if [ "${PGLITE_SKIP_THIRD_PARTY_EXTENSIONS:-false}" != true ]; then
     SAVE_PATH=$PATH
     PATH=$PATH:$INSTALL_FOLDER/bin
