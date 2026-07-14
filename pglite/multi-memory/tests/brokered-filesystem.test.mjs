@@ -201,7 +201,7 @@ try {
   ])
 
   const victim = await sessions[1].query('SELECT pg_backend_pid()::int AS pid')
-  await postmaster.terminateWorkerForTesting(victim.rows[0].pid)
+  await terminateBackendWorker(postmaster, victim.rows[0].pid)
   await sessions[1].close().catch(() => undefined)
   sessions.splice(1, 1)
 
@@ -284,6 +284,12 @@ function assertBrokerCleanup(diagnostics) {
     diagnostics.filesystem.broker.handlesOpened,
     diagnostics.filesystem.broker.handlesClosed,
   )
+}
+
+async function terminateBackendWorker(postmaster, pid) {
+  const record = postmaster.workers?.get(pid)
+  assert.ok(record, `PostgreSQL Worker ${pid} is not live`)
+  await record.worker.terminate()
 }
 
 function byteView(value) {

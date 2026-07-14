@@ -57,7 +57,7 @@ try {
     workerFilesystem: {
       module: join(
         repoRoot,
-        'postgres-pglite/pglite/multi-memory/tests/nodefs-test-filesystem.mjs',
+        'packages/pglite/tests/fixtures/nodefs-filesystem.mjs',
       ),
       options: { root: dataDirectory },
     },
@@ -198,7 +198,7 @@ try {
     await crashSession.query('SELECT pg_backend_pid() AS pid')
   ).rows[0].pid
   const crashGeneration = postmaster.diagnostics().globalShmAllocationGeneration
-  await postmaster.terminateWorkerForTesting(crashedPid)
+  await terminateBackendWorker(postmaster, crashedPid)
   await assert.rejects(
     withTimeout(
       crashSession.query('SELECT 1'),
@@ -446,6 +446,12 @@ function processSample(postmaster) {
     privateMemoryBytes: diagnostics?.privateMemoryBytes ?? 0,
     globalMemoryBytes: diagnostics?.globalMemoryBytes ?? 0,
   }
+}
+
+async function terminateBackendWorker(postmaster, pid) {
+  const record = postmaster.workers?.get(pid)
+  assert.ok(record, `PostgreSQL Worker ${pid} is not live`)
+  await record.worker.terminate()
 }
 
 function awaitableProcStatus() {

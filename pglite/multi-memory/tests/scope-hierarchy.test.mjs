@@ -37,7 +37,7 @@ const postgres = await createPostgres({
 
 const ensureCapacity = postgres.addFunction(() => 0, 'ii')
 postgres._pgl_set_scoped_shmem_host(ensureCapacity)
-postgres._pgl_set_scoped_shmem_enabled(1)
+postgres._pgl_set_scoped_shmem_mode(1)
 
 const Kind = {
   root: 1,

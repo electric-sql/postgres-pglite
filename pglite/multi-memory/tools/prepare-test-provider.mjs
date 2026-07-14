@@ -75,8 +75,8 @@ const config = {
   },
   icuArchive: join(repoRoot, 'packages/pglite-icu-full/static/icu.76.tgz'),
   workerFilesystemModule: join(
-    pgRoot,
-    'pglite/multi-memory/tests/nodefs-test-filesystem.mjs',
+    repoRoot,
+    'packages/pglite/tests/fixtures/nodefs-filesystem.mjs',
   ),
   postgresExecutable: join(native, 'install/bin/postgres'),
   privateMaximumMemory: 1024 * 1024 * 1024,

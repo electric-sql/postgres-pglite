@@ -78,7 +78,7 @@ const postmaster = await PGlitePostmaster.create({
   workerFilesystem: {
     module: join(
       repoRoot,
-      'postgres-pglite/pglite/multi-memory/tests/nodefs-test-filesystem.mjs',
+      'packages/pglite/tests/fixtures/nodefs-filesystem.mjs',
     ),
     options: {
       root: dataDirectory,

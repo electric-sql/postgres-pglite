@@ -72,7 +72,6 @@ int pgl_close(int fd);
 int pgl_poll(struct pollfd *fds, nfds_t nfds, int timeout);
 void pgl_set_shmem_host(int (*ensure_capacity)(uint32_t));
 void pgl_set_scoped_shmem_host(int (*ensure_capacity)(uint32_t));
-void pgl_set_scoped_shmem_enabled(int enabled);
 
 typedef enum PglScopedShmemMode
 {

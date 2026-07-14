@@ -1180,13 +1180,6 @@ pgl_set_scoped_shmem_host(pglite_shmem_ensure_capacity_t ensure_capacity)
 }
 
 void		EMSCRIPTEN_KEEPALIVE
-pgl_set_scoped_shmem_enabled(int enabled)
-{
-	pglite_scoped_shmem_mode = enabled ? PGL_SCOPED_SHMEM_DEDICATED :
-		PGL_SCOPED_SHMEM_DISABLED;
-}
-
-void		EMSCRIPTEN_KEEPALIVE
 pgl_set_scoped_shmem_mode(int mode)
 {
 	if (mode < PGL_SCOPED_SHMEM_DISABLED ||
@@ -2533,12 +2526,6 @@ void		EMSCRIPTEN_KEEPALIVE
 pgl_set_scoped_shmem_host(int (*ensure_capacity) (uint32_t))
 {
 	(void) ensure_capacity;
-}
-
-void		EMSCRIPTEN_KEEPALIVE
-pgl_set_scoped_shmem_enabled(int enabled)
-{
-	(void) enabled;
 }
 
 void		EMSCRIPTEN_KEEPALIVE

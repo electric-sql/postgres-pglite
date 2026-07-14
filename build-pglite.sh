@@ -490,12 +490,6 @@ build_regression_test_modules() {
     PGLITE_STATIC_TEST_OBJECTS="$(tr '\n' ' ' < "$STATIC_TEST_DIR/objects.rsp") $STATIC_TEST_DIR/static-test-modules.o $STATIC_TEST_DIR/static-libpq-encoding.o $(pwd)/src/interfaces/libpq/libpq.a"
 }
 
-if [ "${PGLITE_PROFILING_FUNCS:-false}" = true ]; then
-    echo "pglite: preserving optimized Wasm function names for profiling."
-    POSTGRES_PGLITE_FLAGS="$POSTGRES_PGLITE_FLAGS --profiling-funcs"
-    rm -f src/backend/pglite.js src/backend/pglite.wasm src/backend/pglite.data
-fi
-
 if [ "${PGLITE_BACKEND_ONLY:-false}" = true ]; then
     if [ "${PGLITE_CLEAN_BACKEND:-false}" = true ]; then
         emmake make PORTNAME=emscripten -C src/backend clean || exit 51
