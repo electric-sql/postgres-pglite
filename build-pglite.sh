@@ -439,8 +439,24 @@ build_regression_test_modules() {
 
         build_static_module src/backend/replication/pgoutput pgoutput \
             src/backend/replication/pgoutput/pgoutput.o
+        # A clean backend build can have only a subset of Snowball's objects
+        # materialized when the shell would expand *.o.  Ask its Makefile for
+        # the complete configured object list before the discovery build so
+        # every stemmer is copied into the static world-test artifact.
+        snowball_objects=$(emmake make -s PORTNAME=emscripten \
+            -C src/backend/snowball \
+            --eval='pglite-print-objs: ; @printf "%s" "$(OBJS)"' \
+            pglite-print-objs 2>/dev/null | tail -n 1)
+        snowball_module_objects=()
+        for object in $snowball_objects; do
+            snowball_module_objects+=("src/backend/snowball/$object")
+        done
+        [ "${#snowball_module_objects[@]}" -gt 0 ] || {
+            echo 'error: discovering configured Snowball objects'
+            exit 46
+        }
         build_static_module src/backend/snowball dict_snowball \
-            src/backend/snowball/*.o
+            "${snowball_module_objects[@]}"
 
         build_static_pgxs_tree src/test/modules true
     fi
