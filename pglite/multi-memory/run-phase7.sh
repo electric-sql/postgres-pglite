@@ -23,6 +23,22 @@ docker run --rm \
   "${IMAGE}" \
   chown 1000:1000 /phase7-native
 
+# Dependency installation mutates the shared pnpm and node_modules volumes,
+# which are also used by earlier root-run phases. Prepare them before dropping
+# privileges; the PostgreSQL test process below remains unprivileged so its
+# filesystem permission checks run with native Linux semantics.
+docker run --rm \
+  --volume "${REPO_ROOT}:/work:rw" \
+  --volume pglite-phase5-node-modules:/work/node_modules \
+  --volume pglite-multi-memory-pnpm-store:/tmp/pnpm-store \
+  --workdir /work \
+  "${IMAGE}" \
+  bash -lc '
+    set -euo pipefail
+    export PATH=/opt/node22/bin:${PATH}
+    pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store
+  '
+
 docker run --rm \
   --user 1000:1000 \
   --env PGLITE_PHASE7_TARGET="${PGLITE_PHASE7_TARGET:-check}" \
@@ -40,6 +56,5 @@ docker run --rm \
     set -euo pipefail
     export PATH=/opt/node22/bin:${PATH}
     test "$(uname -m)" = aarch64
-    pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store
     ./postgres-pglite/pglite/multi-memory/tests/run-phase7.sh /work
   '

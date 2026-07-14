@@ -38,6 +38,7 @@ if [[ "${PGLITE_PHASE6_REUSE_ARTIFACT:-false}" != true ]]; then
     DEBUG=false \
     PGLITE_INCREMENTAL=true \
     PGLITE_BACKEND_ONLY=true \
+    PGLITE_CLEAN_BACKEND=true \
     PGLITE_SHARED_MEMORY=true \
     PGLITE_MULTI_MEMORY_PROVENANCE=true \
     PGLITE_POSTMASTER=true \
@@ -47,6 +48,19 @@ if [[ "${PGLITE_PHASE6_REUSE_ARTIFACT:-false}" != true ]]; then
     INSTALL_FOLDER="${SOURCE_OUT}" \
       ./build-pglite.sh
   )
+  LLVM_NM_BIN=${LLVM_NM:-/emsdk/upstream/bin/llvm-nm}
+  TIMESTAMP_SYMBOLS=$(
+    "${LLVM_NM_BIN}" \
+      "${REPO_ROOT}/postgres-pglite/src/backend/utils/adt/timestamp.o"
+  )
+  grep -Eq ' U pgl_gettimeofday$' <<<"${TIMESTAMP_SYMBOLS}" || {
+    echo 'Phase 6 timestamp object bypasses the PGlite libc clock' >&2
+    exit 1
+  }
+  if grep -Eq ' U gettimeofday$' <<<"${TIMESTAMP_SYMBOLS}"; then
+    echo 'Phase 6 timestamp object retained Emscripten gettimeofday' >&2
+    exit 1
+  fi
   PGLITE_MULTI_MEMORY_PHASE4_INNER_OUT="${ARTIFACT_OUT}" \
   PGLITE_MULTI_MEMORY_PHASE4_SOURCE_OUT="${SOURCE_OUT}" \
     "${MM_ROOT}/tests/run-phase4.sh" "${REPO_ROOT}"
