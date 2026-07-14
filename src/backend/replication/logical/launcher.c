@@ -1014,7 +1014,14 @@ logicalrep_launcher_attach_dshmem(void)
 	if (LogicalRepCtx->last_start_dsh == DSHASH_HANDLE_INVALID)
 	{
 		/* Initialize dynamic shared hash table for last-start times. */
+#ifdef __PGLITE_POSTMASTER__
+		/* PGlite fence: client backends also attach to this launcher DSA. */
+		last_start_times_dsa =
+			dsa_create_in_scope(LWTRANCHE_LAUNCHER_DSA,
+							PGL_SHARED_SCOPE_GLOBAL);
+#else
 		last_start_times_dsa = dsa_create(LWTRANCHE_LAUNCHER_DSA);
+#endif
 		dsa_pin(last_start_times_dsa);
 		dsa_pin_mapping(last_start_times_dsa);
 		last_start_times = dshash_create(last_start_times_dsa, &dsh_params, NULL);

@@ -100,7 +100,14 @@ init_dsm_registry(void)
 	if (DSMRegistryCtx->dshh == DSHASH_HANDLE_INVALID)
 	{
 		/* Initialize dynamic shared hash table for registry. */
+#ifdef __PGLITE_POSTMASTER__
+		/* PGlite fence: this registry is visible to unrelated backends. */
+		dsm_registry_dsa =
+			dsa_create_in_scope(LWTRANCHE_DSM_REGISTRY_DSA,
+							PGL_SHARED_SCOPE_GLOBAL);
+#else
 		dsm_registry_dsa = dsa_create(LWTRANCHE_DSM_REGISTRY_DSA);
+#endif
 		dsm_registry_table = dshash_create(dsm_registry_dsa, &dsh_params, NULL);
 
 		dsa_pin(dsm_registry_dsa);
@@ -172,7 +179,12 @@ GetNamedDSMSegment(const char *name, size_t size,
 		*found = false;
 
 		/* Initialize the segment. */
+#ifdef __PGLITE_POSTMASTER__
+		/* PGlite fence: named DSM is cluster-global by API contract. */
+		seg = dsm_create_in_scope(size, 0, PGL_SHARED_SCOPE_GLOBAL);
+#else
 		seg = dsm_create(size, 0);
+#endif
 
 		if (init_callback)
 			(*init_callback) (dsm_segment_address(seg));

@@ -115,6 +115,22 @@ postgres._pgl_shm_scope_enter(firstGeneration)
 assert.equal(postgres._pgl_shm_scope_current(), beforeStaleEnter)
 assert.equal(postgres._pgl_shm_scope_close(secondGeneration), 0)
 
+// Nested SQL execution can legitimately pass 256 QueryDesc instances before
+// PostgreSQL's max_stack_depth check fires. Keep the fixed registry large
+// enough that PGlite scope bookkeeping cannot replace the PostgreSQL error.
+const deepQueries = []
+let deepParent = transaction
+for (let depth = 0; depth < 512; depth++) {
+  const child = createScope(Kind.query, deepParent)
+  deepQueries.push(child)
+  deepParent = child
+}
+assert.equal(count(Kind.query, State.active), deepQueries.length)
+for (const child of deepQueries.reverse()) {
+  assert.equal(postgres._pgl_shm_scope_close(child), 0)
+}
+assert.equal(count(Kind.query, State.active), 0)
+
 postgres._pgl_shm_scope_leave(previousTransaction)
 assert.equal(postgres._pgl_shm_scope_close(transaction), 0)
 postgres._pgl_shm_scope_leave(previousSession)
@@ -136,6 +152,7 @@ writeFileSync(
       closeWaitsForAttachments: true,
       closeWaitsForWorkers: true,
       subtransactionPromotion: true,
+      deepQueryScopes: 512,
       scopedBytesReleased: true,
     },
     null,

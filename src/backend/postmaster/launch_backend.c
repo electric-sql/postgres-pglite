@@ -393,10 +393,11 @@ internal_forkexec(const char *child_kind, int child_slot,
 	/* Fire off execv in child */
 #ifdef __PGLITE_POSTMASTER__
 	/*
-	 * PGlite fence: parallel workers must import their registering backend's
-	 * root-scoped memory.  Keep the process-routing detail at the PGlite libc
-	 * boundary; ordinary and independently registered background workers pass
-	 * no leader and receive their own scope policy in the host.
+	 * PGlite fence: a dynamic background worker that reports to a registering
+	 * backend must import that backend's root-scoped memory.  This covers both
+	 * parallel workers and extension workers that receive DSM handles.  Static
+	 * and independently registered workers pass no leader and receive their
+	 * own scope policy in the host.
 	 */
 	pid_t		scope_leader_pid = 0;
 
@@ -405,7 +406,7 @@ internal_forkexec(const char *child_kind, int child_slot,
 	{
 		BackgroundWorker *worker = (BackgroundWorker *) startup_data;
 
-		if ((worker->bgw_flags & BGWORKER_CLASS_PARALLEL) != 0)
+		if (worker->bgw_notify_pid > 0)
 			scope_leader_pid = worker->bgw_notify_pid;
 	}
 	pid = pgl_spawn_backend(child_kind, tmpfilename,

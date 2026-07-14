@@ -1032,20 +1032,23 @@ pgl_freopen(const char *pathname, const char *mode, int streamid)
  * page-aligned, removed blocks are reused, and the host callback grows the
  * imported memory before a new block becomes visible.
  */
-#define PGL_SHM_GLOBAL_REGISTRY_ADDRESS UINT32_C(0x80010000)
-#define PGL_SHM_SCOPED_REGISTRY_ADDRESS UINT32_C(0xc0010000)
-#define PGL_SHM_DATA_OFFSET UINT32_C(0x00020000)
 #define PGL_SHM_GLOBAL_POINTER_TAG UINT32_C(0x80000000)
 #define PGL_SHM_SCOPED_POINTER_TAG UINT32_C(0xc0000000)
 #define PGL_SHM_POINTER_MASK UINT32_C(0x3fffffff)
+#define PGL_SHM_REGISTRY_OFFSET UINT32_C(0x00010000)
+#define PGL_SHM_GLOBAL_REGISTRY_ADDRESS \
+	(PGL_SHM_GLOBAL_POINTER_TAG | PGL_SHM_REGISTRY_OFFSET)
+#define PGL_SHM_SCOPED_REGISTRY_ADDRESS \
+	(PGL_SHM_SCOPED_POINTER_TAG | PGL_SHM_REGISTRY_OFFSET)
+#define PGL_SHM_DATA_OFFSET UINT32_C(0x00020000)
 #define PGL_SHM_SCOPED_ID_TAG UINT32_C(0x40000000)
 #define PGL_SHM_APERTURE_BYTES UINT32_C(0x40000000)
 #define PGL_SHM_PAGE_BYTES UINT32_C(65536)
 #define PGL_SHM_MAX_SEGMENTS 256
-#define PGL_SHM_MAX_SCOPES 256
+#define PGL_SHM_MAX_SCOPES 640
 #define PGL_SHM_MAGIC_INITIALIZING UINT32_C(0x50474c49)
 #define PGL_SHM_MAGIC_READY UINT32_C(0x50474c53)
-#define PGL_SHM_REGISTRY_VERSION UINT32_C(3)
+#define PGL_SHM_REGISTRY_VERSION UINT32_C(4)
 #define PGL_SHM_COMPACT_CONTROL_INITIALIZING UINT32_C(1)
 #define PGL_SHM_COMPACT_CONTROL_READY UINT32_C(2)
 
@@ -1126,6 +1129,9 @@ _Static_assert(sizeof(PglSharedScopeControl) == 64,
 			   "unexpected PGlite scope control layout");
 _Static_assert(offsetof(PglSharedRegistry, scopes) == 18464,
 			   "unexpected PGlite scope directory offset");
+_Static_assert(PGL_SHM_REGISTRY_OFFSET + sizeof(PglSharedRegistry) <=
+			   PGL_SHM_DATA_OFFSET,
+			   "PGlite shared registry overlaps its allocation arena");
 
 typedef int (*pglite_shmem_ensure_capacity_t) (uint32_t required_bytes);
 static pglite_shmem_ensure_capacity_t pglite_shmem_ensure_capacity = NULL;

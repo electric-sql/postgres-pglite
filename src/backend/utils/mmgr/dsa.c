@@ -461,6 +461,34 @@ dsa_create_ext(int tranche_id, size_t init_segment_size, size_t max_segment_size
 	return area;
 }
 
+#ifdef __PGLITE_POSTMASTER__
+/*
+ * PGlite fence: most DSA follows the active session/query root, but a small
+ * number of PostgreSQL registries are cluster-global by contract.  Keep the
+ * placement switch here so error unwinding cannot leak it into later DSM.
+ */
+dsa_area *
+dsa_create_in_scope_ext(int tranche_id, size_t init_segment_size,
+						size_t max_segment_size, PglSharedScopeKind scope)
+{
+	dsa_area   *volatile area = NULL;
+	PglSharedScopeKind previous_scope;
+
+	previous_scope = pgl_shm_scope_push(scope);
+	PG_TRY();
+	{
+		area = dsa_create_ext(tranche_id, init_segment_size,
+							  max_segment_size);
+	}
+	PG_FINALLY();
+	{
+		pgl_shm_scope_pop(previous_scope);
+	}
+	PG_END_TRY();
+	return (dsa_area *) area;
+}
+#endif
+
 /*
  * Create a new shared area in an existing shared memory space, which may be
  * either DSM or Postmaster-initialized memory.  DSM segments will be
@@ -2198,8 +2226,17 @@ make_new_segment(dsa_area *area, size_t requested_pages)
 	oldowner = CurrentResourceOwner;
 	CurrentResourceOwner = area->resowner;
 #ifdef __PGLITE_POSTMASTER__
-	segment = dsm_create_in_scope_handle(total_size, 0,
-									 area->control->pgl_scope_handle);
+	/*
+	 * PGlite fence: follow the control segment's domain, never the allocating
+	 * backend's incidental current query.  An invalid scope handle denotes a
+	 * cluster-global control segment (not an instruction to inherit).
+	 */
+	if (area->control->pgl_scope_handle == PGL_SHARED_SCOPE_INVALID)
+		segment = dsm_create_in_scope(total_size, 0,
+									  PGL_SHARED_SCOPE_GLOBAL);
+	else
+		segment = dsm_create_in_scope_handle(total_size, 0,
+										 area->control->pgl_scope_handle);
 #else
 	segment = dsm_create(total_size, 0);
 #endif

@@ -23,6 +23,7 @@
 #include "access/session.h"
 #ifdef __PGLITE_POSTMASTER__
 #include "access/parallel.h"
+#include "miscadmin.h"
 #endif
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
@@ -82,19 +83,29 @@ InitializeSession(void)
 	 */
 	if (!IsParallelWorker())
 	{
-		pgl_session_scope =
-			pgl_shm_scope_create(PGL_SHARED_SCOPE_SESSION,
-								 pgl_shm_scope_root());
-		if (pgl_session_scope == PGL_SHARED_SCOPE_INVALID)
-			elog(ERROR, "could not create PGlite session memory scope");
-		(void) pgl_shm_scope_enter(pgl_session_scope);
-		pgl_session_scope_owner = true;
+		PglSharedScopeHandle root_scope = pgl_shm_scope_root();
+
 		/*
-		 * Run after dsm_backend_shutdown(), not in the early callback phase:
-		 * closing the scope first would invalidate the pinned session DSM before
-		 * PostgreSQL can detach it and update the DSM control segment.
+		 * Auxiliary processes intentionally self-alias memory 2 to private
+		 * memory and therefore have no scoped root.  Regular backends require
+		 * one; parentless background workers use one when the host provides it.
 		 */
-		on_shmem_exit(pgl_session_scope_shutdown, (Datum) 0);
+		if (AmRegularBackendProcess() ||
+			root_scope != PGL_SHARED_SCOPE_INVALID)
+		{
+			pgl_session_scope =
+				pgl_shm_scope_create(PGL_SHARED_SCOPE_SESSION, root_scope);
+			if (pgl_session_scope == PGL_SHARED_SCOPE_INVALID)
+				elog(ERROR, "could not create PGlite session memory scope");
+			(void) pgl_shm_scope_enter(pgl_session_scope);
+			pgl_session_scope_owner = true;
+			/*
+			 * Run after dsm_backend_shutdown(), not in the early callback phase:
+			 * closing the scope first would invalidate the pinned session DSM
+			 * before PostgreSQL can detach it and update the DSM control segment.
+			 */
+			on_shmem_exit(pgl_session_scope_shutdown, (Datum) 0);
+		}
 	}
 #endif
 }

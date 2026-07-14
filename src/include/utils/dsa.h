@@ -117,6 +117,12 @@ typedef pg_atomic_uint64 dsa_pointer_atomic;
 #define dsa_create(tranch_id) \
 	dsa_create_ext(tranch_id, DSA_DEFAULT_INIT_SEGMENT_SIZE, \
 				   DSA_MAX_SEGMENT_SIZE)
+#ifdef __PGLITE_POSTMASTER__
+/* PGlite fence: create a DSA in an explicitly selected memory domain. */
+#define dsa_create_in_scope(tranch_id, scope) \
+	dsa_create_in_scope_ext(tranch_id, DSA_DEFAULT_INIT_SEGMENT_SIZE, \
+							DSA_MAX_SEGMENT_SIZE, scope)
+#endif
 
 /* Create dsa_area with default segment sizes in an existing share memory space */
 #define dsa_create_in_place(place, size, tranch_id, segment) \
@@ -140,6 +146,12 @@ typedef dsm_handle dsa_handle;
 
 extern dsa_area *dsa_create_ext(int tranche_id, size_t init_segment_size,
 								size_t max_segment_size);
+#ifdef __PGLITE_POSTMASTER__
+extern dsa_area *dsa_create_in_scope_ext(int tranche_id,
+									 size_t init_segment_size,
+									 size_t max_segment_size,
+									 PglSharedScopeKind scope);
+#endif
 extern dsa_area *dsa_create_in_place_ext(void *place, size_t size,
 										 int tranche_id, dsm_segment *segment,
 										 size_t init_segment_size,

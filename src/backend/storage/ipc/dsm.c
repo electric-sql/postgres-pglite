@@ -657,8 +657,6 @@ dsm_create_in_scope(Size size, int flags, PglSharedScopeKind scope)
 	dsm_segment *volatile seg = NULL;
 	PglSharedScopeKind previous_scope;
 
-	if (scope == PGL_SHARED_SCOPE_GLOBAL)
-		return dsm_create(size, flags);
 	previous_scope = pgl_shm_scope_push(scope);
 	PG_TRY();
 	{
