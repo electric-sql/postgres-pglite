@@ -369,3 +369,66 @@ The tool image is a derived version of `electricsql/pglite-builder:3.1.74-7`.
 It contains the pinned Binaryen sources and native tools, Emscripten's Node 20,
 Node 22.13/24.15, and pinned pnpm 9.7.0; no host compiler, Binaryen, WABT, Node,
 package manager, or test runner is used by either milestone runner.
+
+## Phase 8: transformed dynamic side modules
+
+Postmaster-compatible dynamic extensions use the normal Emscripten dynamic
+linking format, followed by the same multi-memory lowering used for the main
+module. Inside the pinned image, compile the raw extension with the PostgreSQL
+and PGlite libc headers and at least the following ABI flags:
+
+```sh
+emcc -O2 -fPIC -m32 -sWASM_BIGINT -sSIDE_MODULE=1 \
+  -sSHARED_MEMORY=1 -sSUPPORT_LONGJMP=emscripten \
+  -matomics -mbulk-memory \
+  extension.c -o extension.raw.so
+```
+
+Both compilation and transformation are container-owned tooling; do not use a
+host Emscripten or Binaryen installation. Transform and audit the finalized
+side module with the command shipped in the same image:
+
+```sh
+image=$(./postgres-pglite/pglite/multi-memory/build-shared-tools-image.sh)
+docker run --rm \
+  --volume "$PWD:/work:rw" \
+  --workdir /work \
+  "$image" \
+  pglite-transform-side-module \
+    extension.raw.so extension.so extension.report.json extension.audit.json
+```
+
+The command runs the transform twice and requires byte-identical Wasm and JSON
+reports, applies the pinned optimizer, and then verifies the final artifact.
+The audit requires the original `dylink.0` metadata and exports to survive,
+requires exactly the private, global, and scoped memory imports, verifies the
+input hash, and records the optimized output hash. Failed transforms do not
+produce a trusted audit result.
+
+The postmaster loader accepts only modules with exactly one valid
+`pglite.multi-memory.abi` section. It rejects untransformed classic extensions,
+unknown ABI versions, altered pointer tags or apertures, and incompatible
+memory imports before instantiation. Each backend supplies its own private
+memory and function table while the loader supplies that backend's current
+cluster-global and root-scoped memories. Extension data and relocations remain
+backend-private; tagged pointers passed through fmgr can address all three
+domains.
+
+Classic single-user PGlite and postmaster builds therefore consume two outputs
+from one extension source/build pipeline: the ordinary finalized side module
+and its transformed, audited postmaster counterpart. The postmaster artifact
+must never silently fall back to the classic module.
+
+The 14 July 2026 native ARM64 gate passes with the command installed in the
+image. Its C probe preserves `dylink.0`, rewrites five generic operations,
+retains thirteen proven-private operations, and produces three dispatch helper
+shapes. The optimized test module is 2,853 bytes from a 1,234-byte raw module.
+The audit proves all three imports are shared, narrows private compatibility
+from 65,536 to 32,768 pages, and caps global and scoped imports at 16,384 pages.
+At runtime the classic and ABI-tampered modules are rejected, two calls in one
+backend observe private counts 1 and 2, another backend independently observes
+1, and the probe dereferences both global memory and a tag-3 query allocation.
+Shutdown reports zero live private memories, scoped memories, or ready roots.
+The complete reusable gate also passes focused multi-session correctness,
+compact binding, native libpq cancellation/COPY/backpressure, and the selected
+`test_setup int8 create_table create_index select` upstream corpus.

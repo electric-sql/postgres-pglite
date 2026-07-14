@@ -40,6 +40,15 @@ RUN printf '\nbinaryen_add_executable(pglite-wasm-multi-memory pglite-wasm-multi
       /opt/binaryen/build/bin/pglite-wasm-multi-memory \
       /usr/local/bin/pglite-wasm-multi-memory
 
+# The postmaster's dynamic side modules import the two additional PGlite
+# memories. Keep the pinned Emscripten loader change inside the build image so
+# every generated main-module glue file applies the same validation and import
+# contract.
+COPY emscripten/pglite-library-dylink.patch /tmp/pglite-library-dylink.patch
+RUN patch --directory=/emsdk/upstream/emscripten --strip=1 \
+      < /tmp/pglite-library-dylink.patch \
+    && rm /tmp/pglite-library-dylink.patch
+
 RUN case "${TARGETARCH}" in \
       amd64) node_arch=x64 ;; \
       arm64) node_arch=arm64 ;; \
@@ -65,6 +74,19 @@ RUN case "${TARGETARCH}" in \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends jq libipc-run-perl \
     && rm -rf /var/lib/apt/lists/*
+
+# Publish the deterministic side-module transform and audit pipeline in the
+# pinned image. Extension authors need only Docker plus their normal Emscripten
+# SIDE_MODULE; Binaryen, Node, and the ABI validator remain image-owned.
+COPY tools/audit-side-module.mjs \
+  /opt/pglite-multi-memory/bin/audit-side-module.mjs
+COPY tools/transform-side-module.sh \
+  /opt/pglite-multi-memory/bin/pglite-transform-side-module
+RUN chmod 0755 \
+      /opt/pglite-multi-memory/bin/audit-side-module.mjs \
+      /opt/pglite-multi-memory/bin/pglite-transform-side-module \
+    && ln -s /opt/pglite-multi-memory/bin/pglite-transform-side-module \
+      /usr/local/bin/pglite-transform-side-module
 
 LABEL org.opencontainers.image.title="PGlite multi-memory build and test tools" \
       org.opencontainers.image.binaryen-revision="${BINARYEN_COMMIT}" \

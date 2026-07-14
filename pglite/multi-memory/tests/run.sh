@@ -178,6 +178,13 @@ wasm-opt "${ROOT}/tests/unimported-memory.wat" \
 expect_failure unimported-memory 'private memory must be imported' \
   pglite-wasm-multi-memory "${OUT}/unimported-memory.wasm" \
     -o "${OUT}/must-not-exist.wasm"
+wasm-opt "${ROOT}/tests/oversized-memory.wat" \
+  -o "${OUT}/oversized-memory.wasm" \
+  --all-features \
+  --emit-target-features
+expect_failure oversized-memory 'private memory maximum exceeds 2 GiB aperture' \
+  pglite-wasm-multi-memory "${OUT}/oversized-memory.wasm" \
+    -o "${OUT}/must-not-exist.wasm"
 expect_failure invalid-global-limits 'invalid global memory limits' \
   pglite-wasm-multi-memory "${OUT}/opcodes.wasm" \
     -o "${OUT}/must-not-exist.wasm" \

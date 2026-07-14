@@ -47,7 +47,7 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.10.0";
+constexpr const char* ToolVersion = "0.11.0";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
@@ -1214,7 +1214,15 @@ class Transformer {
     }
     if (privateMem->hasMax() &&
         privateMem->max.addr > PrivateAperture / Memory::kPageSize) {
-      throw std::runtime_error("private memory maximum exceeds 2 GiB aperture");
+      // Emscripten SIDE_MODULEs deliberately declare the broadest wasm32
+      // imported-memory maximum so they can attach to different main
+      // modules. The tagged ABI reserves the upper 2 GiB for shared pointer
+      // domains, so narrow that compatibility declaration. The PGlite main
+      // module's actual 1 GiB memory still satisfies the resulting import.
+      if (!module.dylinkSection) {
+        throw std::runtime_error("private memory maximum exceeds 2 GiB aperture");
+      }
+      privateMem->max = PrivateAperture / Memory::kPageSize;
     }
     if (privateMem->shared && !privateMem->hasMax()) {
       throw std::runtime_error("shared private memory requires a maximum");

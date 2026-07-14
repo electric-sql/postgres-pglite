@@ -9,6 +9,7 @@ SOURCE_OUT="${OUT}/source-build"
 ARTIFACT_OUT="${OUT}/artifact"
 NATIVE="${OUT}/native"
 TESTLIB="${OUT}/testlib"
+DYNAMIC="${OUT}/dynamic"
 PGDATA="${OUT}/pgdata"
 RESULTS="${OUT}/regression"
 ISOLATION_RESULTS="${OUT}/isolation"
@@ -72,6 +73,27 @@ test -f "${SOURCE_OUT}/bin/pglite.js"
 test -f "${SOURCE_OUT}/bin/pglite.data"
 test -f "${SOURCE_OUT}/lib/postgresql/regress.so"
 
+rm -rf "${DYNAMIC}"
+mkdir -p "${DYNAMIC}"
+emcc -O2 -Wall -Wextra -Werror -Wno-unused-function \
+  -fPIC -m32 -sWASM_BIGINT -sSIDE_MODULE=1 \
+  -sSHARED_MEMORY=1 -sSUPPORT_LONGJMP=emscripten \
+  -matomics -mbulk-memory \
+  -D__PGLITE__ -D__PGLITE_MULTI_MEMORY__ -D__PGLITE_POSTMASTER__ \
+  -I"${SOURCE_OUT}/include/postgresql/server" \
+  -I"${REPO_ROOT}/postgres-pglite/pglite/src/pglitec" \
+  -include "${REPO_ROOT}/postgres-pglite/pglite/src/pglitec/pglitec.h" \
+  -Dshmget=pgl_shmget -Dshmat=pgl_shmat \
+  -Dshmdt=pgl_shmdt -Dshmctl=pgl_shmctl \
+  "${MM_ROOT}/tests/fixtures/dynamic-probe.c" \
+  -o "${DYNAMIC}/pglite_dynamic_probe.raw.so"
+command -v pglite-transform-side-module >/dev/null
+pglite-transform-side-module \
+  "${DYNAMIC}/pglite_dynamic_probe.raw.so" \
+  "${DYNAMIC}/pglite_dynamic_probe.so" \
+  "${DYNAMIC}/pglite_dynamic_probe.report.json" \
+  "${DYNAMIC}/pglite_dynamic_probe.audit.json"
+
 node22 "${MM_ROOT}/tests/phase8-scope-hierarchy.mjs" \
   "${ARTIFACT_OUT}/postmaster.wasm" \
   "${SOURCE_OUT}/bin/pglite.js" \
@@ -126,6 +148,16 @@ node22 "${MM_ROOT}/tests/phase8-compact-postmaster.mjs" \
   "${SOURCE_OUT}/bin/pglite.data" \
   "${OUT}/focused-correctness.json" \
   "${OUT}/compact-postmaster.json"
+
+node22 "${MM_ROOT}/tests/phase8-dynamic-side-module.mjs" \
+  "${REPO_ROOT}" \
+  "${ARTIFACT_OUT}/postmaster.wasm" \
+  "${SOURCE_OUT}/bin/pglite.js" \
+  "${SOURCE_OUT}/bin/pglite.data" \
+  "${DYNAMIC}/pglite_dynamic_probe.raw.so" \
+  "${DYNAMIC}/pglite_dynamic_probe.so" \
+  "${DYNAMIC}/pglite_dynamic_probe.audit.json" \
+  "${OUT}/dynamic-side-module.json"
 
 SERVER_PID=
 cleanup() {
