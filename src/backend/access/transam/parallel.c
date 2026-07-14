@@ -324,7 +324,17 @@ InitializeParallelDSM(ParallelContext *pcxt)
 	 */
 	segsize = shm_toc_estimate(&pcxt->estimator);
 	if (pcxt->nworkers > 0)
+#ifdef __PGLITE_POSTMASTER__
+		/*
+		 * PGlite fence: the parallel-context DSM and every DSA extension it
+		 * owns stay in the leader's root-scoped memory.
+		 */
+		pcxt->seg = dsm_create_in_scope(segsize,
+										 DSM_CREATE_NULL_IF_MAXSEGMENTS,
+										 PGL_SHARED_SCOPE_PARALLEL_CONTEXT);
+#else
 		pcxt->seg = dsm_create(segsize, DSM_CREATE_NULL_IF_MAXSEGMENTS);
+#endif
 	if (pcxt->seg != NULL)
 		pcxt->toc = shm_toc_create(PARALLEL_MAGIC,
 								   dsm_segment_address(pcxt->seg),

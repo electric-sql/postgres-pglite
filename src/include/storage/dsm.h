@@ -35,6 +35,11 @@ extern void dsm_set_control_handle(dsm_handle h);
 
 /* Functions that create or remove mappings. */
 extern dsm_segment *dsm_create(Size size, int flags);
+#ifdef __PGLITE_POSTMASTER__
+extern dsm_segment *dsm_create_in_scope(Size size, int flags,
+										PglSharedScopeKind scope);
+extern PglSharedScopeKind dsm_segment_scope(dsm_segment *seg);
+#endif
 extern dsm_segment *dsm_attach(dsm_handle h);
 extern void dsm_detach(dsm_segment *seg);
 

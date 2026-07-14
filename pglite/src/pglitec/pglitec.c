@@ -509,7 +509,8 @@ pgl_pclose(FILE *stream)
 
 /* ========== Postmaster process host ========== */
 
-typedef pid_t (*pglite_spawn_backend_t) (const char *, const char *, int);
+typedef pid_t (*pglite_spawn_backend_t) (const char *, const char *, int,
+										 pid_t);
 typedef pid_t (*pglite_getpid_t) (void);
 typedef int (*pglite_kill_t) (pid_t, int);
 typedef pid_t (*pglite_waitpid_t) (pid_t, int *, int);
@@ -646,14 +647,15 @@ pgl_set_socket_host(pglite_socket_t create_socket,
 
 pid_t		EMSCRIPTEN_KEEPALIVE
 pgl_spawn_backend(const char *child_kind, const char *parameter_file,
-				  int client_socket)
+				  int client_socket, pid_t scope_leader_pid)
 {
 	if (pglite_spawn_backend == NULL)
 	{
 		errno = ENOSYS;
 		return -1;
 	}
-	return pglite_spawn_backend(child_kind, parameter_file, client_socket);
+	return pglite_spawn_backend(child_kind, parameter_file, client_socket,
+							 scope_leader_pid);
 }
 
 pid_t		EMSCRIPTEN_KEEPALIVE
@@ -1029,16 +1031,19 @@ pgl_freopen(const char *pathname, const char *mode, int streamid)
  * page-aligned, removed blocks are reused, and the host callback grows the
  * imported memory before a new block becomes visible.
  */
-#define PGL_SHM_REGISTRY_ADDRESS UINT32_C(0x80010000)
+#define PGL_SHM_GLOBAL_REGISTRY_ADDRESS UINT32_C(0x80010000)
+#define PGL_SHM_SCOPED_REGISTRY_ADDRESS UINT32_C(0xc0010000)
 #define PGL_SHM_DATA_OFFSET UINT32_C(0x00020000)
-#define PGL_SHM_POINTER_TAG UINT32_C(0x80000000)
+#define PGL_SHM_GLOBAL_POINTER_TAG UINT32_C(0x80000000)
+#define PGL_SHM_SCOPED_POINTER_TAG UINT32_C(0xc0000000)
 #define PGL_SHM_POINTER_MASK UINT32_C(0x3fffffff)
+#define PGL_SHM_SCOPED_ID_TAG UINT32_C(0x40000000)
 #define PGL_SHM_APERTURE_BYTES UINT32_C(0x40000000)
 #define PGL_SHM_PAGE_BYTES UINT32_C(65536)
 #define PGL_SHM_MAX_SEGMENTS 256
 #define PGL_SHM_MAGIC_INITIALIZING UINT32_C(0x50474c49)
 #define PGL_SHM_MAGIC_READY UINT32_C(0x50474c53)
-#define PGL_SHM_REGISTRY_VERSION UINT32_C(1)
+#define PGL_SHM_REGISTRY_VERSION UINT32_C(2)
 
 enum PglShmSlotState
 {
@@ -1057,6 +1062,7 @@ typedef struct PglSharedSegment
 	uint32_t	allocated_size;
 	uint32_t	offset;
 	uint32_t	attach_count;
+	uint32_t	scope_kind;
 	int32_t		shmflg;
 	int64_t		created_at;
 	int64_t		attached_at;
@@ -1071,11 +1077,16 @@ typedef struct PglSharedRegistry
 	uint32_t	next_shmid;
 	uint32_t	next_offset;
 	uint32_t	allocation_generation;
+	uint32_t	pointer_tag;
+	uint32_t	shmid_base;
 	PglSharedSegment segments[PGL_SHM_MAX_SEGMENTS];
 }			PglSharedRegistry;
 
 typedef int (*pglite_shmem_ensure_capacity_t) (uint32_t required_bytes);
 static pglite_shmem_ensure_capacity_t pglite_shmem_ensure_capacity = NULL;
+static pglite_shmem_ensure_capacity_t pglite_scoped_shmem_ensure_capacity = NULL;
+static PglSharedScopeKind pglite_shmem_scope = PGL_SHARED_SCOPE_GLOBAL;
+static bool pglite_scoped_shmem_enabled = false;
 
 void		EMSCRIPTEN_KEEPALIVE
 pgl_set_shmem_host(pglite_shmem_ensure_capacity_t ensure_capacity)
@@ -1083,13 +1094,55 @@ pgl_set_shmem_host(pglite_shmem_ensure_capacity_t ensure_capacity)
 	pglite_shmem_ensure_capacity = ensure_capacity;
 }
 
+void		EMSCRIPTEN_KEEPALIVE
+pgl_set_scoped_shmem_host(pglite_shmem_ensure_capacity_t ensure_capacity)
+{
+	pglite_scoped_shmem_ensure_capacity = ensure_capacity;
+}
+
+void		EMSCRIPTEN_KEEPALIVE
+pgl_set_scoped_shmem_enabled(int enabled)
+{
+	pglite_scoped_shmem_enabled = enabled != 0;
+}
+
+PglSharedScopeKind
+pgl_shm_scope_push(PglSharedScopeKind scope)
+{
+	PglSharedScopeKind previous = pglite_shmem_scope;
+
+	if (scope < PGL_SHARED_SCOPE_GLOBAL ||
+		scope > PGL_SHARED_SCOPE_PARALLEL_CONTEXT)
+		scope = PGL_SHARED_SCOPE_GLOBAL;
+	pglite_shmem_scope = scope;
+	return previous;
+}
+
+void
+pgl_shm_scope_pop(PglSharedScopeKind previous_scope)
+{
+	pglite_shmem_scope = previous_scope;
+}
+
 static PglSharedRegistry *
-pgl_shm_registry(void)
+pgl_shm_registry(bool scoped)
 {
 	PglSharedRegistry *registry =
-		(PglSharedRegistry *) (uintptr_t) PGL_SHM_REGISTRY_ADDRESS;
+		(PglSharedRegistry *) (uintptr_t) (scoped ?
+											 PGL_SHM_SCOPED_REGISTRY_ADDRESS :
+											 PGL_SHM_GLOBAL_REGISTRY_ADDRESS);
+	uint32_t	pointer_tag = scoped ? PGL_SHM_SCOPED_POINTER_TAG :
+	PGL_SHM_GLOBAL_POINTER_TAG;
+	uint32_t	shmid_base = scoped ? PGL_SHM_SCOPED_ID_TAG : 0;
 	uint32_t	expected = 0;
-	uint32_t	magic = __atomic_load_n(&registry->magic, __ATOMIC_ACQUIRE);
+	uint32_t	magic;
+
+	if (scoped && !pglite_scoped_shmem_enabled)
+	{
+		errno = EPERM;
+		return NULL;
+	}
+	magic = __atomic_load_n(&registry->magic, __ATOMIC_ACQUIRE);
 
 	if (magic == PGL_SHM_MAGIC_READY)
 		return registry;
@@ -1100,9 +1153,11 @@ pgl_shm_registry(void)
 	{
 		registry->version = PGL_SHM_REGISTRY_VERSION;
 		registry->lock = 0;
-		registry->next_shmid = 1;
+		registry->next_shmid = shmid_base + 1;
 		registry->next_offset = PGL_SHM_DATA_OFFSET;
 		registry->allocation_generation = 0;
+		registry->pointer_tag = pointer_tag;
+		registry->shmid_base = shmid_base;
 		__atomic_store_n(&registry->magic, PGL_SHM_MAGIC_READY,
 						 __ATOMIC_RELEASE);
 		return registry;
@@ -1113,7 +1168,9 @@ pgl_shm_registry(void)
 		;
 	if (__atomic_load_n(&registry->magic, __ATOMIC_ACQUIRE) !=
 		PGL_SHM_MAGIC_READY ||
-		registry->version != PGL_SHM_REGISTRY_VERSION)
+		registry->version != PGL_SHM_REGISTRY_VERSION ||
+		registry->pointer_tag != pointer_tag ||
+		registry->shmid_base != shmid_base)
 	{
 		errno = EPROTO;
 		return NULL;
@@ -1149,9 +1206,9 @@ pgl_shm_align(uint32_t value)
 }
 
 static void *
-pgl_shm_pointer(uint32_t offset)
+pgl_shm_pointer(PglSharedRegistry * registry, uint32_t offset)
 {
-	return (void *) (uintptr_t) (PGL_SHM_POINTER_TAG | offset);
+	return (void *) (uintptr_t) (registry->pointer_tag | offset);
 }
 
 static void
@@ -1162,6 +1219,7 @@ pgl_shm_release_slot(PglSharedRegistry * registry, PglSharedSegment * segment)
 	segment->key = 0;
 	segment->requested_size = 0;
 	segment->attach_count = 0;
+	segment->scope_kind = PGL_SHARED_SCOPE_GLOBAL;
 	segment->shmflg = 0;
 	segment->created_at = 0;
 	segment->attached_at = 0;
@@ -1173,6 +1231,9 @@ static PglSharedSegment *
 pgl_shm_allocate_slot(PglSharedRegistry * registry, uint32_t requested_size)
 {
 	uint32_t	allocated_size = pgl_shm_align(requested_size);
+	pglite_shmem_ensure_capacity_t ensure_capacity =
+		registry->pointer_tag == PGL_SHM_SCOPED_POINTER_TAG ?
+		pglite_scoped_shmem_ensure_capacity : pglite_shmem_ensure_capacity;
 	PglSharedSegment *unused = NULL;
 	PglSharedSegment *best = NULL;
 	unsigned int index;
@@ -1220,8 +1281,8 @@ pgl_shm_allocate_slot(PglSharedRegistry * registry, uint32_t requested_size)
 		errno = ENOMEM;
 		return NULL;
 	}
-	if (pglite_shmem_ensure_capacity == NULL ||
-		pglite_shmem_ensure_capacity(registry->next_offset + allocated_size) !=
+	if (ensure_capacity == NULL ||
+		ensure_capacity(registry->next_offset + allocated_size) !=
 		0)
 	{
 		errno = ENOMEM;
@@ -1251,36 +1312,80 @@ pgl_shm_find_id(PglSharedRegistry * registry, int shmid)
 	return NULL;
 }
 
+static PglSharedSegment *
+pgl_shm_find_key(PglSharedRegistry * registry, key_t key)
+{
+	unsigned int index;
+
+	for (index = 0; index < PGL_SHM_MAX_SEGMENTS; index++)
+	{
+		PglSharedSegment *segment = &registry->segments[index];
+
+		if (segment->state == PGL_SHM_SLOT_LIVE &&
+			segment->key == (int32_t) key)
+			return segment;
+	}
+	return NULL;
+}
+
+static PglSharedRegistry *
+pgl_shm_registry_for_id(int shmid)
+{
+	return pgl_shm_registry((((uint32_t) shmid) & PGL_SHM_SCOPED_ID_TAG) != 0);
+}
+
+static PglSharedRegistry *
+pgl_shm_registry_for_pointer(const void *address)
+{
+	uint32_t	tag = ((uint32_t) (uintptr_t) address) &
+	PGL_SHM_SCOPED_POINTER_TAG;
+
+	if (tag == PGL_SHM_SCOPED_POINTER_TAG)
+		return pgl_shm_registry(true);
+	if (tag == PGL_SHM_GLOBAL_POINTER_TAG)
+		return pgl_shm_registry(false);
+	errno = EINVAL;
+	return NULL;
+}
+
 int			EMSCRIPTEN_KEEPALIVE
 pgl_shmget(key_t key, size_t size, int shmflg)
 {
-	PglSharedRegistry *registry = pgl_shm_registry();
+	PglSharedRegistry *registry;
 	PglSharedSegment *segment = NULL;
-	unsigned int index;
 	bool		create = (shmflg & IPC_CREAT) != 0 || key == IPC_PRIVATE;
 
-	if (registry == NULL)
-		return -1;
 	if (size > UINT32_MAX)
 	{
 		errno = EINVAL;
 		return -1;
 	}
 
+	/*
+	 * Creation follows the process-local placement selected by dsm.c.  Attach
+	 * probes this root's scoped registry first and then the cluster-global
+	 * registry.  Another root has a different memory 2, so it cannot discover
+	 * or attach a scoped key even though the PostgreSQL DSM control table is
+	 * cluster-global.
+	 */
+	registry = pgl_shm_registry((!create && pglite_scoped_shmem_enabled) ||
+								 pglite_shmem_scope != PGL_SHARED_SCOPE_GLOBAL);
+	if (registry == NULL)
+		return -1;
 	pgl_shm_lock(registry);
 	if (key != IPC_PRIVATE)
-	{
-		for (index = 0; index < PGL_SHM_MAX_SEGMENTS; index++)
-		{
-			PglSharedSegment *candidate = &registry->segments[index];
+		segment = pgl_shm_find_key(registry, key);
 
-			if (candidate->state == PGL_SHM_SLOT_LIVE &&
-				candidate->key == (int32_t) key)
-			{
-				segment = candidate;
-				break;
-			}
-		}
+	if (!create && segment == NULL &&
+		registry->pointer_tag == PGL_SHM_SCOPED_POINTER_TAG)
+	{
+		pgl_shm_unlock(registry);
+		registry = pgl_shm_registry(false);
+		if (registry == NULL)
+			return -1;
+		pgl_shm_lock(registry);
+		if (key != IPC_PRIVATE)
+			segment = pgl_shm_find_key(registry, key);
 	}
 
 	if (segment != NULL)
@@ -1315,28 +1420,35 @@ pgl_shmget(key_t key, size_t size, int shmflg)
 		return -1;
 	}
 
-	memset(pgl_shm_pointer(segment->offset), 0, segment->allocated_size);
+	memset(pgl_shm_pointer(registry, segment->offset), 0,
+		   segment->allocated_size);
 	segment->state = PGL_SHM_SLOT_LIVE;
 	segment->key = (int32_t) key;
 	segment->requested_size = (uint32_t) size;
 	segment->attach_count = 0;
+	segment->scope_kind = pglite_shmem_scope;
 	segment->shmflg = shmflg;
 	segment->created_at = time(NULL);
 	segment->attached_at = 0;
 	segment->detached_at = 0;
 	segment->shmid = (int32_t) registry->next_shmid++;
-	if (registry->next_shmid == 0 || registry->next_shmid > INT32_MAX)
-		registry->next_shmid = 1;
+	if (registry->next_shmid == 0 || registry->next_shmid > INT32_MAX ||
+		(registry->shmid_base == 0 &&
+		 registry->next_shmid >= PGL_SHM_SCOPED_ID_TAG))
+		registry->next_shmid = registry->shmid_base + 1;
 	registry->allocation_generation++;
-	index = (unsigned int) segment->shmid;
-	pgl_shm_unlock(registry);
-	return (int) index;
+	{
+		int			result = segment->shmid;
+
+		pgl_shm_unlock(registry);
+		return result;
+	}
 }
 
 void		EMSCRIPTEN_KEEPALIVE *
 pgl_shmat(int shmid, const void *shmaddr, int shmflg)
 {
-	PglSharedRegistry *registry = pgl_shm_registry();
+	PglSharedRegistry *registry = pgl_shm_registry_for_id(shmid);
 	PglSharedSegment *segment;
 	void	   *address;
 
@@ -1351,7 +1463,7 @@ pgl_shmat(int shmid, const void *shmaddr, int shmflg)
 		errno = EINVAL;
 		return (void *) -1;
 	}
-	address = pgl_shm_pointer(segment->offset);
+	address = pgl_shm_pointer(registry, segment->offset);
 	if (shmaddr != NULL && shmaddr != address)
 	{
 		pgl_shm_unlock(registry);
@@ -1367,7 +1479,7 @@ pgl_shmat(int shmid, const void *shmaddr, int shmflg)
 int			EMSCRIPTEN_KEEPALIVE
 pgl_shmdt(const void *shmaddr)
 {
-	PglSharedRegistry *registry = pgl_shm_registry();
+	PglSharedRegistry *registry = pgl_shm_registry_for_pointer(shmaddr);
 	unsigned int index;
 
 	if (registry == NULL)
@@ -1379,7 +1491,7 @@ pgl_shmdt(const void *shmaddr)
 
 		if ((segment->state == PGL_SHM_SLOT_LIVE ||
 			 segment->state == PGL_SHM_SLOT_REMOVED) &&
-			pgl_shm_pointer(segment->offset) == shmaddr)
+			pgl_shm_pointer(registry, segment->offset) == shmaddr)
 		{
 			if (segment->attach_count == 0)
 			{
@@ -1404,7 +1516,7 @@ pgl_shmdt(const void *shmaddr)
 int			EMSCRIPTEN_KEEPALIVE
 pgl_shmctl(int shmid, int cmd, struct shmid_ds *buf)
 {
-	PglSharedRegistry *registry = pgl_shm_registry();
+	PglSharedRegistry *registry = pgl_shm_registry_for_id(shmid);
 	PglSharedSegment *segment;
 
 	if (registry == NULL)
@@ -1448,6 +1560,34 @@ pgl_shmctl(int shmid, int cmd, struct shmid_ds *buf)
 	pgl_shm_unlock(registry);
 	errno = EINVAL;
 	return -1;
+}
+
+PglSharedScopeKind
+pgl_shm_scope_for_pointer(const void *address)
+{
+	PglSharedRegistry *registry = pgl_shm_registry_for_pointer(address);
+	unsigned int index;
+
+	if (registry == NULL)
+		return PGL_SHARED_SCOPE_GLOBAL;
+	pgl_shm_lock(registry);
+	for (index = 0; index < PGL_SHM_MAX_SEGMENTS; index++)
+	{
+		PglSharedSegment *segment = &registry->segments[index];
+
+		if ((segment->state == PGL_SHM_SLOT_LIVE ||
+			 segment->state == PGL_SHM_SLOT_REMOVED) &&
+			pgl_shm_pointer(registry, segment->offset) == address)
+		{
+			PglSharedScopeKind scope =
+				(PglSharedScopeKind) segment->scope_kind;
+
+			pgl_shm_unlock(registry);
+			return scope;
+		}
+	}
+	pgl_shm_unlock(registry);
+	return PGL_SHARED_SCOPE_GLOBAL;
 }
 
 #else
@@ -1611,6 +1751,38 @@ void		EMSCRIPTEN_KEEPALIVE
 pgl_set_shmem_host(int (*ensure_capacity) (uint32_t))
 {
 	(void) ensure_capacity;
+}
+
+void		EMSCRIPTEN_KEEPALIVE
+pgl_set_scoped_shmem_host(int (*ensure_capacity) (uint32_t))
+{
+	(void) ensure_capacity;
+}
+
+void		EMSCRIPTEN_KEEPALIVE
+pgl_set_scoped_shmem_enabled(int enabled)
+{
+	(void) enabled;
+}
+
+PglSharedScopeKind
+pgl_shm_scope_push(PglSharedScopeKind scope)
+{
+	(void) scope;
+	return PGL_SHARED_SCOPE_GLOBAL;
+}
+
+void
+pgl_shm_scope_pop(PglSharedScopeKind previous_scope)
+{
+	(void) previous_scope;
+}
+
+PglSharedScopeKind
+pgl_shm_scope_for_pointer(const void *address)
+{
+	(void) address;
+	return PGL_SHARED_SCOPE_GLOBAL;
 }
 
 #endif

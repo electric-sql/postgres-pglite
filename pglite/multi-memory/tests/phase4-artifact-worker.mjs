@@ -44,7 +44,7 @@ const postgres = await createPostgres({
   ],
 })
 
-const spawn = postgres.addFunction(() => 4242, 'ippi')
+const spawn = postgres.addFunction(() => 4242, 'ippii')
 const getpid = postgres.addFunction(() => pid, 'i')
 const kill = postgres.addFunction(() => 0, 'iii')
 const waitpid = postgres.addFunction(() => 0, 'iipi')
@@ -68,7 +68,7 @@ new Uint8Array(privateMemory.buffer)[0] = pid & 0xff
 parentPort.postMessage({
   type: 'ready',
   pid: postgres._pgl_getpid(),
-  spawnResult: postgres._pgl_spawn_backend(1, 1, -1),
+  spawnResult: postgres._pgl_spawn_backend(1, 1, -1, 0),
   privateByte: new Uint8Array(privateMemory.buffer)[0],
   sharedMemory: privateMemory.buffer instanceof SharedArrayBuffer,
   scopedAliasesPrivate: true,

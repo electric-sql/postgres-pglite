@@ -102,7 +102,13 @@ GetSessionDsmHandle(void)
 
 	/* Set up segment and TOC. */
 	size = shm_toc_estimate(&estimator);
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: a session DSM is visible only to this backend root. */
+	seg = dsm_create_in_scope(size, DSM_CREATE_NULL_IF_MAXSEGMENTS,
+							  PGL_SHARED_SCOPE_SESSION);
+#else
 	seg = dsm_create(size, DSM_CREATE_NULL_IF_MAXSEGMENTS);
+#endif
 	if (seg == NULL)
 	{
 		MemoryContextSwitchTo(old_context);

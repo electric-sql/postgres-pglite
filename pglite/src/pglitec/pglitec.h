@@ -36,7 +36,7 @@ int pgl_uses_unrolled_main_loop(void);
 #endif
 
 pid_t pgl_spawn_backend(const char *child_kind, const char *parameter_file,
-						int client_socket);
+						int client_socket, pid_t scope_leader_pid);
 pid_t pgl_getpid(void);
 int pgl_kill(pid_t pid, int signal_number);
 pid_t pgl_waitpid(pid_t pid, int *status, int options);
@@ -71,6 +71,23 @@ int pgl_accept(int socket_fd, struct sockaddr *address,
 int pgl_close(int fd);
 int pgl_poll(struct pollfd *fds, nfds_t nfds, int timeout);
 void pgl_set_shmem_host(int (*ensure_capacity)(uint32_t));
+void pgl_set_scoped_shmem_host(int (*ensure_capacity)(uint32_t));
+void pgl_set_scoped_shmem_enabled(int enabled);
+
+typedef enum PglSharedScopeKind
+{
+	PGL_SHARED_SCOPE_GLOBAL = 0,
+	PGL_SHARED_SCOPE_ROOT,
+	PGL_SHARED_SCOPE_SESSION,
+	PGL_SHARED_SCOPE_TRANSACTION,
+	PGL_SHARED_SCOPE_SUBTRANSACTION,
+	PGL_SHARED_SCOPE_QUERY,
+	PGL_SHARED_SCOPE_PARALLEL_CONTEXT
+} PglSharedScopeKind;
+
+PglSharedScopeKind pgl_shm_scope_push(PglSharedScopeKind scope);
+void pgl_shm_scope_pop(PglSharedScopeKind previous_scope);
+PglSharedScopeKind pgl_shm_scope_for_pointer(const void *address);
 ssize_t pgl_fd_read(int fd, void *buffer, size_t length);
 ssize_t pgl_fd_write(int fd, const void *buffer, size_t length);
 ssize_t pgl_fd_pread(int fd, void *buffer, size_t length, off_t offset);

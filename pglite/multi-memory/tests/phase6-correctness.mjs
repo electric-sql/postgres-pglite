@@ -27,7 +27,16 @@ try {
     maxConnections: 12,
     sharedBuffers: '16MB',
     artifact: { wasm, glue, data },
-    startParams: ['-c', 'deadlock_timeout=50ms'],
+    startParams: [
+      '-c',
+      'deadlock_timeout=50ms',
+      '-c',
+      'max_worker_processes=16',
+      '-c',
+      'max_parallel_workers=4',
+      '-c',
+      'max_parallel_workers_per_gather=2',
+    ],
   })
 
   const a = await open(postmaster)
@@ -47,6 +56,10 @@ try {
     CREATE ROLE phase6_user LOGIN;
     CREATE TABLE phase6_mvcc(id int PRIMARY KEY, value int NOT NULL);
     INSERT INTO phase6_mvcc VALUES (1, 10), (2, 20);
+    CREATE UNLOGGED TABLE phase8_parallel(value int NOT NULL);
+    INSERT INTO phase8_parallel SELECT generate_series(1, 250000);
+    ALTER TABLE phase8_parallel SET (parallel_workers = 2);
+    ANALYZE phase8_parallel;
   `)
   const role = await open(postmaster, { username: 'phase6_user' })
   assert.deepEqual(
@@ -208,6 +221,71 @@ try {
     { datname: 'postgres', has_backends: true, has_commits: true },
   ])
 
+  await a.exec(`
+    SET min_parallel_table_scan_size = 0;
+    SET parallel_setup_cost = 0;
+    SET parallel_tuple_cost = 0;
+    SET max_parallel_workers_per_gather = 2;
+  `)
+  await control.query('SELECT pg_stat_force_next_flush()')
+  const workersBefore = Number(
+    (
+      await control.query(`
+        SELECT parallel_workers_launched
+          FROM pg_stat_database
+         WHERE datname = current_database()
+      `)
+    ).rows[0].parallel_workers_launched,
+  )
+  const memoryBeforeParallel = postmaster.diagnostics()
+  const explained = await a.query(`
+    EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF, FORMAT JSON)
+    SELECT sum(value)::bigint FROM phase8_parallel
+  `)
+  assert.match(
+    JSON.stringify(explained.rows),
+    /"Workers Launched":(?:\s*)[1-9]/,
+    'forced parallel plan did not launch a worker',
+  )
+  assert.deepEqual(
+    (await a.query('SELECT sum(value)::bigint AS total FROM phase8_parallel'))
+      .rows,
+    [{ total: 31_250_125_000 }],
+  )
+  await a.query('SELECT pg_stat_force_next_flush()')
+  let workersAfter = workersBefore
+  const workerStatsDeadline = Date.now() + 5_000
+  while (workersAfter <= workersBefore && Date.now() < workerStatsDeadline) {
+    await control.query('SELECT pg_stat_clear_snapshot()')
+    workersAfter = Number(
+      (
+        await control.query(`
+          SELECT parallel_workers_launched
+            FROM pg_stat_database
+           WHERE datname = current_database()
+        `)
+      ).rows[0].parallel_workers_launched,
+    )
+    if (workersAfter <= workersBefore) await delay(50)
+  }
+  const memoryAfterParallel = postmaster.diagnostics()
+  assert.ok(workersAfter > workersBefore, 'parallel worker stats did not advance')
+  assert.ok(
+    memoryAfterParallel.privateMemoriesStarted >
+      memoryBeforeParallel.privateMemoriesStarted,
+    'parallel query did not create process-private worker memories',
+  )
+  assert.equal(
+    memoryAfterParallel.scopedMemoriesStarted,
+    memoryBeforeParallel.scopedMemoriesStarted,
+    'parallel workers created new roots instead of attaching to the leader',
+  )
+  assert.equal(
+    memoryAfterParallel.globalMemoryBytes,
+    memoryBeforeParallel.globalMemoryBytes,
+    'parallel-context DSM inflated cluster-global memory',
+  )
+
   const beforeClose = postmaster.diagnostics()
   await Promise.all([...sessions].map((session) => session.close()))
   sessions.clear()
@@ -222,6 +300,11 @@ try {
   assert.equal(
     shutdown.privateMemoriesStarted,
     shutdown.privateMemoriesReleased,
+  )
+  assert.equal(shutdown.liveScopedMemories, 0)
+  assert.equal(
+    shutdown.scopedMemoriesStarted,
+    shutdown.scopedMemoriesReleased,
   )
 
   await writeFile(
@@ -246,6 +329,7 @@ try {
           'terminate',
           'rollback',
           'cumulative-statistics',
+          'parallel-query-root-scope',
         ],
         startup,
         processKinds,
