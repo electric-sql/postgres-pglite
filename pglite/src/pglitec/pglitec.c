@@ -524,6 +524,8 @@ typedef int64_t (*pglite_clock_now_t) (void);
 typedef int (*pglite_socket_t) (int, int, int);
 typedef int (*pglite_connect_t) (int, const struct sockaddr *, socklen_t);
 typedef int (*pglite_bind_t) (int, const struct sockaddr *, socklen_t);
+typedef int (*pglite_configure_unix_socket_t) (int, const char *,
+											   const char *, unsigned int);
 typedef int (*pglite_listen_t) (int, int);
 typedef int (*pglite_accept_t) (int, struct sockaddr *, socklen_t *);
 typedef int (*pglite_close_t) (int);
@@ -544,6 +546,7 @@ static pglite_clock_now_t pglite_clock_now = NULL;
 static pglite_socket_t pglite_socket = NULL;
 static pglite_connect_t pglite_connect = NULL;
 static pglite_bind_t pglite_bind = NULL;
+static pglite_configure_unix_socket_t pglite_configure_unix_socket = NULL;
 static pglite_listen_t pglite_listen = NULL;
 static pglite_accept_t pglite_accept = NULL;
 static pglite_close_t pglite_close = NULL;
@@ -633,11 +636,13 @@ pgl_set_socket_host(pglite_socket_t create_socket,
 					pglite_close_t close_socket,
 					pglite_recv_t receive_socket,
 					pglite_send_t send_socket,
-					pglite_poll_t poll_sockets)
+					pglite_poll_t poll_sockets,
+					pglite_configure_unix_socket_t configure_unix_socket)
 {
 	pglite_socket = create_socket;
 	pglite_connect = connect_socket;
 	pglite_bind = bind_socket;
+	pglite_configure_unix_socket = configure_unix_socket;
 	pglite_listen = listen_socket;
 	pglite_accept = accept_socket;
 	pglite_close = close_socket;
@@ -2846,6 +2851,16 @@ pgl_listen(int socket_fd, int backlog)
 	if (pglite_listen != NULL)
 		return pglite_listen(socket_fd, backlog);
 	return listen(socket_fd, backlog);
+}
+
+int
+pgl_configure_unix_socket(int socket_fd, const char *path,
+						  const char *group, unsigned int mode)
+{
+	if (pglite_configure_unix_socket != NULL)
+		return pglite_configure_unix_socket(socket_fd, path, group, mode);
+	errno = ENOSYS;
+	return -1;
 }
 
 int			EMSCRIPTEN_KEEPALIVE

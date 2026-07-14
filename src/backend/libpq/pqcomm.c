@@ -150,7 +150,7 @@ static pg_noinline int internal_flush_buffer(const char *buf, size_t *start,
 											 size_t *end);
 
 static int	Lock_AF_UNIX(const char *unixSocketDir, const char *unixSocketPath);
-static int	Setup_AF_UNIX(const char *sock_path);
+static int	Setup_AF_UNIX(pgsocket fd, const char *sock_path);
 
 static const PQcommMethods PqCommSocketMethods = {
 	.comm_reset = socket_comm_reset,
@@ -628,7 +628,7 @@ ListenServerPort(int family, const char *hostName, unsigned short portNumber,
 
 		if (addr->ai_family == AF_UNIX)
 		{
-			if (Setup_AF_UNIX(service) != STATUS_OK)
+			if (Setup_AF_UNIX(fd, service) != STATUS_OK)
 			{
 				closesocket(fd);
 				break;
@@ -696,6 +696,7 @@ Lock_AF_UNIX(const char *unixSocketDir, const char *unixSocketPath)
 	 * more portable, and second, it lets us remove any pre-existing socket
 	 * file without race conditions.
 	 */
+#ifndef __PGLITE_POSTMASTER__
 	CreateSocketLockFile(unixSocketPath, true, unixSocketDir);
 
 	/*
@@ -703,6 +704,10 @@ Lock_AF_UNIX(const char *unixSocketDir, const char *unixSocketPath)
 	 * socket file to avoid failure at bind() time.
 	 */
 	(void) unlink(unixSocketPath);
+#else
+	/* The Node socket host owns the host-visible socket and lock paths. */
+	(void) unixSocketDir;
+#endif
 
 	/*
 	 * Remember socket file pathnames for later maintenance.
@@ -717,11 +722,20 @@ Lock_AF_UNIX(const char *unixSocketDir, const char *unixSocketPath)
  * Setup_AF_UNIX -- configure unix socket permissions
  */
 static int
-Setup_AF_UNIX(const char *sock_path)
+Setup_AF_UNIX(pgsocket fd, const char *sock_path)
 {
 	/* no file system permissions for abstract sockets */
 	if (sock_path[0] == '@')
 		return STATUS_OK;
+
+#ifdef __PGLITE_POSTMASTER__
+	/* Keep host filesystem policy behind the PGlite libc socket boundary. */
+	if (pgl_configure_unix_socket(fd, sock_path, Unix_socket_group,
+								Unix_socket_permissions) != 0)
+		return STATUS_ERROR;
+	return STATUS_OK;
+#else
+	(void) fd;
 
 	/*
 	 * Fix socket ownership/permission if requested.  Note we must do this
@@ -777,6 +791,7 @@ Setup_AF_UNIX(const char *sock_path)
 		return STATUS_ERROR;
 	}
 	return STATUS_OK;
+#endif
 }
 
 

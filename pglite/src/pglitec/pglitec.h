@@ -65,6 +65,8 @@ int pgl_futex_wake(void *address, int count);
 int pgl_socket(int domain, int type, int protocol);
 int pgl_bind(int socket_fd, const struct sockaddr *address,
 			 socklen_t address_len);
+int pgl_configure_unix_socket(int socket_fd, const char *path,
+							  const char *group, unsigned int mode);
 int pgl_listen(int socket_fd, int backlog);
 int pgl_accept(int socket_fd, struct sockaddr *address,
 			   socklen_t *address_len);
