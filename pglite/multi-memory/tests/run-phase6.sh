@@ -78,6 +78,12 @@ node22 "${MM_ROOT}/tests/phase8-scope-hierarchy.mjs" \
   "${SOURCE_OUT}/bin/pglite.data" \
   "${OUT}/scope-hierarchy.json"
 
+node22 "${MM_ROOT}/tests/phase8-compact-binding.mjs" \
+  "${ARTIFACT_OUT}/postmaster.wasm" \
+  "${SOURCE_OUT}/bin/pglite.js" \
+  "${SOURCE_OUT}/bin/pglite.data" \
+  "${OUT}/compact-binding.json"
+
 "${MM_ROOT}/tests/build-native-regress-tools.sh" "${REPO_ROOT}" "${NATIVE}"
 cc -O2 -Wall -Wextra -Werror \
   -I"${NATIVE}/build/src/include" \
@@ -112,6 +118,14 @@ node22 "${MM_ROOT}/tests/phase6-correctness.mjs" \
   "${SOURCE_OUT}/bin/pglite.js" \
   "${SOURCE_OUT}/bin/pglite.data" \
   "${OUT}/focused-correctness.json"
+
+node22 "${MM_ROOT}/tests/phase8-compact-postmaster.mjs" \
+  "${REPO_ROOT}" \
+  "${ARTIFACT_OUT}/postmaster.wasm" \
+  "${SOURCE_OUT}/bin/pglite.js" \
+  "${SOURCE_OUT}/bin/pglite.data" \
+  "${OUT}/focused-correctness.json" \
+  "${OUT}/compact-postmaster.json"
 
 SERVER_PID=
 cleanup() {

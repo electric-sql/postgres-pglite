@@ -36,6 +36,7 @@
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
+#include <emscripten/heap.h>
 #include <emscripten/stack.h>
 #else
 #define EMSCRIPTEN_KEEPALIVE
@@ -1045,6 +1046,8 @@ pgl_freopen(const char *pathname, const char *mode, int streamid)
 #define PGL_SHM_MAGIC_INITIALIZING UINT32_C(0x50474c49)
 #define PGL_SHM_MAGIC_READY UINT32_C(0x50474c53)
 #define PGL_SHM_REGISTRY_VERSION UINT32_C(3)
+#define PGL_SHM_COMPACT_CONTROL_INITIALIZING UINT32_C(1)
+#define PGL_SHM_COMPACT_CONTROL_READY UINT32_C(2)
 
 enum PglShmSlotState
 {
@@ -1101,6 +1104,21 @@ typedef struct PglSharedRegistry
 	PglSharedScopeControl scopes[PGL_SHM_MAX_SCOPES];
 }			PglSharedRegistry;
 
+/*
+ * In compact mode memory 2 aliases the root process's memory 0.  This small
+ * control word lives in ordinary linked static data, so every instance knows
+ * its numeric offset while a child reaches the root's copy through a tagged
+ * memory-2 pointer.  The registry itself is reserved from the root's unified
+ * sbrk frontier and therefore cannot collide with later private allocations.
+ */
+typedef struct PglCompactShmemControl
+{
+	uint32_t	state;
+	uint32_t	registry_offset;
+} PglCompactShmemControl;
+
+static PglCompactShmemControl pglite_compact_shmem_control;
+
 /* Keep the supervisor's lock-free diagnostic reader tied to this ABI. */
 _Static_assert(sizeof(PglSharedSegment) == 72,
 			   "unexpected PGlite shared segment layout");
@@ -1115,7 +1133,9 @@ static pglite_shmem_ensure_capacity_t pglite_scoped_shmem_ensure_capacity = NULL
 static PglSharedScopeKind pglite_shmem_scope = PGL_SHARED_SCOPE_GLOBAL;
 static PglSharedScopeHandle pglite_shmem_scope_handle =
 	PGL_SHARED_SCOPE_INVALID;
-static bool pglite_scoped_shmem_enabled = false;
+static PglScopedShmemMode pglite_scoped_shmem_mode =
+	PGL_SCOPED_SHMEM_DISABLED;
+static uint32_t pgl_shm_align(uint32_t value);
 
 static PglSharedScopeHandle
 pgl_shm_scope_make_handle(uint32_t scope_id, uint32_t generation)
@@ -1156,7 +1176,119 @@ pgl_set_scoped_shmem_host(pglite_shmem_ensure_capacity_t ensure_capacity)
 void		EMSCRIPTEN_KEEPALIVE
 pgl_set_scoped_shmem_enabled(int enabled)
 {
-	pglite_scoped_shmem_enabled = enabled != 0;
+	pglite_scoped_shmem_mode = enabled ? PGL_SCOPED_SHMEM_DEDICATED :
+		PGL_SCOPED_SHMEM_DISABLED;
+}
+
+void		EMSCRIPTEN_KEEPALIVE
+pgl_set_scoped_shmem_mode(int mode)
+{
+	if (mode < PGL_SCOPED_SHMEM_DISABLED ||
+		mode > PGL_SCOPED_SHMEM_COMPACT)
+		mode = PGL_SCOPED_SHMEM_DISABLED;
+	pglite_scoped_shmem_mode = (PglScopedShmemMode) mode;
+}
+
+static void *
+pgl_shm_compact_pointer(const void *private_address)
+{
+	uintptr_t	offset = (uintptr_t) private_address;
+
+	if (offset >= PGL_SHM_APERTURE_BYTES)
+	{
+		errno = EOVERFLOW;
+		return NULL;
+	}
+	return (void *) (uintptr_t) (PGL_SHM_SCOPED_POINTER_TAG | offset);
+}
+
+/*
+ * Atomically reserve an aligned range from the root process's normal sbrk
+ * frontier.  In a root Worker memory 0 and memory 2 are the same Memory.  In
+ * a parallel child, the tagged pointer routes the identical link-time
+ * sbrk_val offset to the root's memory 2.  Emscripten's own sbrk() CAS loop
+ * and this loop therefore serialize on one word without a host round trip.
+ */
+static uint32_t
+pgl_shm_compact_reserve(uint32_t size)
+{
+	uintptr_t *shared_sbrk =
+		(uintptr_t *) pgl_shm_compact_pointer(emscripten_get_sbrk_ptr());
+
+	if (shared_sbrk == NULL || pglite_scoped_shmem_ensure_capacity == NULL)
+	{
+		errno = ENOMEM;
+		return 0;
+	}
+	for (;;)
+	{
+		uintptr_t old_break = __atomic_load_n(shared_sbrk, __ATOMIC_SEQ_CST);
+		uintptr_t start = pgl_shm_align((uint32_t) old_break);
+		uintptr_t new_break = start + size;
+		uintptr_t expected = old_break;
+
+		if (old_break >= PGL_SHM_APERTURE_BYTES ||
+			new_break <= start || new_break > PGL_SHM_APERTURE_BYTES)
+		{
+			errno = ENOMEM;
+			return 0;
+		}
+		if (pglite_scoped_shmem_ensure_capacity((uint32_t) new_break) != 0)
+		{
+			errno = ENOMEM;
+			return 0;
+		}
+		if (__atomic_compare_exchange_n(shared_sbrk, &expected, new_break,
+									false, __ATOMIC_SEQ_CST,
+									__ATOMIC_SEQ_CST))
+			return (uint32_t) start;
+	}
+}
+
+static PglSharedRegistry *
+pgl_shm_compact_registry(void)
+{
+	PglCompactShmemControl *control =
+		(PglCompactShmemControl *) pgl_shm_compact_pointer(
+			&pglite_compact_shmem_control);
+	uint32_t	state;
+
+	if (control == NULL)
+		return NULL;
+	state = __atomic_load_n(&control->state, __ATOMIC_ACQUIRE);
+	if (state == 0)
+	{
+		uint32_t expected = 0;
+
+		if (__atomic_compare_exchange_n(&control->state, &expected,
+									PGL_SHM_COMPACT_CONTROL_INITIALIZING,
+									false, __ATOMIC_ACQ_REL,
+									__ATOMIC_ACQUIRE))
+		{
+			uint32_t offset =
+				pgl_shm_compact_reserve(pgl_shm_align(sizeof(PglSharedRegistry)));
+
+			if (offset == 0)
+			{
+				__atomic_store_n(&control->state, 0, __ATOMIC_RELEASE);
+				return NULL;
+			}
+			control->registry_offset = offset;
+			__atomic_store_n(&control->state,
+							 PGL_SHM_COMPACT_CONTROL_READY, __ATOMIC_RELEASE);
+		}
+	}
+	while (__atomic_load_n(&control->state, __ATOMIC_ACQUIRE) ==
+		   PGL_SHM_COMPACT_CONTROL_INITIALIZING)
+		;
+	if (__atomic_load_n(&control->state, __ATOMIC_ACQUIRE) !=
+		PGL_SHM_COMPACT_CONTROL_READY)
+	{
+		errno = ENOMEM;
+		return NULL;
+	}
+	return (PglSharedRegistry *) (uintptr_t)
+		(PGL_SHM_SCOPED_POINTER_TAG | control->registry_offset);
 }
 
 PglSharedScopeKind
@@ -1180,21 +1312,25 @@ pgl_shm_scope_pop(PglSharedScopeKind previous_scope)
 static PglSharedRegistry *
 pgl_shm_registry(bool scoped)
 {
-	PglSharedRegistry *registry =
-		(PglSharedRegistry *) (uintptr_t) (scoped ?
-											 PGL_SHM_SCOPED_REGISTRY_ADDRESS :
-											 PGL_SHM_GLOBAL_REGISTRY_ADDRESS);
+	PglSharedRegistry *registry;
 	uint32_t	pointer_tag = scoped ? PGL_SHM_SCOPED_POINTER_TAG :
 	PGL_SHM_GLOBAL_POINTER_TAG;
 	uint32_t	shmid_base = scoped ? PGL_SHM_SCOPED_ID_TAG : 0;
 	uint32_t	expected = 0;
 	uint32_t	magic;
 
-	if (scoped && !pglite_scoped_shmem_enabled)
+	if (scoped && pglite_scoped_shmem_mode == PGL_SCOPED_SHMEM_DISABLED)
 	{
 		errno = EPERM;
 		return NULL;
 	}
+	registry = scoped && pglite_scoped_shmem_mode == PGL_SCOPED_SHMEM_COMPACT ?
+		pgl_shm_compact_registry() :
+		(PglSharedRegistry *) (uintptr_t) (scoped ?
+											 PGL_SHM_SCOPED_REGISTRY_ADDRESS :
+											 PGL_SHM_GLOBAL_REGISTRY_ADDRESS);
+	if (registry == NULL)
+		return NULL;
 	magic = __atomic_load_n(&registry->magic, __ATOMIC_ACQUIRE);
 
 	if (magic == PGL_SHM_MAGIC_READY)
@@ -1207,7 +1343,9 @@ pgl_shm_registry(bool scoped)
 		registry->version = PGL_SHM_REGISTRY_VERSION;
 		registry->lock = 0;
 		registry->next_shmid = shmid_base + 1;
-		registry->next_offset = PGL_SHM_DATA_OFFSET;
+		registry->next_offset =
+			scoped && pglite_scoped_shmem_mode == PGL_SCOPED_SHMEM_COMPACT ?
+			0 : PGL_SHM_DATA_OFFSET;
 		registry->allocation_generation = 0;
 		registry->pointer_tag = pointer_tag;
 		registry->shmid_base = shmid_base;
@@ -1242,6 +1380,30 @@ pgl_shm_registry(bool scoped)
 		return NULL;
 	}
 	return registry;
+}
+
+uint32_t EMSCRIPTEN_KEEPALIVE
+pgl_shm_registry_offset(void)
+{
+	PglSharedRegistry *registry = pgl_shm_registry(true);
+
+	if (registry == NULL)
+		return 0;
+	return ((uint32_t) (uintptr_t) registry) & PGL_SHM_POINTER_MASK;
+}
+
+uint32_t EMSCRIPTEN_KEEPALIVE
+pgl_shm_compact_frontier(void)
+{
+	uintptr_t *shared_sbrk;
+
+	if (pglite_scoped_shmem_mode != PGL_SCOPED_SHMEM_COMPACT)
+		return 0;
+	shared_sbrk =
+		(uintptr_t *) pgl_shm_compact_pointer(emscripten_get_sbrk_ptr());
+	if (shared_sbrk == NULL)
+		return 0;
+	return (uint32_t) __atomic_load_n(shared_sbrk, __ATOMIC_SEQ_CST);
 }
 
 static void
@@ -1806,6 +1968,19 @@ pgl_shm_allocate_slot(PglSharedRegistry * registry, uint32_t requested_size)
 		errno = ENOSPC;
 		return NULL;
 	}
+	if (registry->pointer_tag == PGL_SHM_SCOPED_POINTER_TAG &&
+		pglite_scoped_shmem_mode == PGL_SCOPED_SHMEM_COMPACT)
+	{
+		uint32_t offset = pgl_shm_compact_reserve(allocated_size);
+
+		if (offset == 0)
+			return NULL;
+		unused->offset = offset;
+		unused->allocated_size = allocated_size;
+		if (registry->next_offset < offset + allocated_size)
+			registry->next_offset = offset + allocated_size;
+		return unused;
+	}
 	if (registry->next_offset > PGL_SHM_APERTURE_BYTES - allocated_size)
 	{
 		errno = ENOMEM;
@@ -1898,8 +2073,9 @@ pgl_shmget(key_t key, size_t size, int shmflg)
 	 * or attach a scoped key even though the PostgreSQL DSM control table is
 	 * cluster-global.
 	 */
-	registry = pgl_shm_registry((!create && pglite_scoped_shmem_enabled) ||
-								 pglite_shmem_scope != PGL_SHARED_SCOPE_GLOBAL);
+	registry = pgl_shm_registry((!create &&
+								 pglite_scoped_shmem_mode != PGL_SCOPED_SHMEM_DISABLED) ||
+									 pglite_shmem_scope != PGL_SHARED_SCOPE_GLOBAL);
 	if (registry == NULL)
 		return -1;
 	pgl_shm_lock(registry);
@@ -2357,6 +2533,24 @@ void		EMSCRIPTEN_KEEPALIVE
 pgl_set_scoped_shmem_enabled(int enabled)
 {
 	(void) enabled;
+}
+
+void		EMSCRIPTEN_KEEPALIVE
+pgl_set_scoped_shmem_mode(int mode)
+{
+	(void) mode;
+}
+
+uint32_t EMSCRIPTEN_KEEPALIVE
+pgl_shm_registry_offset(void)
+{
+	return 0;
+}
+
+uint32_t EMSCRIPTEN_KEEPALIVE
+pgl_shm_compact_frontier(void)
+{
+	return 0;
 }
 
 PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE

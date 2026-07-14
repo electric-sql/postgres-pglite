@@ -74,6 +74,17 @@ void pgl_set_shmem_host(int (*ensure_capacity)(uint32_t));
 void pgl_set_scoped_shmem_host(int (*ensure_capacity)(uint32_t));
 void pgl_set_scoped_shmem_enabled(int enabled);
 
+typedef enum PglScopedShmemMode
+{
+	PGL_SCOPED_SHMEM_DISABLED = 0,
+	PGL_SCOPED_SHMEM_DEDICATED,
+	PGL_SCOPED_SHMEM_COMPACT
+} PglScopedShmemMode;
+
+void pgl_set_scoped_shmem_mode(int mode);
+uint32_t pgl_shm_registry_offset(void);
+uint32_t pgl_shm_compact_frontier(void);
+
 typedef enum PglSharedScopeKind
 {
 	PGL_SHARED_SCOPE_GLOBAL = 0,

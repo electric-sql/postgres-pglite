@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -43,6 +44,7 @@ try {
   const b = await open(postmaster)
   const control = await open(postmaster)
   const startup = postmaster.diagnostics()
+  const startupPhysical = physicalMemory()
   assert.ok(startup.liveProcesses >= 4, 'auxiliary processes did not start')
   assert.ok(
     startup.scopedLifetime.readyRoots >= 3,
@@ -357,6 +359,7 @@ try {
   assert.equal(memoryAfterParallel.scopedLifetime.activeQueryScopes, 0)
 
   const beforeClose = postmaster.diagnostics()
+  const beforeClosePhysical = physicalMemory()
   await Promise.all([...sessions].map((session) => session.close()))
   sessions.clear()
   await waitFor(
@@ -366,6 +369,7 @@ try {
   )
   await postmaster.close()
   const shutdown = postmaster.diagnostics()
+  const shutdownPhysical = physicalMemory()
   assert.equal(shutdown.livePrivateMemories, 0)
   assert.equal(
     shutdown.privateMemoriesStarted,
@@ -401,9 +405,12 @@ try {
           'parallel-query-root-scope',
         ],
         startup,
+        startupPhysical,
         processKinds,
         beforeClose,
+        beforeClosePhysical,
         shutdown,
+        shutdownPhysical,
       },
       null,
       2,
@@ -414,6 +421,24 @@ try {
   await Promise.allSettled([...sessions].map((session) => session.close()))
   await postmaster?.close().catch(() => undefined)
   await rm(dataDirectory, { recursive: true, force: true })
+}
+
+function physicalMemory() {
+  const status = readFileSync('/proc/self/status', 'utf8')
+  const fieldBytes = (name) => {
+    const match = new RegExp(`^${name}:\\s+(\\d+)\\s+kB$`, 'm').exec(status)
+    assert.ok(match, `/proc/self/status has no ${name}`)
+    return Number(match[1]) * 1024
+  }
+  const usage = process.memoryUsage()
+  return {
+    rssBytes: usage.rss,
+    vmRssBytes: fieldBytes('VmRSS'),
+    vmSizeBytes: fieldBytes('VmSize'),
+    maxRssBytes: process.resourceUsage().maxRSS * 1024,
+    arrayBuffersBytes: usage.arrayBuffers,
+    externalBytes: usage.external,
+  }
 }
 
 async function open(server, options) {
