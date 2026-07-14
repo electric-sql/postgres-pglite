@@ -25,12 +25,14 @@ cleanup() {
 trap cleanup EXIT
 
 "${PROVIDER}/bin/initdb" -D "${PGDATA}" --auth=trust --no-sync \
-  --no-instructions
+  --no-instructions -c track_commit_timestamp=on
 "${PROVIDER}/bin/pg_ctl" -D "${PGDATA}" -l "${LOG}" \
   -o "-F -k '${SOCKET_DIR}' -p ${PORT}" start
 "${PROVIDER}/bin/pg_ctl" -D "${PGDATA}" status
 "${PROVIDER}/bin/psql" -X -v ON_ERROR_STOP=1 -h "${SOCKET_DIR}" \
   -p "${PORT}" -d postgres -Atqc 'SELECT 41 + 1'
+test "$("${PROVIDER}/bin/psql" -X -h "${SOCKET_DIR}" -p "${PORT}" \
+  -d postgres -Atqc "SHOW track_commit_timestamp")" = on
 
 printf '%s\n' 'log_min_messages = warning' >>"${PGDATA}/postgresql.conf"
 "${PROVIDER}/bin/pg_ctl" -D "${PGDATA}" reload

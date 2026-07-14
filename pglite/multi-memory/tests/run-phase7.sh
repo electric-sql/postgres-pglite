@@ -7,13 +7,18 @@ PHASE6=/phase6
 OUT=/phase7
 NATIVE="${OUT}/native"
 TARGET=${PGLITE_PHASE7_TARGET:-check}
-JOBS=${PGLITE_PHASE7_JOBS:-4}
+JOBS=${PGLITE_PHASE7_JOBS:-2}
 
 test -f /.dockerenv || {
   echo 'Phase 7 must run inside the pinned Docker image' >&2
   exit 1
 }
 test "$(uname -m)" = aarch64
+[[ "${JOBS}" =~ ^[1-9][0-9]*$ ]] || {
+  echo "invalid Phase 7 parallel job count: ${JOBS}" >&2
+  exit 1
+}
+export PGLITE_PHASE7_JOBS="${JOBS}"
 perl -MIPC::Run -e 'print "Phase 7 TAP dependency: PASS\n"'
 test -f "${PHASE6}/artifact/postmaster.wasm"
 test -f "${PHASE6}/source-build/bin/pglite.js"

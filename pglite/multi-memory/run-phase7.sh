@@ -13,7 +13,7 @@ test "$(docker image inspect "${IMAGE}" --format '{{.Os}}/{{.Architecture}}')" =
 
 docker run --rm \
   --env PGLITE_PHASE7_TARGET="${PGLITE_PHASE7_TARGET:-check}" \
-  --env PGLITE_PHASE7_JOBS="${PGLITE_PHASE7_JOBS:-4}" \
+  --env PGLITE_PHASE7_JOBS="${PGLITE_PHASE7_JOBS:-2}" \
   --env PGLITE_PROVIDER_DEBUG="${PGLITE_PROVIDER_DEBUG:-false}" \
   --volume "${REPO_ROOT}:/work:rw" \
   --volume "${PHASE6_OUT}:/phase6:rw" \

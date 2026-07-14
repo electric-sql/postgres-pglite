@@ -125,6 +125,7 @@ async function runPostgres(args) {
     initialize: false,
     postmasterPid: process.pid,
     maxConnections,
+    osUser: cluster.bootstrapSuperuser,
     respectPostgresqlConfig: true,
     icuDataDir: new Blob([icuArchive]),
     artifact: config.artifact,
@@ -302,26 +303,62 @@ async function startServer(pgdata, options) {
     detached: false,
     stdio: ['ignore', output, output],
   })
-  child.unref()
+  let spawnError
+  child.once('error', (error) => {
+    spawnError = error
+  })
   if (logDescriptor !== undefined) closeSync(logDescriptor)
   const deadline = Date.now() + options.timeout * 1_000
-  while (Date.now() < deadline) {
-    const state = await readLifecycle(pgdata, false)
-    if (state?.status === 'ready' && state.pid === child.pid) {
-      if (logPath) {
-        state.log = logPath
-        await writeLifecycle(pgdata, state)
+  try {
+    while (Date.now() < deadline) {
+      const state = await readLifecycle(pgdata, false)
+      if (state?.status === 'ready' && state.pid === child.pid) {
+        if (logPath) {
+          state.log = logPath
+          await writeLifecycle(pgdata, state)
+        }
+        child.unref()
+        return
       }
-      return
+      if (
+        spawnError ||
+        child.exitCode !== null ||
+        child.signalCode !== null ||
+        !isProcessAlive(child.pid)
+      ) {
+        fail(
+          `pg_ctl: server exited before becoming ready${spawnError ? `: ${spawnError.message}` : `; see ${logPath ?? 'stderr'}`}`,
+        )
+      }
+      await delay(100)
     }
-    if (!isProcessAlive(child.pid)) {
-      fail(
-        `pg_ctl: server exited before becoming ready; see ${logPath ?? 'stderr'}`,
-      )
-    }
-    await delay(100)
+    fail(
+      `pg_ctl: server did not become ready within ${options.timeout} seconds`,
+    )
+  } catch (error) {
+    await terminateStartingServer(child, pgdata)
+    throw error
   }
-  fail(`pg_ctl: server did not become ready within ${options.timeout} seconds`)
+}
+
+async function terminateStartingServer(child, pgdata) {
+  if (isProcessAlive(child.pid)) {
+    try {
+      process.kill(child.pid, 'SIGQUIT')
+    } catch (error) {
+      if (error?.code !== 'ESRCH') throw error
+    }
+  }
+  const deadline = Date.now() + 5_000
+  while (Date.now() < deadline && isProcessAlive(child.pid)) await delay(50)
+  if (isProcessAlive(child.pid)) {
+    try {
+      process.kill(child.pid, 'SIGKILL')
+    } catch (error) {
+      if (error?.code !== 'ESRCH') throw error
+    }
+  }
+  await rm(join(pgdata, STATE_FILE), { force: true })
 }
 
 async function stopServer(pgdata, mode, timeout, silent) {
@@ -375,6 +412,8 @@ function parseInitdb(args) {
     '--auth',
     '--auth-local',
     '--auth-host',
+    '-c',
+    '--set',
   ])
   const flagOptions = new Set([
     '--allow-group-access',

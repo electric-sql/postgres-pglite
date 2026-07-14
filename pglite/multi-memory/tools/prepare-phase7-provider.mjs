@@ -27,6 +27,8 @@ const pgRoot = join(repoRoot, 'postgres-pglite')
 const source = join(pgRoot, 'pglite/multi-memory/provider')
 const provider = join(phase7, 'provider')
 const target = process.env.PGLITE_PHASE7_TARGET ?? 'check'
+const jobs = Number.parseInt(process.env.PGLITE_PHASE7_JOBS ?? '2', 10)
+assert.ok(Number.isInteger(jobs) && jobs > 0, 'invalid Phase 7 job count')
 const resultsRoot = join(phase7, 'results', `raw-${target}`)
 const revision = execFileSync('git', ['-C', pgRoot, 'rev-parse', 'HEAD'], {
   encoding: 'utf8',
@@ -59,6 +61,7 @@ await writeFile(
 const config = {
   schema: 1,
   architecture: process.arch,
+  jobs,
   postgresRevision: revision,
   repoRoot,
   artifact: {

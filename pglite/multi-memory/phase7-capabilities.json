@@ -178,11 +178,39 @@
         "reason": "The logical decoding replication suite has not yet completed the Phase 7 gate."
       },
       {
-        "id": "archive-shell-command",
-        "match": "prefix",
-        "path": "contrib/basic_archive",
+        "id": "bloom-wal-replication",
+        "match": "exact",
+        "path": "contrib/bloom/t/001_wal.pl",
         "state": "BLOCKED",
-        "reason": "Archive tests require host command execution that pgl_system currently rejects."
+        "reason": "The test requires a streaming-replication standby, which has not yet completed the Phase 7 gate."
+      },
+      {
+        "id": "pg-visibility-replication",
+        "match": "exact",
+        "path": "contrib/pg_visibility/t/001_concurrent_transaction.pl",
+        "state": "BLOCKED",
+        "reason": "The test requires a streaming-replication standby, which has not yet completed the Phase 7 gate."
+      },
+      {
+        "id": "brin-wal-consistency-replication",
+        "match": "exact",
+        "path": "src/test/modules/brin/t/02_wal_consistency.pl",
+        "state": "BLOCKED",
+        "reason": "The test requires recovery and WAL replay, which have not yet completed the Phase 7 gate."
+      },
+      {
+        "id": "commit-ts-standby",
+        "match": "exact",
+        "path": "src/test/modules/commit_ts/t/002_standby.pl",
+        "state": "BLOCKED",
+        "reason": "The test requires a streaming-replication standby, which has not yet completed the Phase 7 gate."
+      },
+      {
+        "id": "commit-ts-standby-promotion",
+        "match": "exact",
+        "path": "src/test/modules/commit_ts/t/003_standby_2.pl",
+        "state": "BLOCKED",
+        "reason": "The test requires standby promotion and multi-node recovery, which have not yet completed the Phase 7 gate."
       },
       {
         "id": "basebackup-shell-command",

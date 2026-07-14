@@ -119,11 +119,12 @@ const summary = {
   upstreamExitStatus: status,
   postgresRevision: config.postgresRevision,
   architecture: config.architecture,
+  jobs: config.jobs,
   provider,
   canonicalCommand:
     target === 'check-world'
-      ? `PGLITE_TEST_PROVIDER=${provider} PGLITE_TEST_CAPABILITY_RUNNER=${provider}/bin/pglite-test-capability make -k ${target} PROVE=${provider}/bin/prove`
-      : `PGLITE_TEST_PROVIDER=${provider} make ${target}`,
+      ? `PGLITE_TEST_PROVIDER=${provider} PGLITE_TEST_CAPABILITY_RUNNER=${provider}/bin/pglite-test-capability make -j${config.jobs} -k ${target} PROVE=${provider}/bin/prove`
+      : `PGLITE_TEST_PROVIDER=${provider} make -j${config.jobs} ${target}`,
   capabilityCounts,
   testPolicy: {
     defaultState: capabilities.testPolicy.defaultState,

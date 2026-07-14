@@ -798,13 +798,16 @@ struct passwd *EMSCRIPTEN_KEEPALIVE
 pgl_getpwuid(uid_t uid)
 {
 	static struct passwd pw;
-	static char name[] = "postgres";
+	static char fallback_name[] = "postgres";
 	static char passwd[] = "x";
 	static char gecos[] = "Static User";
 	static char dir[] = "/home/postgres";
 	static char shell[] = "/bin/sh";
+	const char *configured_name = getenv("USER");
 
-	pw.pw_name = name;
+	if (configured_name == NULL || configured_name[0] == '\0')
+		configured_name = fallback_name;
+	pw.pw_name = (char *) configured_name;
 	pw.pw_passwd = passwd;
 	pw.pw_uid = uid;
 	pw.pw_gid = uid;
@@ -1614,6 +1617,33 @@ pgl_getsockopt(int __fd, int __level, int __optname,
 			   void *__restrict __optval,
 			   socklen_t *__restrict __optlen)
 {
+#if defined(__PGLITE_POSTMASTER__) && defined(SO_PEERCRED)
+	/*
+	 * Node does not expose SO_PEERCRED for an accepted net.Socket.  A virtual
+	 * local-socket connection is admitted by the same Node process, so present
+	 * PGlite libc's synthetic process identity.  PostgreSQL then resolves the
+	 * name through pgl_getpwuid_r(), keeping this platform behavior behind the
+	 * libc abstraction instead of adding an authentication-specific fork.
+	 */
+	if (__fd >= 0x3e000000 && __level == SOL_SOCKET &&
+		__optname == SO_PEERCRED)
+	{
+		int32_t		credentials[3];
+
+		if (__optval == NULL || __optlen == NULL ||
+			*__optlen < sizeof(credentials))
+		{
+			errno = EINVAL;
+			return -1;
+		}
+		credentials[0] = (int32_t) pgl_getpid();
+		credentials[1] = PGLITE_UID;
+		credentials[2] = PGLITE_UID;
+		memcpy(__optval, credentials, sizeof(credentials));
+		*__optlen = sizeof(credentials);
+		return 0;
+	}
+#endif
 	/* dummy  */
 	return 0;
 }

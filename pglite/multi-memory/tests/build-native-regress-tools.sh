@@ -47,7 +47,8 @@ process.exit(
   manifest.status === 'pass' &&
     manifest.revision === revision &&
     manifest.host === host &&
-    manifest.architecture === architecture
+    manifest.architecture === architecture &&
+    manifest.execBackendCompatibility === true
     ? 0
     : 1,
 )
@@ -81,7 +82,7 @@ git -C "${PG_ROOT}" archive --format=tar "${REVISION}" \
 
 (
   cd "${BUILD}"
-  "${SOURCE}/configure" \
+  CPPFLAGS=-DEXEC_BACKEND "${SOURCE}/configure" \
     --prefix="${INSTALL}" \
     --without-icu \
     --without-readline \
@@ -119,6 +120,7 @@ fs.writeFileSync(output, `${JSON.stringify({
   postgresql: '18.3',
   host,
   architecture,
+  execBackendCompatibility: true,
   tools: [
     'libpq',
     'psql',
