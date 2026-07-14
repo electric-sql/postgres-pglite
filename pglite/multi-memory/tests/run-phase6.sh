@@ -159,6 +159,13 @@ node22 "${MM_ROOT}/tests/phase8-dynamic-side-module.mjs" \
   "${DYNAMIC}/pglite_dynamic_probe.audit.json" \
   "${OUT}/dynamic-side-module.json"
 
+node22 "${MM_ROOT}/tests/phase8-brokered-filesystem.mjs" \
+  "${REPO_ROOT}" \
+  "${ARTIFACT_OUT}/postmaster.wasm" \
+  "${SOURCE_OUT}/bin/pglite.js" \
+  "${SOURCE_OUT}/bin/pglite.data" \
+  "${OUT}/brokered-filesystem.json"
+
 SERVER_PID=
 cleanup() {
   if [[ -n "${SERVER_PID}" ]] && kill -0 "${SERVER_PID}" 2>/dev/null; then
