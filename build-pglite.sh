@@ -14,7 +14,8 @@ fi
 INSTALL_FOLDER=${INSTALL_FOLDER:-"/pglite"}
 
 # build with optimizations by default aka release
-PGLITE_CFLAGS="-m32 -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types"
+PGLITE_CFLAGS="-m32 -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types \
+-I$(pwd)/pglite/src/pglitec -include $(pwd)/pglite/src/pglitec/pglitec.h"
 PGLITE_WASM_FEATURE_FLAGS=""
 PGLITE_MEMORY_LDFLAGS="-sUSE_PTHREADS=0"
 POSTGRES_PGLITE_INITIAL_MEMORY=${PGLITE_PRIVATE_INITIAL_MEMORY:-128MB}
@@ -30,11 +31,6 @@ if [ "${PGLITE_SHARED_MEMORY:-false}" = true ]; then
     PGLITE_MEMORY_LDFLAGS="$PGLITE_MEMORY_LDFLAGS -sSHARED_MEMORY=1 -sMAXIMUM_MEMORY=${POSTGRES_PGLITE_MAXIMUM_MEMORY}"
     PGLITE_SHARED_MEMORY_RECONFIGURE=true
 
-    # Feature flags are recorded on every object. Never reuse the ordinary
-    # single-user object graph for a shared-memory link.
-    if [ -f Makefile ] && [ "${PGLITE_INCREMENTAL:-false}" != true ]; then
-        emmake make clean || { echo 'error: cleaning ordinary Wasm objects for shared build' ; exit 8; }
-    fi
 fi
 if [ "$DEBUG" = true ]
 then
@@ -49,7 +45,7 @@ fi
 
 if [ "${PGLITE_MULTI_MEMORY_PROVENANCE:-false}" = true ]; then
     echo "pglite: enabling explicit multi-memory provenance markers."
-    PGLITE_CFLAGS="$PGLITE_CFLAGS -D__PGLITE_MULTI_MEMORY__ -I$(pwd)/pglite/src/pglitec"
+    PGLITE_CFLAGS="$PGLITE_CFLAGS -D__PGLITE_MULTI_MEMORY__"
     PGLITE_MULTI_MEMORY_RECONFIGURE=true
     # Make does not track command-line flags. Recompile the fenced source that
     # consumes the PGlite libc marker and force the final main-module relink.
@@ -60,8 +56,7 @@ fi
 
 if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
     echo "pglite: enabling the Worker-backed EXEC_BACKEND portability layer."
-    PGLITE_CFLAGS="$PGLITE_CFLAGS -D__PGLITE_POSTMASTER__ \
--I$(pwd)/pglite/src/pglitec -include $(pwd)/pglite/src/pglitec/pglitec.h"
+    PGLITE_CFLAGS="$PGLITE_CFLAGS -D__PGLITE_POSTMASTER__"
     PGLITE_POSTMASTER_RECONFIGURE=true
     # The forced PGlite libc header redirects the dynamic-loader boundary.
     # Make does not otherwise notice a change to this injected header.
@@ -69,6 +64,29 @@ if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
     rm -f src/backend/utils/fmgr/dfmgr.o
     rm -f src/backend/utils/misc/stack_depth.o
     rm -f src/backend/postmaster/checkpointer.o
+fi
+
+# PostgreSQL's generated Makefiles capture the absolute workspace, compiler
+# flags, and linker flags from configure.  Make itself does not notice when a
+# checkout switches between the ordinary single-user build and the
+# shared/postmaster build, and stale postmaster objects cannot be linked into
+# the classic non-shared artifact.  Persist the effective build profile and
+# force a clean configure whenever any captured input changes.
+PGLITE_BUILD_PROFILE_FILE=.pglite-build-profile
+PGLITE_BUILD_PROFILE=$(printf '%s\n' \
+    "workspace=$(pwd)" \
+    "cflags=${PGLITE_CFLAGS}" \
+    "memory_ldflags=${PGLITE_MEMORY_LDFLAGS}" \
+    "initial_memory=${POSTGRES_PGLITE_INITIAL_MEMORY}" \
+    "maximum_memory=${POSTGRES_PGLITE_MAXIMUM_MEMORY}")
+PGLITE_PROFILE_RECONFIGURE=false
+if [ ! -f "${PGLITE_BUILD_PROFILE_FILE}" ] ||
+   [ "$(cat "${PGLITE_BUILD_PROFILE_FILE}" 2>/dev/null || true)" != "${PGLITE_BUILD_PROFILE}" ]; then
+    echo "pglite: build profile changed; cleaning and reconfiguring."
+    PGLITE_PROFILE_RECONFIGURE=true
+    if [ -f Makefile ]; then
+        emmake make clean || { echo 'error: cleaning stale Wasm build profile' ; exit 8; }
+    fi
 fi
 
 # PGLITE_OTHER_FLAGS="-sUSE_PTHREADS=0 -fPIC -m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn"
@@ -119,7 +137,8 @@ RUN_CONFIGURE=false
 
 if [ "${PGLITE_MULTI_MEMORY_RECONFIGURE:-false}" = true ] ||
    [ "${PGLITE_SHARED_MEMORY_RECONFIGURE:-false}" = true ] ||
-   [ "${PGLITE_POSTMASTER_RECONFIGURE:-false}" = true ]; then
+   [ "${PGLITE_POSTMASTER_RECONFIGURE:-false}" = true ] ||
+   [ "${PGLITE_PROFILE_RECONFIGURE}" = true ]; then
     echo "multi-memory/shared build flags require ./configure."
     RUN_CONFIGURE=true
 elif [ ! -f "$CONFIG_STATUS" ]; then
@@ -184,6 +203,7 @@ if [ "$RUN_CONFIGURE" = true ]; then
     ICU_CFLAGS="-I/install/libs/include" \
     ICU_LIBS="-L/install/libs/lib -licui18n -licuuc -licudata" \
     CFLAGS=${PGLITE_CFLAGS} emconfigure ./configure $CONFIGURE_PARAMS || { echo 'error: emconfigure failed' ; exit 11; }
+    printf '%s\n' "${PGLITE_BUILD_PROFILE}" > "${PGLITE_BUILD_PROFILE_FILE}"
 else
     echo "Warning: configure has not been run because RUN_CONFIGURE=${RUN_CONFIGURE}"
 fi
