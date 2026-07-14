@@ -36,6 +36,7 @@ if [[ -f "${OUT}/manifest.json" && \
       -x "${BUILD}/src/bin/initdb/initdb" && \
       -x "${BUILD}/src/backend/postgres" && \
       -f "${BUILD}/src/test/perl/Makefile" && \
+      -f "${BUILD}/contrib/dist.mk" && \
       -f "${SOURCE}/src/test/regress/parallel_schedule" ]] && \
    node22 - "${OUT}/manifest.json" "${REVISION}" \
      "${HOST_PLATFORM}" "${ARCHITECTURE}" <<'NODE'
@@ -87,6 +88,10 @@ git -C "${PG_ROOT}" archive --format=tar "${REVISION}" \
     --without-zlib \
     --enable-tap-tests
 )
+
+# PGlite's contrib/Makefile adds an in-tree packaging include. Keep this
+# native-test compatibility fence here instead of changing PostgreSQL source.
+ln -s "${SOURCE}/contrib/dist.mk" "${BUILD}/contrib/dist.mk"
 
 make -j"${JOBS}" -C "${BUILD}" all
 
