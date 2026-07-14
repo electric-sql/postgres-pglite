@@ -10,8 +10,15 @@ rmSync(options.outputDirectory, { recursive: true, force: true })
 mkdirSync(options.outputDirectory, { recursive: true })
 
 for (const module of options.modules) {
+  module.cName = cIdentifier(module.name)
   module.symbols = definedFunctions(options.llvmNm, module.objects)
 }
+
+assert.equal(
+  new Set(options.modules.map(({ cName }) => cName)).size,
+  options.modules.length,
+  'static module names must have distinct C identifiers',
+)
 
 const owners = new Map()
 for (const module of options.modules) {
@@ -44,7 +51,7 @@ for (const module of options.modules) {
     return output
   })
   const linkedSymbols = definedFunctions(options.llvmNm, module.copiedObjects)
-  const magic = `pgl_static_${module.name}_Pg_magic_func`
+  const magic = `pgl_static_${module.cName}_Pg_magic_func`
   assert.ok(linkedSymbols.has(magic), `${module.name} has no namespaced magic`)
   const requestedByResolved = new Map(
     [...module.aliases].map(([requested, resolved]) => [resolved, requested]),
@@ -99,6 +106,7 @@ writeFileSync(
       schema: 1,
       modules: options.modules.map((module) => ({
         name: module.name,
+        cName: module.cName,
         objects: module.objects.map((object) => resolve(object)),
         symbols: module.symbols.size,
         magic: module.resolvedSymbols.get('Pg_magic_func'),
@@ -123,13 +131,13 @@ function parseArguments(args) {
       while (index < args.length && !args[index].startsWith('--')) {
         objects.push(args[index++])
       }
-      assert.match(name, /^[a-z][a-z0-9_]*$/)
+      assert.match(name, /^[A-Za-z0-9_-]+$/)
       assert.ok(objects.length > 0, `${name} has no objects`)
       modules.push({ name, objects, aliases: new Map() })
     } else if (option === '--alias') {
       const value = args[index++]
       const match = value.match(
-        /^([a-z][a-z0-9_]*):([A-Za-z_$][A-Za-z0-9_$]*)=([A-Za-z_$][A-Za-z0-9_$]*)$/,
+        /^([A-Za-z0-9_-]+):([A-Za-z_$][A-Za-z0-9_$]*)=([A-Za-z_$][A-Za-z0-9_$]*)$/,
       )
       assert.ok(match, `invalid static-module alias: ${value}`)
       const module = modules.find(({ name }) => name === match[1])
@@ -145,6 +153,11 @@ function parseArguments(args) {
   assert.ok(modules.length > 0, 'at least one --module is required')
   assert.equal(new Set(modules.map(({ name }) => name)).size, modules.length)
   return { outputDirectory: resolve(outputDirectory), llvmNm, modules }
+}
+
+function cIdentifier(name) {
+  const sanitized = name.replaceAll(/[^A-Za-z0-9_]/g, '_')
+  return /^[A-Za-z]/.test(sanitized) ? sanitized : `m_${sanitized}`
 }
 
 function definedFunctions(llvmNm, objects) {
@@ -188,7 +201,7 @@ function generateRegistry(modules) {
             `\t{"${cString(requested)}", ${resolved}},`,
         )
         .join('\n')
-      return `static const struct pgl_static_symbol ${module.name}_symbols[] = {
+      return `static const struct pgl_static_symbol ${module.cName}_symbols[] = {
 ${entries}
 };`
     })
@@ -196,8 +209,8 @@ ${entries}
   const handles = modules
     .map((module) => {
       const magic = module.resolvedSymbols.get('Pg_magic_func')
-      return `\t{"${module.name}.so", ${magic}, ${module.name}_symbols,
-\t sizeof(${module.name}_symbols) / sizeof(${module.name}_symbols[0])},`
+      return `\t{"${module.name}.so", ${magic}, ${module.cName}_symbols,
+\t sizeof(${module.cName}_symbols) / sizeof(${module.cName}_symbols[0])},`
     })
     .join('\n')
   return `/* Generated test artifact input; do not edit. */

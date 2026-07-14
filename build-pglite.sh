@@ -216,6 +216,144 @@ $PGPRELOAD \
 build_regression_test_modules() {
     REGRESS_DIR="src/test/regress"
     REGRESS_IMPORTS_DIR="$INSTALL_FOLDER/include/postgresql/emscripten/extension/imports"
+    STATIC_TEST_DIR="$INSTALL_FOLDER/pglite-static-tests"
+    STATIC_MODULE_ARGS=()
+    PGLITE_STATIC_TEST_LIBS=""
+
+    static_module_c_name() {
+        local name
+
+        name=$(printf '%s' "$1" | sed 's/[^A-Za-z0-9_]/_/g')
+        if [[ ! "$name" =~ ^[A-Za-z] ]]; then
+            name="m_$name"
+        fi
+        printf '%s' "$name"
+    }
+
+    # Build one loadable module twice.  The first compile discovers its
+    # PostgreSQL loader entry points; the second gives those process-local
+    # symbols deterministic names so many modules can coexist in one main
+    # module.  SQL-visible functions retain their ordinary dlsym names in the
+    # generated registry.
+    build_static_module() {
+        local module_dir=$1
+        local module_name=$2
+        shift 2
+        local module_objects=("$@")
+        local c_name
+        local base_cppflags
+        local cppflags
+        local entry
+        local resolved
+        local entry_points=()
+
+        c_name=$(static_module_c_name "$module_name")
+        rm -f "${module_objects[@]}" "$module_dir/$module_name.so"
+        emmake make PORTNAME=emscripten -C "$module_dir" \
+            "$module_name.so" || {
+            echo "error: discovering static module $module_name"
+            exit 42
+        }
+        base_cppflags=$(emmake make -s PORTNAME=emscripten -C "$module_dir" \
+            --eval='pglite-print-cppflags: ; @printf "%s" "$(CPPFLAGS)"' \
+            pglite-print-cppflags 2>/dev/null | tail -n 1)
+        mapfile -t entry_points < <(
+            "$LLVM_NM" --defined-only --extern-only "${module_objects[@]}" \
+                | awk '$2 ~ /^[Tt]$/ && $3 ~ /^_PG_/ {print $3}' \
+                | sort -u
+        )
+
+        cppflags="-DPg_magic_func=pgl_static_${c_name}_Pg_magic_func"
+        for entry in "${entry_points[@]}"; do
+            resolved="pgl_static_${c_name}${entry}"
+            cppflags="$cppflags -D${entry}=${resolved}"
+        done
+        rm -f "${module_objects[@]}" "$module_dir/$module_name.so"
+        emmake make PORTNAME=emscripten \
+            CPPFLAGS="$base_cppflags $cppflags" \
+            -C "$module_dir" "$module_name.so" || {
+            echo "error: building namespaced static module $module_name"
+            exit 43
+        }
+
+        STATIC_MODULE_ARGS+=(
+            --module "$module_name" "${module_objects[@]}"
+        )
+        for entry in "${entry_points[@]}"; do
+            resolved="pgl_static_${c_name}${entry}"
+            STATIC_MODULE_ARGS+=(
+                --alias "$module_name:$entry=$resolved"
+            )
+        done
+    }
+
+    # Discover the exact configured PGXS module set rather than maintaining a
+    # second extension list.  Standalone test programs remain native host
+    # tools; only server modules and their extension data enter the Wasm
+    # artifact.
+    build_static_pgxs_tree() {
+        local tree=$1
+        local install_data=$2
+        local subdirs
+        local subdir
+        local module_dir
+        local values
+        local module_big
+        local modules
+        local objects
+        local shlib_link
+        local extensions
+        local data
+        local data_built
+        local module
+        local object
+        local module_objects=()
+
+        subdirs=$(emmake make -s PGLITE_WITH_PGCRYPTO=1 \
+            PORTNAME=emscripten -C "$tree" \
+            --eval='pglite-print-vars: ; @printf "%s" "$(SUBDIRS)"' \
+            pglite-print-vars 2>/dev/null | tail -n 1)
+        for subdir in $subdirs; do
+            module_dir="$tree/$subdir"
+            values=$(emmake make -s PGLITE_WITH_PGCRYPTO=1 \
+                PORTNAME=emscripten -C "$module_dir" \
+                --eval='pglite-print-vars: ; @printf "%s|%s|%s|%s|%s|%s|%s" "$(MODULE_big)" "$(MODULES)" "$(OBJS)" "$(SHLIB_LINK)" "$(EXTENSION)" "$(DATA)" "$(DATA_built)"' \
+                pglite-print-vars 2>/dev/null | tail -n 1)
+            IFS='|' read -r module_big modules objects shlib_link \
+                extensions data data_built <<<"$values"
+            if [ -n "$module_big" ]; then
+                module_objects=()
+                for object in $objects; do
+                    module_objects+=("$module_dir/$object")
+                done
+                build_static_module "$module_dir" "$module_big" \
+                    "${module_objects[@]}"
+            fi
+            for module in $modules; do
+                build_static_module "$module_dir" "$module" \
+                    "$module_dir/$module.o"
+            done
+            if [ -n "$shlib_link" ]; then
+                PGLITE_STATIC_TEST_LIBS="$PGLITE_STATIC_TEST_LIBS $shlib_link"
+            fi
+            # pgcrypto is deliberately built even though the PostgreSQL core
+            # is configured without OpenSSL.  Its normal PGlite side-module
+            # build supplies these archives explicitly; retain the same
+            # dependency boundary when folding it into the world-test binary.
+            if [ "$module_big" = pgcrypto ]; then
+                PGLITE_STATIC_TEST_LIBS="$PGLITE_STATIC_TEST_LIBS -Wl,--whole-archive -lssl -lcrypto -Wl,--no-whole-archive"
+            fi
+            if [ "$install_data" = true ] && \
+               [ -n "$module_big$modules$extensions$data$data_built" ]; then
+                emmake make PORTNAME=emscripten PROGRAM= \
+                    -C "$module_dir" install || {
+                    echo "error: installing static test module data from $module_dir"
+                    exit 44
+                }
+            fi
+        done
+    }
+
     rm -f "$REGRESS_DIR/regress.o" "$REGRESS_DIR/regress.so"
     emmake make PORTNAME=emscripten \
         CPPFLAGS="-DPg_magic_func=pgl_static_regress_Pg_magic_func" \
@@ -234,6 +372,7 @@ build_regression_test_modules() {
         | sort -u > "$REGRESS_DIR/regress.defs.txt"
     comm -23 "$REGRESS_DIR/regress.undef.txt" "$REGRESS_DIR/regress.defs.txt" \
         > "$REGRESS_IMPORTS_DIR/regress.imports"
+    STATIC_MODULE_ARGS+=(--module regress "$REGRESS_DIR/regress.o")
 
     # Core regression exercises Datums backed by shared buffers. Ordinary
     # Emscripten side modules only understand memory 0, so the test artifact
@@ -247,12 +386,22 @@ build_regression_test_modules() {
         -C src/pl/plpgsql/src install || \
         { echo 'error: building static PL/pgSQL test module' ; exit 34; }
 
-    rm -f src/test/modules/test_dsa/test_dsa.o \
-        src/test/modules/test_dsa/test_dsa.so
-    emmake make PORTNAME=emscripten \
-        CPPFLAGS="-DPg_magic_func=pgl_static_test_dsa_Pg_magic_func" \
-        -C src/test/modules/test_dsa install || \
-        { echo 'error: building static DSA test module' ; exit 38; }
+    STATIC_MODULE_ARGS+=(--module plpgsql src/pl/plpgsql/src/*.o)
+
+    # The earlier single-instance regression artifact needs only test_dsa.
+    # Postmaster artifacts below discover and install the complete configured
+    # world-test module set, which includes test_dsa.
+    if [ "${PGLITE_POSTMASTER:-false}" != true ]; then
+        rm -f src/test/modules/test_dsa/test_dsa.o \
+            src/test/modules/test_dsa/test_dsa.so
+        emmake make PORTNAME=emscripten \
+            CPPFLAGS="-DPg_magic_func=pgl_static_test_dsa_Pg_magic_func" \
+            -C src/test/modules/test_dsa install || \
+            { echo 'error: building static DSA test module' ; exit 38; }
+        STATIC_MODULE_ARGS+=(
+            --module test_dsa src/test/modules/test_dsa/test_dsa.o
+        )
+    fi
 
     rm -f src/backend/replication/libpqwalreceiver/libpqwalreceiver.o \
         src/backend/replication/libpqwalreceiver/libpqwalreceiver.so
@@ -265,17 +414,34 @@ build_regression_test_modules() {
         CPPFLAGS="-Dpg_link_canary_is_frontend=pgl_static_libpq_link_canary_is_frontend" \
         -C src/interfaces/libpq all || \
         { echo 'error: building libpq for the static walreceiver' ; exit 40; }
-
-    STATIC_TEST_DIR="$INSTALL_FOLDER/pglite-static-tests"
-    STATIC_MODULE_ARGS=(
-        --module regress "$REGRESS_DIR/regress.o"
-        --module plpgsql src/pl/plpgsql/src/*.o
-        --module test_dsa src/test/modules/test_dsa/test_dsa.o
+    STATIC_MODULE_ARGS+=(
         --module libpqwalreceiver \
             src/backend/replication/libpqwalreceiver/libpqwalreceiver.o
         --alias \
             libpqwalreceiver:_PG_init=pgl_static_libpqwalreceiver_PG_init
     )
+    if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
+        # Install the already-built contrib archives into the test artifact so
+        # PostgreSQL sees the normal control/SQL/library layout.  Execution is
+        # claimed by the static registry before Emscripten's side-module
+        # loader, keeping every server pointer in the transformed main module.
+        for archive in "$INSTALL_FOLDER"/extensions/*.tar.gz; do
+            [ -f "$archive" ] || continue
+            tar -xzf "$archive" -C "$INSTALL_FOLDER" || {
+                echo "error: installing static contrib archive $archive"
+                exit 45
+            }
+        done
+
+        build_static_pgxs_tree contrib false
+
+        build_static_module src/backend/replication/pgoutput pgoutput \
+            src/backend/replication/pgoutput/pgoutput.o
+        build_static_module src/backend/snowball dict_snowball \
+            src/backend/snowball/*.o
+
+        build_static_pgxs_tree src/test/modules true
+    fi
     for module_dir in src/backend/utils/mb/conversion_procs/*; do
         [ -d "$module_dir" ] || continue
         module_name=$(basename "$module_dir")
@@ -350,7 +516,7 @@ if [ "${PGLITE_BACKEND_ONLY:-false}" = true ]; then
     emmake make PORTNAME=emscripten -C src/backend \
         pglite-exported-functions || exit 58
     PGLITE_EXTRA_OBJS="${PGLITE_STATIC_TEST_OBJECTS:-}" \
-    POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" \
+    POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS ${PGLITE_STATIC_TEST_LIBS:-}" \
         emmake make PORTNAME=emscripten -C src/backend \
         -j"${PGLITE_BUILD_JOBS:-}" pglite || exit 59
     emmake make PORTNAME=emscripten -C src/backend install-pglite || exit 60
@@ -427,5 +593,5 @@ emmake make PORTNAME=emscripten -j"${PGLITE_BUILD_JOBS:-}" -C src/backend pglite
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 PGLITE_EXTRA_OBJS="${PGLITE_STATIC_TEST_OBJECTS:-}" \
-POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" emmake make PORTNAME=emscripten -C src/backend/ -j"${PGLITE_BUILD_JOBS:-}" pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
+POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS ${PGLITE_STATIC_TEST_LIBS:-}" emmake make PORTNAME=emscripten -C src/backend/ -j"${PGLITE_BUILD_JOBS:-}" pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
 emmake make PORTNAME=emscripten -C src/backend/ install-pglite || { echo 'emmake make PORTNAME=emscripten -C src/backend/ install-pglite' ; exit 62; }

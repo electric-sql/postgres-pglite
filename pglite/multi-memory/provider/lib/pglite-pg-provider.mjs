@@ -8,13 +8,7 @@ import {
   readFileSync,
   realpathSync,
 } from 'node:fs'
-import {
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  writeFile,
-} from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { userInfo } from 'node:os'
 import { spawn } from 'node:child_process'
@@ -71,10 +65,14 @@ async function runInitdb(args) {
   }
   await writeFile(
     join(pgdata, CLUSTER_FILE),
-    `${JSON.stringify({
-      schema: PROVIDER_SCHEMA,
-      bootstrapSuperuser: parsed.username,
-    }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        schema: PROVIDER_SCHEMA,
+        bootstrapSuperuser: parsed.username,
+      },
+      null,
+      2,
+    )}\n`,
     { mode: 0o600 },
   )
   console.log(`PGlite PostgreSQL data directory initialized at ${pgdata}`)
@@ -89,9 +87,7 @@ async function runPostgres(args) {
   }
   await removeStaleLifecycle(pgdata)
 
-  const fileSettings = readPostgresqlSettings(
-    join(pgdata, 'postgresql.conf'),
-  )
+  const fileSettings = readPostgresqlSettings(join(pgdata, 'postgresql.conf'))
   const setting = (name, fallback) =>
     parsed.settings.get(name) ?? fileSettings.get(name) ?? fallback
   const port = parsePort(setting('port', process.env.PGPORT ?? '5432'))
@@ -120,9 +116,8 @@ async function runPostgres(args) {
     ).href
   )
   const { PGliteSocketServer } = await import(
-    pathToFileURL(
-      join(config.repoRoot, 'packages/pglite-socket/dist/index.js'),
-    ).href
+    pathToFileURL(join(config.repoRoot, 'packages/pglite-socket/dist/index.js'))
+      .href
   )
   const icuArchive = await readFile(config.icuArchive)
   const postmaster = await PGlitePostmaster.create({
@@ -171,9 +166,9 @@ async function runPostgres(args) {
     if (!shutdownPromise) {
       shutdownPromise = (async () => {
         await socket.stop().catch((error) => console.error(error))
-        await postmaster.shutdown(requestedMode).catch((error) =>
-          console.error(error),
-        )
+        await postmaster
+          .shutdown(requestedMode)
+          .catch((error) => console.error(error))
         return reason
       })()
     }
@@ -320,7 +315,9 @@ async function startServer(pgdata, options) {
       return
     }
     if (!isProcessAlive(child.pid)) {
-      fail(`pg_ctl: server exited before becoming ready; see ${logPath ?? 'stderr'}`)
+      fail(
+        `pg_ctl: server exited before becoming ready; see ${logPath ?? 'stderr'}`,
+      )
     }
     await delay(100)
   }
@@ -330,7 +327,8 @@ async function startServer(pgdata, options) {
 async function stopServer(pgdata, mode, timeout, silent) {
   const state = await readLifecycle(pgdata, false)
   if (!state || !isProcessAlive(state.pid)) {
-    if (!silent) console.error('pg_ctl: PID file does not exist or server is not running')
+    if (!silent)
+      console.error('pg_ctl: PID file does not exist or server is not running')
     process.exitCode = 1
     return
   }
@@ -359,14 +357,34 @@ function parseInitdb(args) {
   let username
   const initdbArgs = []
   const valueOptions = new Set([
-    '-E', '--encoding', '--locale', '--locale-provider', '--icu-locale',
-    '--icu-rules', '--lc-collate', '--lc-ctype', '--lc-messages',
-    '--lc-monetary', '--lc-numeric', '--lc-time', '-U', '--username',
-    '-A', '--auth', '--auth-local', '--auth-host',
+    '-E',
+    '--encoding',
+    '--locale',
+    '--locale-provider',
+    '--icu-locale',
+    '--icu-rules',
+    '--lc-collate',
+    '--lc-ctype',
+    '--lc-messages',
+    '--lc-monetary',
+    '--lc-numeric',
+    '--lc-time',
+    '-U',
+    '--username',
+    '-A',
+    '--auth',
+    '--auth-local',
+    '--auth-host',
   ])
   const flagOptions = new Set([
-    '--allow-group-access', '--data-checksums', '--no-data-checksums',
-    '--debug', '--no-clean', '--no-instructions', '--no-locale', '--no-sync',
+    '--allow-group-access',
+    '--data-checksums',
+    '--no-data-checksums',
+    '--debug',
+    '--no-clean',
+    '--no-instructions',
+    '--no-locale',
+    '--no-sync',
   ])
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -378,18 +396,26 @@ function parseInitdb(args) {
       const value = requiredValue(args, ++i, arg)
       initdbArgs.push(arg, value)
       if (arg === '-U' || arg === '--username') username = value
-    } else if ([...valueOptions].some((name) =>
-      name.startsWith('--') && arg.startsWith(`${name}=`),
-    )) {
+    } else if (
+      [...valueOptions].some(
+        (name) => name.startsWith('--') && arg.startsWith(`${name}=`),
+      )
+    ) {
       initdbArgs.push(arg)
       if (arg.startsWith('--username=')) {
         username = arg.slice('--username='.length)
       }
     } else if (flagOptions.has(arg)) {
       initdbArgs.push(arg)
-    } else if (arg === '--waldir' || arg.startsWith('--waldir=') ||
-               arg === '--pwfile' || arg.startsWith('--pwfile=')) {
-      fail(`initdb: option requires an unimplemented host-path capability: ${arg}`)
+    } else if (
+      arg === '--waldir' ||
+      arg.startsWith('--waldir=') ||
+      arg === '--pwfile' ||
+      arg.startsWith('--pwfile=')
+    ) {
+      fail(
+        `initdb: option requires an unimplemented host-path capability: ${arg}`,
+      )
     } else if (!arg.startsWith('-') && pgdata === undefined) {
       pgdata = arg
     } else {
@@ -402,10 +428,7 @@ function parseInitdb(args) {
   // as the container user to a role that does not exist.
   if (!username) {
     username = process.env.USER || process.env.LOGNAME || userInfo().username
-    initdbArgs.push(
-      '-U',
-      username,
-    )
+    initdbArgs.push('-U', username)
   }
   return { pgdata, initdbArgs, username }
 }
@@ -431,8 +454,11 @@ function parsePostgres(args) {
       startParams.push(arg, value)
       serverArgs.push(arg, value)
       settings.set(
-        arg === '-k' ? 'unix_socket_directories' :
-          arg === '-p' ? 'port' : 'listen_addresses',
+        arg === '-k'
+          ? 'unix_socket_directories'
+          : arg === '-p'
+            ? 'port'
+            : 'listen_addresses',
         value,
       )
     } else if (arg === '-F') {
@@ -486,7 +512,12 @@ function parsePgCtl(args) {
       options = arg.slice('--options='.length)
     } else if (arg === '-s' || arg === '--silent') {
       silent = true
-    } else if (arg === '-w' || arg === '--wait' || arg === '-W' || arg === '--no-wait') {
+    } else if (
+      arg === '-w' ||
+      arg === '--wait' ||
+      arg === '-W' ||
+      arg === '--no-wait'
+    ) {
       // The provider always waits: its lifecycle state is the synchronization contract.
     } else if (!arg.startsWith('-') && action === undefined) {
       action = arg
@@ -510,7 +541,9 @@ function readPostgresqlSettings(path) {
   if (!existsSync(path)) return settings
   for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
     const withoutComment = stripConfigComment(line).trim()
-    const match = /^([A-Za-z_][A-Za-z0-9_.]*)\s*=\s*(.*?)\s*$/.exec(withoutComment)
+    const match = /^([A-Za-z_][A-Za-z0-9_.]*)\s*=\s*(.*?)\s*$/.exec(
+      withoutComment,
+    )
     if (!match) continue
     settings.set(match[1].toLowerCase(), unquoteSetting(match[2]))
   }
@@ -535,7 +568,10 @@ function unquoteSetting(value) {
 }
 
 function splitSettingList(value) {
-  return unquoteSetting(String(value)).split(',').map((item) => item.trim()).filter(Boolean)
+  return unquoteSetting(String(value))
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function recordSetting(settings, assignment) {
@@ -573,6 +609,18 @@ function splitShellWords(text) {
 }
 
 async function removeStaleLifecycle(pgdata) {
+  // Physical backups and filesystem clones can copy the provider's runtime
+  // marker.  Unlike CLUSTER_FILE, this file describes one running host
+  // process and must not be inherited by another data-directory path.  Drop
+  // that foreign marker before considering whether its PID is live: it may
+  // legitimately still identify the source cluster.
+  const statePath = join(pgdata, STATE_FILE)
+  if (existsSync(statePath)) {
+    const copiedState = JSON.parse(await readFile(statePath, 'utf8'))
+    if (copiedState.pgdata !== pgdata) {
+      await rm(statePath, { force: true })
+    }
+  }
   const state = await readLifecycle(pgdata, false)
   if (state && isProcessAlive(state.pid)) {
     fail(`provider: live server ${state.pid} already owns ${pgdata}`)
@@ -580,7 +628,10 @@ async function removeStaleLifecycle(pgdata) {
   if (state) await rm(join(pgdata, STATE_FILE), { force: true })
   const pidPath = join(pgdata, 'postmaster.pid')
   if (existsSync(pidPath)) {
-    const pid = Number.parseInt(readFileSync(pidPath, 'utf8').split(/\r?\n/, 1)[0], 10)
+    const pid = Number.parseInt(
+      readFileSync(pidPath, 'utf8').split(/\r?\n/, 1)[0],
+      10,
+    )
     if (Number.isInteger(pid) && isProcessAlive(pid)) {
       fail(`provider: live postmaster PID ${pid} already owns ${pgdata}`)
     }
@@ -590,7 +641,8 @@ async function removeStaleLifecycle(pgdata) {
 
 async function requireLiveLifecycle(pgdata) {
   const state = await readLifecycle(pgdata, true)
-  if (!isProcessAlive(state.pid)) fail(`provider: server PID ${state.pid} is not running`)
+  if (!isProcessAlive(state.pid))
+    fail(`provider: server PID ${state.pid} is not running`)
   return state
 }
 
@@ -598,8 +650,11 @@ async function readLifecycle(pgdata, required) {
   const path = join(pgdata, STATE_FILE)
   try {
     const state = JSON.parse(await readFile(path, 'utf8'))
-    if (state.schema !== PROVIDER_SCHEMA || state.pgdata !== pgdata ||
-        !Number.isInteger(state.pid)) {
+    if (
+      state.schema !== PROVIDER_SCHEMA ||
+      state.pgdata !== pgdata ||
+      !Number.isInteger(state.pid)
+    ) {
       fail(`provider: invalid lifecycle state: ${path}`)
     }
     return state
@@ -612,7 +667,9 @@ async function readLifecycle(pgdata, required) {
 async function writeLifecycle(pgdata, state) {
   const path = join(pgdata, STATE_FILE)
   const temporary = `${path}.${process.pid}.tmp`
-  await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 })
+  await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, {
+    mode: 0o600,
+  })
   await rename(temporary, path)
 }
 
@@ -659,7 +716,9 @@ function printVersionOrHelp(program, args) {
     return true
   }
   if (args.length === 1 && ['--help', '-?'].includes(args[0])) {
-    console.log(`${program} (PostgreSQL) ${VERSION} PGlite test-provider adapter`)
+    console.log(
+      `${program} (PostgreSQL) ${VERSION} PGlite test-provider adapter`,
+    )
     return true
   }
   return false
@@ -679,8 +738,16 @@ function requiredValue(args, index, option) {
 }
 
 function validateConfig(value) {
-  assert.equal(value.schema, PROVIDER_SCHEMA, 'unsupported provider config schema')
-  assert.equal(value.architecture, process.arch, 'provider architecture mismatch')
+  assert.equal(
+    value.schema,
+    PROVIDER_SCHEMA,
+    'unsupported provider config schema',
+  )
+  assert.equal(
+    value.architecture,
+    process.arch,
+    'provider architecture mismatch',
+  )
   for (const path of [
     value.repoRoot,
     value.icuArchive,
