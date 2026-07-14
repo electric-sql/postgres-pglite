@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-OUT=${ROOT}/.out/phase0
+OUT=${ROOT}/.out/transformer-tests
 
 rm -rf "${OUT}"
 mkdir -p "${OUT}"
@@ -203,4 +203,4 @@ node20 "${ROOT}/tests/capability-tests.mjs" \
 node22 "${ROOT}/tests/capability-tests.mjs" "${OUT}/capability.wasm"
 node24 "${ROOT}/tests/capability-tests.mjs" "${OUT}/capability.wasm"
 
-echo 'PGlite multi-memory Phase 0: PASS'
+echo 'PGlite multi-memory transformer tests: PASS'

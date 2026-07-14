@@ -40,7 +40,7 @@ case "${STATE}" in
     exit 0
     ;;
   BLOCKED)
-    if [ "${PGLITE_PHASE7_RUN_BLOCKED:-false}" != true ]; then
+    if [ "${PGLITE_POSTGRES_TEST_RUN_BLOCKED:-false}" != true ]; then
       echo "PGlite capability: BLOCKED ${SUITE} (recorded, not executed)"
       node22 "${PROVIDER_ROOT}/lib/pglite-test-capabilities.mjs" \
         record suite "${SUITE}" "${STATE}" blocked 0 0 "${TARGET}"

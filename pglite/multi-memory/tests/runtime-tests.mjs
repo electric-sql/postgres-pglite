@@ -398,11 +398,7 @@ for (const destination of domains) {
   for (const source of domains) {
     new Uint8Array(source.memory.buffer, 300, 16).set(copyBytes)
     new Uint8Array(destination.memory.buffer, 400, 16).fill(0)
-    transformed.bulk_copy(
-      destination.pointer(400),
-      source.pointer(300),
-      16,
-    )
+    transformed.bulk_copy(destination.pointer(400), source.pointer(300), 16)
     assert.deepEqual(
       [...new Uint8Array(destination.memory.buffer, 400, 16)],
       copyBytes,
@@ -418,9 +414,8 @@ for (const destination of domains) {
 }
 
 const aliased = makeMemory()
-const aliasExports = (
-  await instantiateTransformed(aliased, aliased, aliased)
-).instance.exports
+const aliasExports = (await instantiateTransformed(aliased, aliased, aliased))
+  .instance.exports
 const aliasView = new Uint8Array(aliased.buffer)
 aliasView.set([0, 1, 2, 3, 4, 5, 6, 7], 600)
 aliasExports.bulk_copy(tagGlobal(602), 600, 6)
@@ -490,9 +485,8 @@ const random = () => {
 }
 const model = new Uint8Array(4096)
 const fuzzMemory = makeMemory()
-const fuzz = (
-  await instantiateTransformed(fuzzMemory, fuzzMemory, fuzzMemory)
-).instance.exports
+const fuzz = (await instantiateTransformed(fuzzMemory, fuzzMemory, fuzzMemory))
+  .instance.exports
 const actual = new Uint8Array(fuzzMemory.buffer)
 for (let i = 0; i < 2000; i++) {
   const address = 8 + (random() % 4000)

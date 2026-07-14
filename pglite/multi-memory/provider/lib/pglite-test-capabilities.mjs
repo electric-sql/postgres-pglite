@@ -33,7 +33,7 @@ if (command === 'classify') {
 }
 
 function validateInputs() {
-  assert.equal(manifest.schema, 2, 'unsupported Phase 7 manifest schema')
+  assert.equal(manifest.schema, 2, 'unsupported test capability schema')
   assert.equal(
     manifest.postgresRevision,
     config.postgresRevision,
@@ -161,7 +161,7 @@ async function runProve(proveArgs) {
     }
     if (
       rule.state === 'BLOCKED' &&
-      process.env.PGLITE_PHASE7_RUN_BLOCKED !== 'true'
+      process.env.PGLITE_POSTGRES_TEST_RUN_BLOCKED !== 'true'
     ) {
       console.log(`PGlite capability: BLOCKED ${path} (recorded, not executed)`)
       await recordEvent({

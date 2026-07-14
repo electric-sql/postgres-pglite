@@ -6,26 +6,32 @@ import { Worker } from 'node:worker_threads'
 
 const bytes = await readFile(process.argv[2])
 if (process.argv.includes('--expect-reject')) {
-  assert.equal(WebAssembly.validate(bytes), false,
-    `${process.version} unexpectedly accepted the multi-memory artifact`)
+  assert.equal(
+    WebAssembly.validate(bytes),
+    false,
+    `${process.version} unexpectedly accepted the multi-memory artifact`,
+  )
   console.log(`${process.version} rejection: ok`)
   process.exit(0)
 }
 
 assert.ok(Number(process.versions.node.split('.')[0]) >= 22)
 assert.equal(WebAssembly.validate(bytes), true)
-const memory = (maximum) => new WebAssembly.Memory({ initial: 1, maximum, shared: true })
+const memory = (maximum) =>
+  new WebAssembly.Memory({ initial: 1, maximum, shared: true })
 const globalMemory = memory(16384)
 const privateA = memory(32768)
 const privateB = memory(32768)
 const scopedA = memory(16384)
 const scopedB = memory(16384)
 const module = new WebAssembly.Module(bytes)
-const imports = (privateMemory, scopedMemory) => ({ cap: {
-  private_memory: privateMemory,
-  global_memory: globalMemory,
-  scoped_memory: scopedMemory,
-} })
+const imports = (privateMemory, scopedMemory) => ({
+  cap: {
+    private_memory: privateMemory,
+    global_memory: globalMemory,
+    scoped_memory: scopedMemory,
+  },
+})
 const a = new WebAssembly.Instance(module, imports(privateA, scopedA))
 const b = new WebAssembly.Instance(module, imports(privateB, scopedB))
 
@@ -51,12 +57,25 @@ privateA.grow(1)
 assert.equal(a.exports.size_private(), before + 1)
 
 await new Promise((resolve, reject) => {
-  const worker = new Worker(new URL('./capability-worker.mjs', import.meta.url), {
-    workerData: { module, privateMemory: privateB, globalMemory, scopedMemory: scopedB },
-  })
-  worker.once('message', (result) => result.ok ? resolve() : reject(new Error(result.error)))
+  const worker = new Worker(
+    new URL('./capability-worker.mjs', import.meta.url),
+    {
+      workerData: {
+        module,
+        privateMemory: privateB,
+        globalMemory,
+        scopedMemory: scopedB,
+      },
+    },
+  )
+  worker.once('message', (result) =>
+    result.ok ? resolve() : reject(new Error(result.error)),
+  )
   worker.once('error', reject)
-  worker.once('exit', (code) => code && reject(new Error(`capability worker exited ${code}`)))
+  worker.once(
+    'exit',
+    (code) => code && reject(new Error(`capability worker exited ${code}`)),
+  )
 })
 assert.equal(a.exports.load_global(128), 51)
 
@@ -79,7 +98,9 @@ const notify = async (value) => {
   })
   assert.equal(await result.value, 'ok')
   await new Promise((resolve, reject) => {
-    worker.once('exit', (code) => code ? reject(new Error(`notifier exited ${code}`)) : resolve())
+    worker.once('exit', (code) =>
+      code ? reject(new Error(`notifier exited ${code}`)) : resolve(),
+    )
     worker.once('error', reject)
   })
   assert.equal(Atomics.load(waitView, 0), value)
@@ -95,5 +116,10 @@ const rssBefore = process.memoryUsage().rss
 const reservations = Array.from({ length: 8 }, () => memory(16384))
 const rssDelta = process.memoryUsage().rss - rssBefore
 assert.ok(reservations.length === 8)
-assert.ok(rssDelta < 128 * 1024 * 1024, `unexpected shared-memory RSS delta ${rssDelta}`)
-console.log(`${process.version} capabilities: ok; eight-memory RSS delta=${rssDelta}`)
+assert.ok(
+  rssDelta < 128 * 1024 * 1024,
+  `unexpected shared-memory RSS delta ${rssDelta}`,
+)
+console.log(
+  `${process.version} capabilities: ok; eight-memory RSS delta=${rssDelta}`,
+)
