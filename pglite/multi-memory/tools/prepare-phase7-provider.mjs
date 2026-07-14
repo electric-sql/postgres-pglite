@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict'
-import { chmod, cp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  cp,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 
@@ -28,8 +36,8 @@ await rm(provider, { recursive: true, force: true })
 await mkdir(resultsRoot, { recursive: true })
 await cp(source, provider, { recursive: true })
 await Promise.all(
-  ['initdb', 'postgres', 'pg_ctl'].map((name) =>
-    chmod(join(provider, 'bin', name), 0o755),
+  ['initdb', 'postgres', 'pg_ctl', 'pglite-test-capability', 'prove'].map(
+    (name) => chmod(join(provider, 'bin', name), 0o755),
   ),
 )
 
@@ -66,6 +74,9 @@ const config = {
   privateMaximumMemory: 1024 * 1024 * 1024,
   globalMaximumMemory: 1024 * 1024 * 1024,
   resultsRoot,
+  capabilityEvents: join(resultsRoot, 'capabilities', 'events'),
+  postgresSource: join(native, 'source'),
+  postgresBuild: join(native, 'build'),
   mounts: [
     { root: join(phase6, 'icu'), path: '/pglite/icu' },
     { root: phase7, path: phase7 },

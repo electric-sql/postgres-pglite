@@ -39,7 +39,13 @@ mkdir -p "${OUT}/results/raw-${TARGET}"
 "${MM_ROOT}/tests/phase7-provider-lifecycle.sh" \
   "${PROVIDER}" "${OUT}/results/raw-${TARGET}"
 set +e
-make -C "${NATIVE}/build" -j"${JOBS}" "${TARGET}" \
+MAKE_OPTIONS=(-C "${NATIVE}/build" -j"${JOBS}")
+if [ "${TARGET}" = check-world ]; then
+  MAKE_OPTIONS+=(-k)
+fi
+make "${MAKE_OPTIONS[@]}" "${TARGET}" \
+  PGLITE_TEST_CAPABILITY_RUNNER="${PROVIDER}/bin/pglite-test-capability" \
+  PROVE="${PROVIDER}/bin/prove" \
   2>&1 | tee "${OUT}/results/${TARGET}.log"
 STATUS=${PIPESTATUS[0]}
 set -e

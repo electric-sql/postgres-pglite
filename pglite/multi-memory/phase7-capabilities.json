@@ -1,8 +1,18 @@
 {
-  "schema": 1,
+  "schema": 2,
   "profile": "node-multi-memory-phase7",
   "revisionPolicy": "provider-config-exact-head",
   "states": ["SUPPORTED", "UNSUPPORTED", "BLOCKED"],
+  "buildFeatures": {
+    "nodeOnly": true,
+    "ssl": false,
+    "gss": false,
+    "ldap": false,
+    "selinux": false,
+    "nativeChildPids": false,
+    "dynamicSideModules": false,
+    "hostCommandExecution": false
+  },
   "capabilities": {
     "core-regression": {
       "state": "SUPPORTED",
@@ -14,7 +24,7 @@
     },
     "replication": {
       "state": "BLOCKED",
-      "reason": "WAL sender/receiver and multi-cluster lifecycle have not completed the Phase 7 gate"
+      "reason": "WAL sender/receiver, recovery commands, and multi-cluster lifecycle have not completed the Phase 7 gate"
     },
     "dynamic-modules": {
       "state": "BLOCKED",
@@ -36,5 +46,151 @@
       "state": "UNSUPPORTED",
       "reason": "the artifact exposes its packaged libc/ICU locale inventory rather than the host inventory"
     }
+  },
+  "testPolicy": {
+    "defaultState": "SUPPORTED",
+    "blockedExecution": "record-unless-PGLITE_PHASE7_RUN_BLOCKED=true",
+    "rules": [
+      {
+        "id": "amcheck-pitr-system-command",
+        "match": "exact",
+        "path": "contrib/amcheck/t/005_pitr.pl",
+        "state": "BLOCKED",
+        "reason": "PITR requires archive_command and restore_command host command execution, which pgl_system deliberately rejects."
+      },
+      {
+        "id": "native-initdb-cli",
+        "match": "prefix",
+        "path": "src/bin/initdb",
+        "state": "UNSUPPORTED",
+        "reason": "The provider adapter implements cluster initialization for regression harnesses, not native initdb filesystem, permission, and option-surface conformance."
+      },
+      {
+        "id": "pg-upgrade-multiple-binaries",
+        "match": "prefix",
+        "path": "src/bin/pg_upgrade",
+        "state": "UNSUPPORTED",
+        "reason": "pg_upgrade requires executable-compatible old and new PostgreSQL installations; the provider supplies one PG18 Wasm artifact."
+      },
+      {
+        "id": "ssl-server",
+        "match": "prefix",
+        "path": "src/test/ssl",
+        "state": "UNSUPPORTED",
+        "reason": "The Phase 7 Wasm server is configured without SSL."
+      },
+      {
+        "id": "kerberos-server",
+        "match": "prefix",
+        "path": "src/test/kerberos",
+        "state": "UNSUPPORTED",
+        "reason": "The Phase 7 Wasm server is configured without GSSAPI/Kerberos."
+      },
+      {
+        "id": "ldap-server",
+        "match": "prefix",
+        "path": "src/test/ldap",
+        "state": "UNSUPPORTED",
+        "reason": "The Phase 7 Wasm server is configured without LDAP and the test LDAP daemon."
+      },
+      {
+        "id": "selinux-extension",
+        "match": "prefix",
+        "path": "contrib/sepgsql",
+        "state": "UNSUPPORTED",
+        "reason": "The Wasm build has no SELinux runtime or sepgsql module."
+      },
+      {
+        "id": "oauth-validator-module",
+        "match": "prefix",
+        "path": "src/test/modules/oauth_validator",
+        "state": "UNSUPPORTED",
+        "reason": "The Wasm build is configured without OAuth and does not include its validator module."
+      },
+      {
+        "id": "ldap-password-module",
+        "match": "prefix",
+        "path": "src/test/modules/ldap_password_func",
+        "state": "UNSUPPORTED",
+        "reason": "The Wasm build is configured without LDAP and does not include its password-hook test module."
+      },
+      {
+        "id": "ssl-passphrase-module",
+        "match": "prefix",
+        "path": "src/test/modules/ssl_passphrase_callback",
+        "state": "UNSUPPORTED",
+        "reason": "The Wasm build is configured without SSL and does not include its passphrase callback module."
+      },
+      {
+        "id": "exec-close-on-exec",
+        "match": "prefix",
+        "path": "src/test/modules/test_cloexec",
+        "state": "UNSUPPORTED",
+        "reason": "The provider uses Workers and virtual descriptors rather than native fork/exec file-descriptor inheritance."
+      },
+      {
+        "id": "object-access-native-pids",
+        "match": "prefix",
+        "path": "src/test/modules/test_oat_hooks",
+        "state": "UNSUPPORTED",
+        "reason": "The test observes native backend child PIDs, while PGlite backends use process-registry IDs."
+      },
+      {
+        "id": "injection-points-disabled",
+        "match": "prefix",
+        "path": "src/test/modules/injection_points",
+        "state": "UNSUPPORTED",
+        "reason": "The Phase 7 server is not configured with PostgreSQL injection points."
+      },
+      {
+        "id": "recovery-replication",
+        "match": "prefix",
+        "path": "src/test/recovery",
+        "state": "BLOCKED",
+        "reason": "The recovery suite requires multi-cluster replication, PITR, archive commands, and recovery utilities not yet through the Phase 7 gate."
+      },
+      {
+        "id": "logical-replication",
+        "match": "prefix",
+        "path": "src/test/subscription",
+        "state": "BLOCKED",
+        "reason": "The logical replication multi-cluster suite has not yet completed the Phase 7 gate."
+      },
+      {
+        "id": "basebackup-replication",
+        "match": "prefix",
+        "path": "src/bin/pg_basebackup",
+        "state": "BLOCKED",
+        "reason": "The complete pg_basebackup replication and recovery suite has not yet completed the Phase 7 gate."
+      },
+      {
+        "id": "rewind-recovery",
+        "match": "prefix",
+        "path": "src/bin/pg_rewind",
+        "state": "BLOCKED",
+        "reason": "pg_rewind requires divergent multi-cluster recovery lifecycle that has not yet completed the Phase 7 gate."
+      },
+      {
+        "id": "test-decoding-replication",
+        "match": "prefix",
+        "path": "contrib/test_decoding",
+        "state": "BLOCKED",
+        "reason": "The logical decoding replication suite has not yet completed the Phase 7 gate."
+      },
+      {
+        "id": "archive-shell-command",
+        "match": "prefix",
+        "path": "contrib/basic_archive",
+        "state": "BLOCKED",
+        "reason": "Archive tests require host command execution that pgl_system currently rejects."
+      },
+      {
+        "id": "basebackup-shell-command",
+        "match": "prefix",
+        "path": "contrib/basebackup_to_shell",
+        "state": "BLOCKED",
+        "reason": "The module and tests invoke host shell commands, which pgl_system currently rejects."
+      }
+    ]
   }
 }

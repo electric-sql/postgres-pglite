@@ -921,7 +921,7 @@ define _create_recursive_target
 .PHONY: $(1)-$(2)-recurse
 $(1): $(1)-$(2)-recurse
 $(1)-$(2)-recurse: $(if $(filter all install check installcheck, $(3)), submake-generated-headers) $(if $(filter check, $(3)), temp-install)
-	$$(MAKE) -C $(2) $(3)
+	$(if $(and $(filter check,$(3)),$(PGLITE_TEST_CAPABILITY_RUNNER)),$(PGLITE_TEST_CAPABILITY_RUNNER) --suite '$(if $(subdir),$(subdir)/)$(2)' --target '$(3)' --) $$(MAKE) -C $(2) $(3)
 endef
 # Note that the use of $$ on the last line above is important; we want
 # $(MAKE) to be evaluated when the rule is run, not when the $(eval) is run
