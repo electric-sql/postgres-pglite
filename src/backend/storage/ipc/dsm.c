@@ -672,11 +672,44 @@ dsm_create_in_scope(Size size, int flags, PglSharedScopeKind scope)
 	return (dsm_segment *) seg;
 }
 
+/*
+ * PGlite fence: the hierarchical variant selects a generation-checked scope
+ * instance rather than only a scope kind.  The libc layer owns validation,
+ * parentage, and allocation accounting.
+ */
+dsm_segment *
+dsm_create_in_scope_handle(Size size, int flags, PglSharedScopeHandle scope)
+{
+	dsm_segment *volatile seg = NULL;
+	PglSharedScopeHandle previous_scope;
+
+	if (scope == PGL_SHARED_SCOPE_INVALID)
+		return dsm_create(size, flags);
+	previous_scope = pgl_shm_scope_enter(scope);
+	PG_TRY();
+	{
+		seg = dsm_create(size, flags);
+	}
+	PG_FINALLY();
+	{
+		pgl_shm_scope_leave(previous_scope);
+	}
+	PG_END_TRY();
+	return (dsm_segment *) seg;
+}
+
 PglSharedScopeKind
 dsm_segment_scope(dsm_segment *seg)
 {
 	Assert(seg->mapped_address != NULL);
 	return pgl_shm_scope_for_pointer(seg->mapped_address);
+}
+
+PglSharedScopeHandle
+dsm_segment_scope_handle(dsm_segment *seg)
+{
+	Assert(seg->mapped_address != NULL);
+	return pgl_shm_scope_handle_for_pointer(seg->mapped_address);
 }
 #endif
 

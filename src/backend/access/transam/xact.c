@@ -215,6 +215,10 @@ typedef struct TransactionStateData
 	bool		parallelChildXact;	/* is any parent transaction parallel? */
 	bool		chain;			/* start a new block after this one */
 	bool		topXidLogged;	/* for a subxact: is top-level XID logged? */
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: generation-checked owner in the root's memory 2. */
+	PglSharedScopeHandle pgl_scope_handle;
+#endif
 	struct TransactionStateData *parent;	/* back link to parent */
 } TransactionStateData;
 
@@ -2154,6 +2158,25 @@ StartTransaction(void)
 	AtStart_Memory();
 	AtStart_ResourceOwner();
 
+#ifdef __PGLITE_POSTMASTER__
+	/*
+	 * PGlite fence: InitPostgres starts one bootstrap transaction before the
+	 * session scope exists.  All later client transactions become children of
+	 * the active session scope.  Parallel workers use the leader's existing
+	 * hierarchy and therefore do not create competing scope instances.
+	 */
+	if (!IsParallelWorker() &&
+		pgl_shm_scope_current() != PGL_SHARED_SCOPE_INVALID)
+	{
+		s->pgl_scope_handle =
+			pgl_shm_scope_create(PGL_SHARED_SCOPE_TRANSACTION,
+								 pgl_shm_scope_current());
+		if (s->pgl_scope_handle == PGL_SHARED_SCOPE_INVALID)
+			elog(ERROR, "could not create PGlite transaction memory scope");
+		(void) pgl_shm_scope_enter(s->pgl_scope_handle);
+	}
+#endif
+
 	/*
 	 * Assign a new LocalTransactionId, and combine it with the proc number to
 	 * form a virtual transaction id.
@@ -2485,6 +2508,15 @@ CommitTransaction(void)
 
 	AtCommit_Memory();
 
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: PostgreSQL cleanup has detached every query child. */
+	if (s->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
+	{
+		(void) pgl_shm_scope_close(s->pgl_scope_handle);
+		s->pgl_scope_handle = PGL_SHARED_SCOPE_INVALID;
+	}
+#endif
+
 	s->fullTransactionId = InvalidFullTransactionId;
 	s->subTransactionId = InvalidSubTransactionId;
 	s->nestingLevel = 0;
@@ -2781,6 +2813,15 @@ PrepareTransaction(void)
 
 	AtCommit_Memory();
 
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: PREPARE also ends this backend-local scope owner. */
+	if (s->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
+	{
+		(void) pgl_shm_scope_close(s->pgl_scope_handle);
+		s->pgl_scope_handle = PGL_SHARED_SCOPE_INVALID;
+	}
+#endif
+
 	s->fullTransactionId = InvalidFullTransactionId;
 	s->subTransactionId = InvalidSubTransactionId;
 	s->nestingLevel = 0;
@@ -3031,6 +3072,15 @@ CleanupTransaction(void)
 	TopTransactionResourceOwner = NULL;
 
 	AtCleanup_Memory();			/* and transaction memory */
+
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: abort closes every descendant after portal cleanup. */
+	if (s->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
+	{
+		(void) pgl_shm_scope_close(s->pgl_scope_handle);
+		s->pgl_scope_handle = PGL_SHARED_SCOPE_INVALID;
+	}
+#endif
 
 	s->fullTransactionId = InvalidFullTransactionId;
 	s->subTransactionId = InvalidSubTransactionId;
@@ -5081,6 +5131,20 @@ StartSubTransaction(void)
 	 */
 	AtSubStart_Memory();
 	AtSubStart_ResourceOwner();
+
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: a savepoint owns a child scope of its transaction. */
+	if (!IsParallelWorker() &&
+		s->parent->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
+	{
+		s->pgl_scope_handle =
+			pgl_shm_scope_create(PGL_SHARED_SCOPE_SUBTRANSACTION,
+								 s->parent->pgl_scope_handle);
+		if (s->pgl_scope_handle == PGL_SHARED_SCOPE_INVALID)
+			elog(ERROR, "could not create PGlite subtransaction memory scope");
+		(void) pgl_shm_scope_enter(s->pgl_scope_handle);
+	}
+#endif
 	AfterTriggerBeginSubXact();
 
 	s->state = TRANS_INPROGRESS;
@@ -5206,6 +5270,18 @@ CommitSubTransaction(void)
 	s->curTransactionOwner = NULL;
 
 	AtSubCommit_Memory();
+
+#ifdef __PGLITE_POSTMASTER__
+	/*
+	 * PGlite fence: committed portal/query children and any eligible extents
+	 * move to the parent transaction before the savepoint scope is retired.
+	 */
+	if (s->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
+	{
+		(void) pgl_shm_scope_promote(s->pgl_scope_handle);
+		s->pgl_scope_handle = PGL_SHARED_SCOPE_INVALID;
+	}
+#endif
 
 	s->state = TRANS_DEFAULT;
 
@@ -5399,6 +5475,15 @@ CleanupSubTransaction(void)
 	s->curTransactionOwner = NULL;
 
 	AtSubCleanup_Memory();
+
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: abort drops the savepoint scope and all descendants. */
+	if (s->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
+	{
+		(void) pgl_shm_scope_close(s->pgl_scope_handle);
+		s->pgl_scope_handle = PGL_SHARED_SCOPE_INVALID;
+	}
+#endif
 
 	s->state = TRANS_DEFAULT;
 

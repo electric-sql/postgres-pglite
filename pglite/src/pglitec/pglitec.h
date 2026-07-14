@@ -81,10 +81,37 @@ typedef enum PglSharedScopeKind
 	PGL_SHARED_SCOPE_SESSION,
 	PGL_SHARED_SCOPE_TRANSACTION,
 	PGL_SHARED_SCOPE_SUBTRANSACTION,
+	PGL_SHARED_SCOPE_PORTAL,
 	PGL_SHARED_SCOPE_QUERY,
 	PGL_SHARED_SCOPE_PARALLEL_CONTEXT
 } PglSharedScopeKind;
 
+typedef uint64_t PglSharedScopeHandle;
+
+#define PGL_SHARED_SCOPE_INVALID UINT64_C(0)
+
+typedef enum PglSharedScopeState
+{
+	PGL_SHARED_SCOPE_UNUSED = 0,
+	PGL_SHARED_SCOPE_ACTIVE,
+	PGL_SHARED_SCOPE_CLOSING,
+	PGL_SHARED_SCOPE_DEAD
+} PglSharedScopeState;
+
+PglSharedScopeHandle pgl_shm_scope_root(void);
+PglSharedScopeHandle pgl_shm_scope_create(PglSharedScopeKind kind,
+										  PglSharedScopeHandle parent);
+PglSharedScopeHandle pgl_shm_scope_enter(PglSharedScopeHandle scope);
+void pgl_shm_scope_leave(PglSharedScopeHandle previous_scope);
+int pgl_shm_scope_close(PglSharedScopeHandle scope);
+int pgl_shm_scope_promote(PglSharedScopeHandle scope);
+int pgl_shm_scope_worker_attach(PglSharedScopeHandle scope);
+int pgl_shm_scope_worker_detach(PglSharedScopeHandle scope);
+PglSharedScopeHandle pgl_shm_scope_current(void);
+PglSharedScopeHandle pgl_shm_scope_handle_for_pointer(const void *address);
+uint32_t pgl_shm_scope_count(PglSharedScopeKind kind,
+							 PglSharedScopeState state);
+uint64_t pgl_shm_scope_bytes(PglSharedScopeKind kind);
 PglSharedScopeKind pgl_shm_scope_push(PglSharedScopeKind scope);
 void pgl_shm_scope_pop(PglSharedScopeKind previous_scope);
 PglSharedScopeKind pgl_shm_scope_for_pointer(const void *address);

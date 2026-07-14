@@ -53,6 +53,10 @@ typedef struct QueryDesc
 
 	/* This is always set NULL by the core system, but plugins can change it */
 	struct Instrumentation *totaltime;	/* total time spent in ExecutorRun */
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: scope retained across suspended portal execution. */
+	PglSharedScopeHandle pgl_scope_handle;
+#endif
 } QueryDesc;
 
 /* in pquery.c */

@@ -193,6 +193,14 @@ CreateParallelContext(const char *library_name, const char *function_name,
 	pcxt->library_name = pstrdup(library_name);
 	pcxt->function_name = pstrdup(function_name);
 	pcxt->error_context_stack = error_context_stack;
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: parallel DSM/DSA is owned by this context instance. */
+	pcxt->pgl_scope_handle =
+		pgl_shm_scope_create(PGL_SHARED_SCOPE_PARALLEL_CONTEXT,
+							 pgl_shm_scope_current());
+	if (pcxt->pgl_scope_handle == PGL_SHARED_SCOPE_INVALID)
+		elog(ERROR, "could not create PGlite parallel memory scope");
+#endif
 	shm_toc_initialize_estimator(&pcxt->estimator);
 	dlist_push_head(&pcxt_list, &pcxt->node);
 
@@ -329,9 +337,9 @@ InitializeParallelDSM(ParallelContext *pcxt)
 		 * PGlite fence: the parallel-context DSM and every DSA extension it
 		 * owns stay in the leader's root-scoped memory.
 		 */
-		pcxt->seg = dsm_create_in_scope(segsize,
-										 DSM_CREATE_NULL_IF_MAXSEGMENTS,
-										 PGL_SHARED_SCOPE_PARALLEL_CONTEXT);
+		pcxt->seg = dsm_create_in_scope_handle(segsize,
+											DSM_CREATE_NULL_IF_MAXSEGMENTS,
+											pcxt->pgl_scope_handle);
 #else
 		pcxt->seg = dsm_create(segsize, DSM_CREATE_NULL_IF_MAXSEGMENTS);
 #endif
@@ -1028,6 +1036,15 @@ DestroyParallelContext(ParallelContext *pcxt)
 		pcxt->worker = NULL;
 	}
 
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: workers are gone and DSM detach callbacks have run. */
+	if (pcxt->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
+	{
+		(void) pgl_shm_scope_close(pcxt->pgl_scope_handle);
+		pcxt->pgl_scope_handle = PGL_SHARED_SCOPE_INVALID;
+	}
+#endif
+
 	/* Free memory. */
 	pfree(pcxt->library_name);
 	pfree(pcxt->function_name);
@@ -1377,6 +1394,11 @@ ParallelWorkerMain(Datum main_arg)
 	ParallelLeaderPid = fps->parallel_leader_pid;
 	ParallelLeaderProcNumber = fps->parallel_leader_proc_number;
 	before_shmem_exit(ParallelWorkerShutdown, PointerGetDatum(seg));
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: close cannot recycle this scope while a worker uses it. */
+	if (pgl_shm_scope_worker_attach(dsm_segment_scope_handle(seg)) != 0)
+		elog(ERROR, "could not attach PGlite parallel worker memory scope");
+#endif
 
 	/*
 	 * Now we can find and attach to the error queue provided for us.  That's
@@ -1630,11 +1652,16 @@ ParallelWorkerReportLastRecEnd(XLogRecPtr last_xlog_end)
 static void
 ParallelWorkerShutdown(int code, Datum arg)
 {
+	dsm_segment *seg = (dsm_segment *) DatumGetPointer(arg);
+
 	SendProcSignal(ParallelLeaderPid,
 				   PROCSIG_PARALLEL_MESSAGE,
 				   ParallelLeaderProcNumber);
 
-	dsm_detach((dsm_segment *) DatumGetPointer(arg));
+#ifdef __PGLITE_POSTMASTER__
+	(void) pgl_shm_scope_worker_detach(dsm_segment_scope_handle(seg));
+#endif
+	dsm_detach(seg);
 }
 
 /*

@@ -18,6 +18,9 @@
 #include <limits.h>
 
 #include "access/xact.h"
+#ifdef __PGLITE_POSTMASTER__
+#include "access/parallel.h"
+#endif
 #include "commands/prepare.h"
 #include "executor/executor.h"
 #include "executor/tstoreReceiver.h"
@@ -93,6 +96,23 @@ CreateQueryDesc(PlannedStmt *plannedstmt,
 	qd->planstate = NULL;
 	qd->totaltime = NULL;
 
+#ifdef __PGLITE_POSTMASTER__
+	/*
+	 * PGlite fence: QueryDesc already follows executor/portal lifetime, so it
+	 * is the narrowest reliable owner for query-scoped shared allocations.
+	 */
+	qd->pgl_scope_handle = PGL_SHARED_SCOPE_INVALID;
+	if (!IsParallelWorker() &&
+		pgl_shm_scope_current() != PGL_SHARED_SCOPE_INVALID)
+	{
+		qd->pgl_scope_handle =
+			pgl_shm_scope_create(PGL_SHARED_SCOPE_QUERY,
+								 pgl_shm_scope_current());
+		if (qd->pgl_scope_handle == PGL_SHARED_SCOPE_INVALID)
+			elog(ERROR, "could not create PGlite query memory scope");
+	}
+#endif
+
 	/* not yet executed */
 	qd->already_executed = false;
 
@@ -111,6 +131,14 @@ FreeQueryDesc(QueryDesc *qdesc)
 	/* forget our snapshots */
 	UnregisterSnapshot(qdesc->snapshot);
 	UnregisterSnapshot(qdesc->crosscheck_snapshot);
+
+#ifdef __PGLITE_POSTMASTER__
+	if (qdesc->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
+	{
+		(void) pgl_shm_scope_close(qdesc->pgl_scope_handle);
+		qdesc->pgl_scope_handle = PGL_SHARED_SCOPE_INVALID;
+	}
+#endif
 
 	/* Only the QueryDesc itself need be freed */
 	pfree(qdesc);

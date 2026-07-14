@@ -72,6 +72,12 @@ test -f "${SOURCE_OUT}/bin/pglite.js"
 test -f "${SOURCE_OUT}/bin/pglite.data"
 test -f "${SOURCE_OUT}/lib/postgresql/regress.so"
 
+node22 "${MM_ROOT}/tests/phase8-scope-hierarchy.mjs" \
+  "${ARTIFACT_OUT}/postmaster.wasm" \
+  "${SOURCE_OUT}/bin/pglite.js" \
+  "${SOURCE_OUT}/bin/pglite.data" \
+  "${OUT}/scope-hierarchy.json"
+
 "${MM_ROOT}/tests/build-native-regress-tools.sh" "${REPO_ROOT}" "${NATIVE}"
 cc -O2 -Wall -Wextra -Werror \
   -I"${NATIVE}/build/src/include" \

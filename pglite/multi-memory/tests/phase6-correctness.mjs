@@ -44,6 +44,19 @@ try {
   const control = await open(postmaster)
   const startup = postmaster.diagnostics()
   assert.ok(startup.liveProcesses >= 4, 'auxiliary processes did not start')
+  assert.ok(
+    startup.scopedLifetime.readyRoots >= 3,
+    'backend scope directories did not initialize',
+  )
+  assert.equal(
+    startup.scopedLifetime.activeRootScopes,
+    startup.scopedLifetime.readyRoots,
+  )
+  assert.equal(
+    startup.scopedLifetime.activeSessionScopes,
+    sessions.size,
+    'client sessions did not each create a session scope',
+  )
   const processKinds = countProcessKinds(postmaster, PostgresProcessKind)
   assert.ok(processKinds.postmaster >= 1, 'postmaster Worker did not start')
   assert.ok(processKinds.auxiliary >= 1, 'auxiliary Workers did not start')
@@ -62,10 +75,9 @@ try {
     ANALYZE phase8_parallel;
   `)
   const role = await open(postmaster, { username: 'phase6_user' })
-  assert.deepEqual(
-    (await role.query('SELECT current_user AS role')).rows,
-    [{ role: 'phase6_user' }],
-  )
+  assert.deepEqual((await role.query('SELECT current_user AS role')).rows, [
+    { role: 'phase6_user' },
+  ])
 
   await a.exec("SET application_name='phase6-a'; SET work_mem='1MB'")
   await b.exec("SET application_name='phase6-b'; SET work_mem='2MB'")
@@ -101,7 +113,9 @@ try {
     [{ isolated: true }],
   )
 
-  await a.exec('BEGIN; DECLARE phase6_cursor CURSOR FOR SELECT generate_series(1, 3) AS value')
+  await a.exec(
+    'BEGIN; DECLARE phase6_cursor CURSOR FOR SELECT generate_series(1, 3) AS value',
+  )
   assert.deepEqual((await a.query('FETCH 2 FROM phase6_cursor')).rows, [
     { value: 1 },
     { value: 2 },
@@ -110,6 +124,33 @@ try {
     { value: 3 },
   ])
   await a.exec('COMMIT')
+
+  const scopeBaseline = postmaster.diagnostics().scopedLifetime
+  await a.exec('BEGIN')
+  const transactionScope = postmaster.diagnostics().scopedLifetime
+  assert.equal(
+    transactionScope.activeTransactionScopes,
+    scopeBaseline.activeTransactionScopes + 1,
+  )
+  await a.exec('SAVEPOINT phase8_scope')
+  const subtransactionScope = postmaster.diagnostics().scopedLifetime
+  assert.equal(
+    subtransactionScope.activeSubtransactionScopes,
+    scopeBaseline.activeSubtransactionScopes + 1,
+  )
+  await a.exec('RELEASE SAVEPOINT phase8_scope')
+  const promotedScope = postmaster.diagnostics().scopedLifetime
+  assert.equal(
+    promotedScope.activeSubtransactionScopes,
+    scopeBaseline.activeSubtransactionScopes,
+  )
+  await a.exec('ROLLBACK')
+  const closedTransactionScope = postmaster.diagnostics().scopedLifetime
+  assert.equal(
+    closedTransactionScope.activeTransactionScopes,
+    scopeBaseline.activeTransactionScopes,
+  )
+  assert.equal(closedTransactionScope.closingScopes, 0)
 
   await a.exec('BEGIN; UPDATE phase6_mvcc SET value = 11 WHERE id = 1')
   assert.deepEqual(
@@ -127,19 +168,20 @@ try {
     [{ value: 11 }],
   )
 
-  await a.exec("SET lock_timeout='0'; BEGIN; UPDATE phase6_mvcc SET value = value WHERE id = 1")
-  await b.exec("SET lock_timeout='0'; BEGIN; UPDATE phase6_mvcc SET value = value WHERE id = 2")
-  const deadlockA = a.query(
-    'UPDATE phase6_mvcc SET value = value WHERE id = 2',
+  await a.exec(
+    "SET lock_timeout='0'; BEGIN; UPDATE phase6_mvcc SET value = value WHERE id = 1",
   )
+  await b.exec(
+    "SET lock_timeout='0'; BEGIN; UPDATE phase6_mvcc SET value = value WHERE id = 2",
+  )
+  const deadlockA = a.query('UPDATE phase6_mvcc SET value = value WHERE id = 2')
   await delay(75)
-  const deadlockB = b.query(
-    'UPDATE phase6_mvcc SET value = value WHERE id = 1',
-  )
+  const deadlockB = b.query('UPDATE phase6_mvcc SET value = value WHERE id = 1')
   const deadlockResults = await Promise.allSettled([deadlockA, deadlockB])
   assert.equal(
     deadlockResults.filter(
-      (result) => result.status === 'rejected' && sqlState(result.reason) === '40P01',
+      (result) =>
+        result.status === 'rejected' && sqlState(result.reason) === '40P01',
     ).length,
     1,
     `expected one deadlock victim: ${formatSettled(deadlockResults)}`,
@@ -179,8 +221,11 @@ try {
   const cancellationResult = expectSqlState(cancelled, '57014')
   await delay(100)
   assert.deepEqual(
-    (await control.query('SELECT pg_cancel_backend($1) AS cancelled', [targetPid]))
-      .rows,
+    (
+      await control.query('SELECT pg_cancel_backend($1) AS cancelled', [
+        targetPid,
+      ])
+    ).rows,
     [{ cancelled: true }],
   )
   await cancellationResult
@@ -204,7 +249,9 @@ try {
   await terminated.close().catch(() => undefined)
   sessions.delete(terminated)
 
-  await a.exec('BEGIN; UPDATE phase6_mvcc SET value = 99 WHERE id = 1; ROLLBACK')
+  await a.exec(
+    'BEGIN; UPDATE phase6_mvcc SET value = 99 WHERE id = 1; ROLLBACK',
+  )
   assert.deepEqual(
     (await b.query('SELECT value FROM phase6_mvcc WHERE id = 1')).rows,
     [{ value: 11 }],
@@ -269,7 +316,10 @@ try {
     if (workersAfter <= workersBefore) await delay(50)
   }
   const memoryAfterParallel = postmaster.diagnostics()
-  assert.ok(workersAfter > workersBefore, 'parallel worker stats did not advance')
+  assert.ok(
+    workersAfter > workersBefore,
+    'parallel worker stats did not advance',
+  )
   assert.ok(
     memoryAfterParallel.privateMemoriesStarted >
       memoryBeforeParallel.privateMemoriesStarted,
@@ -285,6 +335,26 @@ try {
     memoryBeforeParallel.globalMemoryBytes,
     'parallel-context DSM inflated cluster-global memory',
   )
+  assert.equal(
+    memoryAfterParallel.scopedLifetime.activeParallelContextScopes,
+    memoryBeforeParallel.scopedLifetime.activeParallelContextScopes,
+    'parallel-context scope survived query cleanup',
+  )
+  assert.equal(
+    memoryAfterParallel.scopedLifetime.activeQueryScopes,
+    memoryBeforeParallel.scopedLifetime.activeQueryScopes,
+    'query scope survived executor cleanup',
+  )
+  assert.equal(memoryAfterParallel.scopedLifetime.activeWorkers, 0)
+  assert.equal(memoryAfterParallel.scopedLifetime.closingScopes, 0)
+  assert.equal(
+    memoryAfterParallel.scopedLifetime.activeSessionScopes,
+    sessions.size,
+    'an idle client lost or leaked its session scope',
+  )
+  assert.equal(memoryAfterParallel.scopedLifetime.activeTransactionScopes, 0)
+  assert.equal(memoryAfterParallel.scopedLifetime.activeSubtransactionScopes, 0)
+  assert.equal(memoryAfterParallel.scopedLifetime.activeQueryScopes, 0)
 
   const beforeClose = postmaster.diagnostics()
   await Promise.all([...sessions].map((session) => session.close()))
@@ -302,10 +372,8 @@ try {
     shutdown.privateMemoriesReleased,
   )
   assert.equal(shutdown.liveScopedMemories, 0)
-  assert.equal(
-    shutdown.scopedMemoriesStarted,
-    shutdown.scopedMemoriesReleased,
-  )
+  assert.equal(shutdown.scopedMemoriesStarted, shutdown.scopedMemoriesReleased)
+  assert.equal(shutdown.scopedLifetime.readyRoots, 0)
 
   await writeFile(
     output,
@@ -329,6 +397,7 @@ try {
           'terminate',
           'rollback',
           'cumulative-statistics',
+          'hierarchical-scope-lifetimes',
           'parallel-query-root-scope',
         ],
         startup,
@@ -400,7 +469,10 @@ async function withTimeout(promise, timeout, label) {
     return await Promise.race([
       promise,
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeout)
+        timer = setTimeout(
+          () => reject(new Error(`${label} timed out`)),
+          timeout,
+        )
       }),
     ])
   } finally {

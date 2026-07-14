@@ -45,6 +45,10 @@ typedef struct ParallelContext
 	ParallelWorkerInfo *worker;
 	int			nknown_attached_workers;
 	bool	   *known_attached_workers;
+#ifdef __PGLITE_POSTMASTER__
+	/* PGlite fence: child of the active QueryDesc scope. */
+	PglSharedScopeHandle pgl_scope_handle;
+#endif
 } ParallelContext;
 
 typedef struct ParallelWorkerContext

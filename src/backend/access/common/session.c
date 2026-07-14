@@ -21,6 +21,10 @@
 #include "postgres.h"
 
 #include "access/session.h"
+#ifdef __PGLITE_POSTMASTER__
+#include "access/parallel.h"
+#endif
+#include "storage/ipc.h"
 #include "storage/lwlock.h"
 #include "storage/shm_toc.h"
 #include "utils/memutils.h"
@@ -47,6 +51,23 @@
 /* This backend's current session. */
 Session    *CurrentSession = NULL;
 
+#ifdef __PGLITE_POSTMASTER__
+static PglSharedScopeHandle pgl_session_scope = PGL_SHARED_SCOPE_INVALID;
+static bool pgl_session_scope_owner = false;
+
+static void
+pgl_session_scope_shutdown(int code, Datum arg)
+{
+	(void) code;
+	(void) arg;
+	if (pgl_session_scope_owner &&
+		pgl_session_scope != PGL_SHARED_SCOPE_INVALID)
+		(void) pgl_shm_scope_close(pgl_session_scope);
+	pgl_session_scope = PGL_SHARED_SCOPE_INVALID;
+	pgl_session_scope_owner = false;
+}
+#endif
+
 /*
  * Set up CurrentSession to point to an empty Session object.
  */
@@ -54,6 +75,28 @@ void
 InitializeSession(void)
 {
 	CurrentSession = MemoryContextAllocZero(TopMemoryContext, sizeof(Session));
+#ifdef __PGLITE_POSTMASTER__
+	/*
+	 * PGlite fence: a client backend owns one session scope.  Parallel
+	 * workers attach to that existing scope later via AttachSession().
+	 */
+	if (!IsParallelWorker())
+	{
+		pgl_session_scope =
+			pgl_shm_scope_create(PGL_SHARED_SCOPE_SESSION,
+								 pgl_shm_scope_root());
+		if (pgl_session_scope == PGL_SHARED_SCOPE_INVALID)
+			elog(ERROR, "could not create PGlite session memory scope");
+		(void) pgl_shm_scope_enter(pgl_session_scope);
+		pgl_session_scope_owner = true;
+		/*
+		 * Run after dsm_backend_shutdown(), not in the early callback phase:
+		 * closing the scope first would invalidate the pinned session DSM before
+		 * PostgreSQL can detach it and update the DSM control segment.
+		 */
+		on_shmem_exit(pgl_session_scope_shutdown, (Datum) 0);
+	}
+#endif
 }
 
 /*
@@ -104,8 +147,8 @@ GetSessionDsmHandle(void)
 	size = shm_toc_estimate(&estimator);
 #ifdef __PGLITE_POSTMASTER__
 	/* PGlite fence: a session DSM is visible only to this backend root. */
-	seg = dsm_create_in_scope(size, DSM_CREATE_NULL_IF_MAXSEGMENTS,
-							  PGL_SHARED_SCOPE_SESSION);
+	seg = dsm_create_in_scope_handle(size, DSM_CREATE_NULL_IF_MAXSEGMENTS,
+								 pgl_session_scope);
 #else
 	seg = dsm_create(size, DSM_CREATE_NULL_IF_MAXSEGMENTS);
 #endif
@@ -173,6 +216,12 @@ AttachSession(dsm_handle handle)
 	seg = dsm_attach(handle);
 	if (seg == NULL)
 		elog(ERROR, "could not attach to per-session DSM segment");
+#ifdef __PGLITE_POSTMASTER__
+	pgl_session_scope = dsm_segment_scope_handle(seg);
+	if (pgl_session_scope == PGL_SHARED_SCOPE_INVALID)
+		elog(ERROR, "per-session DSM has no PGlite scope");
+	(void) pgl_shm_scope_enter(pgl_session_scope);
+#endif
 	toc = shm_toc_attach(SESSION_MAGIC, dsm_segment_address(seg));
 
 	/* Attach to the DSA area. */
@@ -211,4 +260,8 @@ DetachSession(void)
 	CurrentSession->segment = NULL;
 	dsa_detach(CurrentSession->area);
 	CurrentSession->area = NULL;
+#ifdef __PGLITE_POSTMASTER__
+	pgl_session_scope = PGL_SHARED_SCOPE_INVALID;
+	pgl_shm_scope_leave(PGL_SHARED_SCOPE_INVALID);
+#endif
 }

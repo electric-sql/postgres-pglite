@@ -306,7 +306,7 @@ typedef struct
 	size_t		max_total_segment_size;
 #ifdef __PGLITE_POSTMASTER__
 	/* PGlite memory-2 placement inherited by extension DSM segments. */
-	uint32		pgl_scope_kind;
+	PglSharedScopeHandle pgl_scope_handle;
 #endif
 	/* Highest used segment index in the history of this area. */
 	dsa_segment_index high_segment_index;
@@ -404,7 +404,7 @@ static dsa_area *create_internal(void *place, size_t size,
 								 int tranche_id,
 								 dsm_handle control_handle,
 								 dsm_segment *control_segment,
-								 uint32 pgl_scope_kind,
+								 uint64 pgl_scope_handle,
 								 size_t init_segment_size,
 								 size_t max_segment_size);
 static dsa_area *attach_internal(void *place, dsm_segment *segment,
@@ -427,7 +427,7 @@ dsa_create_ext(int tranche_id, size_t init_segment_size, size_t max_segment_size
 {
 	dsm_segment *segment;
 	dsa_area   *area;
-	uint32		pgl_scope_kind = 0;
+	uint64		pgl_scope_handle = 0;
 
 	/*
 	 * Create the DSM segment that will hold the shared control object and the
@@ -435,7 +435,7 @@ dsa_create_ext(int tranche_id, size_t init_segment_size, size_t max_segment_size
 	 */
 	segment = dsm_create(init_segment_size, 0);
 #ifdef __PGLITE_POSTMASTER__
-	pgl_scope_kind = dsm_segment_scope(segment);
+	pgl_scope_handle = dsm_segment_scope_handle(segment);
 #endif
 
 	/*
@@ -451,7 +451,7 @@ dsa_create_ext(int tranche_id, size_t init_segment_size, size_t max_segment_size
 						   init_segment_size,
 						   tranche_id,
 						   dsm_segment_handle(segment), segment,
-						   pgl_scope_kind,
+						   pgl_scope_handle,
 						   init_segment_size, max_segment_size);
 
 	/* Clean up when the control segment detaches. */
@@ -483,16 +483,16 @@ dsa_create_in_place_ext(void *place, size_t size,
 						size_t init_segment_size, size_t max_segment_size)
 {
 	dsa_area   *area;
-	uint32		pgl_scope_kind = 0;
+	uint64		pgl_scope_handle = 0;
 
 #ifdef __PGLITE_POSTMASTER__
 	if (segment != NULL)
-		pgl_scope_kind = dsm_segment_scope(segment);
+		pgl_scope_handle = dsm_segment_scope_handle(segment);
 #endif
 
 	area = create_internal(place, size, tranche_id,
 						   DSM_HANDLE_INVALID, NULL,
-						   pgl_scope_kind,
+						   pgl_scope_handle,
 						   init_segment_size, max_segment_size);
 
 	/*
@@ -1236,7 +1236,7 @@ create_internal(void *place, size_t size,
 				int tranche_id,
 				dsm_handle control_handle,
 				dsm_segment *control_segment,
-				uint32 pgl_scope_kind,
+				uint64 pgl_scope_handle,
 				size_t init_segment_size, size_t max_segment_size)
 {
 	dsa_area_control *control;
@@ -1288,9 +1288,9 @@ create_internal(void *place, size_t size,
 	control->max_total_segment_size = (size_t) -1;
 	control->total_segment_size = size;
 #ifdef __PGLITE_POSTMASTER__
-	control->pgl_scope_kind = pgl_scope_kind;
+	control->pgl_scope_handle = pgl_scope_handle;
 #else
-	(void) pgl_scope_kind;
+	(void) pgl_scope_handle;
 #endif
 	control->segment_handles[0] = control_handle;
 	for (i = 0; i < DSA_NUM_SEGMENT_BINS; ++i)
@@ -2198,8 +2198,8 @@ make_new_segment(dsa_area *area, size_t requested_pages)
 	oldowner = CurrentResourceOwner;
 	CurrentResourceOwner = area->resowner;
 #ifdef __PGLITE_POSTMASTER__
-	segment = dsm_create_in_scope(total_size, 0,
-								  (PglSharedScopeKind) area->control->pgl_scope_kind);
+	segment = dsm_create_in_scope_handle(total_size, 0,
+									 area->control->pgl_scope_handle);
 #else
 	segment = dsm_create(total_size, 0);
 #endif
