@@ -49,7 +49,8 @@ process.exit(
     manifest.revision === revision &&
     manifest.host === host &&
     manifest.architecture === architecture &&
-    manifest.execBackendCompatibility === true
+    manifest.execBackendCompatibility === true &&
+    manifest.wasm32WalCompatibility === true
     ? 0
     : 1,
 )
@@ -83,7 +84,7 @@ git -C "${PG_ROOT}" archive --format=tar "${REVISION}" \
 
 (
   cd "${BUILD}"
-  CPPFLAGS=-DEXEC_BACKEND "${SOURCE}/configure" \
+  CPPFLAGS='-DEXEC_BACKEND -DPGLITE_WASM32_WAL' "${SOURCE}/configure" \
     --prefix="${INSTALL}" \
     --without-icu \
     --without-readline \
@@ -123,6 +124,7 @@ fs.writeFileSync(output, `${JSON.stringify({
   host,
   architecture,
   execBackendCompatibility: true,
+  wasm32WalCompatibility: true,
   tools: [
     'libpq',
     'psql',

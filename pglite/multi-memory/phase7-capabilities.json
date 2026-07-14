@@ -219,6 +219,27 @@
         "reason": "The Node provider captures the foreground postmaster stream and deliberately disables PostgreSQL's forked logging collector, so pg_ctl logrotate has no server-side collector to rotate."
       },
       {
+        "id": "pg-dump-non-utf8-encoding-conversion",
+        "match": "exact",
+        "path": "src/bin/pg_dump/t/010_dump_connstr.pl",
+        "state": "UNSUPPORTED",
+        "reason": "The test initializes a LATIN1 cluster. The Phase 7 artifact does not yet load PostgreSQL's dynamic encoding-conversion side modules; UTF8 clusters and pg_dump connection-string behavior remain covered by the supported tests."
+      },
+      {
+        "id": "scripts-non-utf8-encoding-conversion",
+        "match": "exact",
+        "path": "src/bin/scripts/t/200_connstr.pl",
+        "state": "UNSUPPORTED",
+        "reason": "The test initializes a LATIN1 cluster. The Phase 7 artifact does not yet load PostgreSQL's dynamic encoding-conversion side modules; UTF8 clusters and client connection-string behavior remain covered by the supported tests."
+      },
+      {
+        "id": "verifybackup-standby-promotion",
+        "match": "exact",
+        "path": "src/bin/pg_verifybackup/t/007_wal.pl",
+        "state": "BLOCKED",
+        "reason": "The test creates and promotes a streaming-replication standby; standby promotion has not completed the Phase 7 gate."
+      },
+      {
         "id": "combine-backup-replication-fixtures",
         "match": "prefix",
         "path": "src/bin/pg_combinebackup/t",
