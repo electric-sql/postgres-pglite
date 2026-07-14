@@ -18,7 +18,7 @@ The runner:
 
 1. generates an exhaustive single-memory fixture;
 2. assembles it with the pinned Binaryen parser;
-3. transforms it into the two-domain tagged-pointer ABI;
+3. transforms it into the three-domain tagged-pointer ABI;
 4. validates the output and the fail-closed opcode report;
 5. runs differential, trap, alias, atomic, bulk-memory, and fuzz tests on
    Node 22;

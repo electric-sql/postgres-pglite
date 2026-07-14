@@ -7,7 +7,7 @@ const [report, performance] = await Promise.all(
     readFile(path, 'utf8').then(JSON.parse),
   ),
 )
-assert.equal(report.abi.profile, 'two-domain-provenance')
+assert.equal(report.abi.profile, 'three-domain-provenance')
 const clones = report.functions
   .filter((entry) => entry.privateCloneOf !== null)
   .map((entry) => ({

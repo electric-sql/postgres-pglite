@@ -38,10 +38,10 @@ const abi = JSON.parse(new TextDecoder().decode(sections[0]))
 const report = JSON.parse(reportText)
 assert.deepEqual(report.abi, abi)
 assert.equal(abi.pointerABI, 'pglite-tagged-i32-v1')
-assert.equal(abi.profile, 'two-domain-generic-private-fast-path')
+assert.equal(abi.profile, 'three-domain-generic-private-fast-path')
 assert.equal(abi.privateTag, 0)
 assert.equal(abi.globalTag, 2)
-assert.equal(abi.reservedTag, 3)
+assert.equal(abi.scopedTag, 3)
 assert.equal(abi.inputSHA256, sha256(classic))
 
 const rewrittenTotal = Object.values(report.rewritten).reduce(

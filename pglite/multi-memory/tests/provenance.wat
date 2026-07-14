@@ -20,6 +20,18 @@
     (i32.load (i32.const 96))
   )
 
+  ;; Constant and constant-offset tagged roots prove that the operation can
+  ;; name memory 1 or 2 directly without a runtime domain branch.
+  (func (export "constant_global") (result i32)
+    (i32.load (i32.const -2147483488))
+  )
+
+  (func (export "constant_scoped") (result i32)
+    (i32.load
+      (i32.add (i32.const -1073741668) (i32.const 4))
+    )
+  )
+
   (func (export "stack") (result i32)
     (i32.load
       (i32.sub (global.get $stack) (i32.const 8))

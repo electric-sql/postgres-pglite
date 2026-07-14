@@ -119,7 +119,7 @@ const result = {
 }
 
 assert.equal(report.abi.memoryAccessProfiling, false)
-assert.equal(result.toolVersion, '0.8.3')
+assert.equal(result.toolVersion, '0.10.0')
 assert.equal(performance.length, 3)
 assert.ok(performance.every(({ status }) => status === 'pass'))
 assert.ok(worstThroughputRatio <= result.threshold)

@@ -2,14 +2,15 @@
  * Copyright 2026 Electric DB Limited
  * SPDX-License-Identifier: Apache-2.0
  *
- * Correctness-first two-domain WebAssembly memory transformer for PGlite.
+ * Correctness-first three-domain WebAssembly memory transformer for PGlite.
  *
  * This tool is intentionally built against the exact Binaryen revision in the
  * pinned Emscripten SDK. It accepts a conventional, imported-memory wasm32
- * module and adds a second imported memory for cluster-global pointers. Every
- * dereferencing instruction in defined input functions is replaced by a call
- * to a deduplicated per-shape helper. The helper validates pointer tags and
- * aperture bounds before selecting private memory 0 or global memory 1.
+ * module and adds imported memories for cluster-global and root-scoped
+ * pointers. Every dereferencing instruction in defined input functions is
+ * replaced by a call to a deduplicated per-shape helper. The helper validates
+ * pointer tags and aperture bounds before selecting private memory 0, global
+ * memory 1, or scoped memory 2.
  */
 
 #include <algorithm>
@@ -46,7 +47,7 @@ using namespace wasm;
 
 namespace {
 
-constexpr const char* ToolVersion = "0.8.4";
+constexpr const char* ToolVersion = "0.10.0";
 constexpr const char* PointerABI = "pglite-tagged-i32-v1";
 constexpr const char* ABISectionName = "pglite.multi-memory.abi";
 constexpr const char* HelperPrefix = "__pglite_mm_";
@@ -57,7 +58,10 @@ constexpr const char* WasmShadowStackDepth =
 constexpr uint64_t PrivateAperture = uint64_t(1) << 31;
 constexpr uint64_t GlobalAperture = uint64_t(1) << 30;
 constexpr uint64_t GlobalPointerTag = uint64_t(1) << 31;
+constexpr uint64_t ScopedPointerTag = uint64_t(3) << 30;
 constexpr uint64_t Memory32Size = uint64_t(1) << 32;
+
+enum class DirectDomain { None, Private, Global, Scoped };
 
 struct Options {
   std::string input;
@@ -468,6 +472,8 @@ class Transformer {
     uint64_t expressionShapeHash = 1469598103934665603ULL;
     std::map<std::string, uint64_t> operations;
     std::map<std::string, uint64_t> directPrivateOperations;
+    std::map<std::string, uint64_t> directGlobalOperations;
+    std::map<std::string, uint64_t> directScopedOperations;
     std::map<std::string, uint64_t> genericOperations;
   };
 
@@ -480,6 +486,8 @@ class Transformer {
   std::vector<std::pair<Name, HelperSpec>> helperSpecs;
   std::map<std::string, uint64_t> rewritten;
   std::map<std::string, uint64_t> directPrivate;
+  std::map<std::string, uint64_t> directGlobal;
+  std::map<std::string, uint64_t> directScoped;
   std::map<std::string, uint64_t> directPrivateProofs;
   std::map<std::string, uint64_t> allowlisted;
   std::map<std::string, FunctionStat> functionStats;
@@ -513,13 +521,26 @@ class Transformer {
     return builder.makeLocalGet(index, type);
   }
 
-  Expression* isGlobal(Builder& builder, Index ptrIndex) {
-    return builder.makeBinary(LtSInt32,
-                              local(builder, ptrIndex, Type::i32),
-                              builder.makeConst(int32_t(0)));
+  Expression* pointerHasTag(Builder& builder,
+                            Index ptrIndex,
+                            uint32_t tag) {
+    return builder.makeBinary(
+      EqInt32,
+      builder.makeBinary(AndInt32,
+                         local(builder, ptrIndex, Type::i32),
+                         builder.makeConst(uint32_t(0xc0000000))),
+      builder.makeConst(tag));
   }
 
-  Expression* maskedGlobalPointer(Builder& builder, Index ptrIndex) {
+  Expression* isGlobal(Builder& builder, Index ptrIndex) {
+    return pointerHasTag(builder, ptrIndex, uint32_t(GlobalPointerTag));
+  }
+
+  Expression* isScoped(Builder& builder, Index ptrIndex) {
+    return pointerHasTag(builder, ptrIndex, uint32_t(ScopedPointerTag));
+  }
+
+  Expression* maskedSharedPointer(Builder& builder, Index ptrIndex) {
     return builder.makeBinary(AndInt32,
                               local(builder, ptrIndex, Type::i32),
                               builder.makeConst(uint32_t(0x3fffffff)));
@@ -532,16 +553,6 @@ class Transformer {
   Expression* nullTrap(Builder& builder, Index ptrIndex) {
     return builder.makeIf(
       builder.makeUnary(EqZInt32, local(builder, ptrIndex, Type::i32)),
-      builder.makeUnreachable());
-  }
-
-  Expression* reservedTagTrap(Builder& builder, Index ptrIndex) {
-    auto* tag = builder.makeBinary(
-      AndInt32,
-      local(builder, ptrIndex, Type::i32),
-      builder.makeConst(uint32_t(0xc0000000)));
-    return builder.makeIf(
-      builder.makeBinary(EqInt32, tag, builder.makeConst(uint32_t(0xc0000000))),
       builder.makeUnreachable());
   }
 
@@ -577,30 +588,31 @@ class Transformer {
       builder.makeUnreachable());
   }
 
-  Expression* effectiveReservedTagTrap(Builder& builder,
-                                       Index ptrIndex,
-                                       uint64_t offset) {
-    auto* tag = builder.makeBinary(
-      AndInt32,
-      effectivePointer(builder, ptrIndex, offset),
-      builder.makeConst(uint32_t(0xc0000000)));
-    return builder.makeIf(
-      builder.makeBinary(EqInt32, tag, builder.makeConst(uint32_t(0xc0000000))),
-      builder.makeUnreachable());
-  }
-
   Expression* effectiveIsGlobal(Builder& builder,
                                 Index ptrIndex,
                                 uint64_t offset) {
     return builder.makeBinary(
-      LtSInt32,
-      effectivePointer(builder, ptrIndex, offset),
-      builder.makeConst(int32_t(0)));
+      EqInt32,
+      builder.makeBinary(AndInt32,
+                         effectivePointer(builder, ptrIndex, offset),
+                         builder.makeConst(uint32_t(0xc0000000))),
+      builder.makeConst(uint32_t(GlobalPointerTag)));
   }
 
-  Expression* effectiveMaskedGlobalPointer(Builder& builder,
-                                           Index ptrIndex,
-                                           uint64_t offset) {
+  Expression* effectiveIsScoped(Builder& builder,
+                                Index ptrIndex,
+                                uint64_t offset) {
+    return builder.makeBinary(
+      EqInt32,
+      builder.makeBinary(AndInt32,
+                         effectivePointer(builder, ptrIndex, offset),
+                         builder.makeConst(uint32_t(0xc0000000))),
+      builder.makeConst(uint32_t(ScopedPointerTag)));
+  }
+
+  Expression* effectiveMaskedSharedPointer(Builder& builder,
+                                            Index ptrIndex,
+                                            uint64_t offset) {
     return builder.makeBinary(
       AndInt32,
       effectivePointer(builder, ptrIndex, offset),
@@ -796,18 +808,28 @@ class Transformer {
         builder,
         globalMemory,
         makeOperands(
-          effectiveMaskedGlobalPointer(builder, 0, spec.offset)),
+          effectiveMaskedSharedPointer(builder, 0, spec.offset)),
+        GlobalAperture,
+        true);
+      auto* scopedOp = makeDirectOperation(
+        normalized,
+        builder,
+        scopedMemory,
+        makeOperands(
+          effectiveMaskedSharedPointer(builder, 0, spec.offset)),
         GlobalAperture,
         true);
       auto* dispatch = builder.makeIf(
-        effectiveIsGlobal(builder, 0, spec.offset),
-        globalOp,
-        privateOp,
+        effectiveIsScoped(builder, 0, spec.offset),
+        scopedOp,
+        builder.makeIf(effectiveIsGlobal(builder, 0, spec.offset),
+                       globalOp,
+                       privateOp,
+                       spec.type),
         spec.type);
       return builder.makeBlock(
         {effectiveOffsetTrap(builder, 0, spec.offset),
          effectiveNullTrap(builder, 0, spec.offset),
-         effectiveReservedTagTrap(builder, 0, spec.offset),
          dispatch},
         spec.type);
     }
@@ -823,79 +845,113 @@ class Transformer {
       spec,
       builder,
       globalMemory,
-      makeOperands(maskedGlobalPointer(builder, 0)),
+      makeOperands(maskedSharedPointer(builder, 0)),
+      GlobalAperture,
+      true);
+    auto* scopedOp = makeDirectOperation(
+      spec,
+      builder,
+      scopedMemory,
+      makeOperands(maskedSharedPointer(builder, 0)),
       GlobalAperture,
       true);
     auto* dispatch = builder.makeIf(
-      isGlobal(builder, 0), globalOp, privateOp, spec.type);
+      isScoped(builder, 0),
+      scopedOp,
+      builder.makeIf(isGlobal(builder, 0), globalOp, privateOp, spec.type),
+      spec.type);
     return builder.makeBlock(
-      {nullTrap(builder, 0), reservedTagTrap(builder, 0), dispatch}, spec.type);
+      {nullTrap(builder, 0), dispatch}, spec.type);
   }
 
-  Expression* copyFor(Builder& builder, bool destGlobal, bool sourceGlobal) {
-    auto* dest = destGlobal ? maskedGlobalPointer(builder, 0)
-                            : rawPointer(builder, 0);
-    auto* source = sourceGlobal ? maskedGlobalPointer(builder, 1)
-                                : rawPointer(builder, 1);
+  Name memoryForDomain(unsigned domain) {
+    if (domain == 0) return privateMemory;
+    if (domain == 1) return globalMemory;
+    return scopedMemory;
+  }
+
+  uint64_t apertureForDomain(unsigned domain) {
+    return domain == 0 ? PrivateAperture : GlobalAperture;
+  }
+
+  Expression* pointerForDomain(Builder& builder,
+                               Index ptrIndex,
+                               unsigned domain) {
+    return domain == 0 ? rawPointer(builder, ptrIndex)
+                       : maskedSharedPointer(builder, ptrIndex);
+  }
+
+  Expression* copyFor(Builder& builder,
+                      unsigned destDomain,
+                      unsigned sourceDomain) {
+    auto* dest = pointerForDomain(builder, 0, destDomain);
+    auto* source = pointerForDomain(builder, 1, sourceDomain);
     auto* sizeForDest = local(builder, 2, Type::i32);
     auto* sizeForSource = local(builder, 2, Type::i32);
     auto* operation = builder.makeMemoryCopy(
       ExpressionManipulator::copy(dest, module),
       ExpressionManipulator::copy(source, module),
       local(builder, 2, Type::i32),
-      destGlobal ? globalMemory : privateMemory,
-      sourceGlobal ? globalMemory : privateMemory);
+      memoryForDomain(destDomain),
+      memoryForDomain(sourceDomain));
     return builder.makeBlock(
       {dynamicRangeTrap(builder,
                         dest,
                         sizeForDest,
-                        destGlobal ? GlobalAperture : PrivateAperture),
+                        apertureForDomain(destDomain)),
        dynamicRangeTrap(builder,
                         source,
                         sizeForSource,
-                        sourceGlobal ? GlobalAperture : PrivateAperture),
+                        apertureForDomain(sourceDomain)),
        operation},
       Type::none);
   }
 
+  Expression* copyForSource(Builder& builder, unsigned destDomain) {
+    return builder.makeIf(
+      isScoped(builder, 1),
+      copyFor(builder, destDomain, 2),
+      builder.makeIf(isGlobal(builder, 1),
+                     copyFor(builder, destDomain, 1),
+                     copyFor(builder, destDomain, 0)));
+  }
+
   Expression* makeCopyBody(Builder& builder) {
-    auto* privateSource = builder.makeIf(isGlobal(builder, 1),
-                                         copyFor(builder, false, true),
-                                         copyFor(builder, false, false));
-    auto* globalSource = builder.makeIf(isGlobal(builder, 1),
-                                        copyFor(builder, true, true),
-                                        copyFor(builder, true, false));
-    auto* dispatch =
-      builder.makeIf(isGlobal(builder, 0), globalSource, privateSource);
+    auto* dispatch = builder.makeIf(
+      isScoped(builder, 0),
+      copyForSource(builder, 2),
+      builder.makeIf(isGlobal(builder, 0),
+                     copyForSource(builder, 1),
+                     copyForSource(builder, 0)));
     return builder.makeBlock({nullTrap(builder, 0),
-                              reservedTagTrap(builder, 0),
                               nullTrap(builder, 1),
-                              reservedTagTrap(builder, 1),
                               dispatch});
   }
 
-  Expression* fillFor(Builder& builder, bool global) {
-    auto* dest = global ? maskedGlobalPointer(builder, 0)
-                        : rawPointer(builder, 0);
+  Expression* fillFor(Builder& builder, unsigned domain) {
+    auto* dest = pointerForDomain(builder, 0, domain);
     auto* size = local(builder, 2, Type::i32);
     auto* operation = builder.makeMemoryFill(
       ExpressionManipulator::copy(dest, module),
       local(builder, 1, Type::i32),
       local(builder, 2, Type::i32),
-      global ? globalMemory : privateMemory);
+      memoryForDomain(domain));
     return builder.makeBlock(
       {dynamicRangeTrap(builder,
                         dest,
                         size,
-                        global ? GlobalAperture : PrivateAperture),
+                        apertureForDomain(domain)),
        operation});
   }
 
   Expression* makeFillBody(Builder& builder) {
     auto* dispatch = builder.makeIf(
-      isGlobal(builder, 0), fillFor(builder, true), fillFor(builder, false));
-    return builder.makeBlock(
-      {nullTrap(builder, 0), reservedTagTrap(builder, 0), dispatch});
+      isScoped(builder, 0),
+      fillFor(builder, 2),
+      builder.makeIf(isGlobal(builder, 0),
+                     fillFor(builder, 1),
+                     fillFor(builder, 0)));
+    return builder.makeBlock({nullTrap(builder, 0), dispatch});
   }
 
   std::vector<Type> helperParams(const HelperSpec& spec) {
@@ -1314,15 +1370,15 @@ class Transformer {
               ? "profile-guided-private-oracle"
               : options.provenance
               ? (options.inlinePrivateFastPath
-                   ? "two-domain-provenance-private-fast-path"
-                   : "two-domain-provenance")
+                   ? "three-domain-provenance-private-fast-path"
+                   : "three-domain-provenance")
               : options.privateOnlyOracle
               ? (options.profileFunctionEntries
                    ? "private-only-oracle-function-profile"
                    : "private-only-oracle")
               : options.inlinePrivateFastPath
-                  ? "two-domain-generic-private-fast-path"
-                  : "two-domain-generic")
+                  ? "three-domain-generic-private-fast-path"
+                  : "three-domain-generic")
         << "\","
         << "\"memoryAccessProfiling\":"
         << (options.profileMemoryAccesses ? "true" : "false");
@@ -1347,7 +1403,7 @@ class Transformer {
         << "\","
         << "\"scopedMemory\":\"" << jsonEscape(scopedMemory.toString())
         << "\","
-        << "\"privateTag\":0,\"globalTag\":2,\"reservedTag\":3,"
+        << "\"privateTag\":0,\"globalTag\":2,\"scopedTag\":3,"
         << "\"privateApertureBytes\":" << PrivateAperture << ','
         << "\"globalApertureBytes\":" << GlobalAperture << ','
         << "\"wasmShadowStackFrameBytes\":"
@@ -1454,6 +1510,28 @@ public:
     return operation;
   }
 
+  Expression* makeInlineSharedOperation(const HelperSpec& spec,
+                                        Builder& builder,
+                                        std::vector<Expression*> operands,
+                                        DirectDomain domain) {
+    if (domain != DirectDomain::Global && domain != DirectDomain::Scoped) {
+      throw std::runtime_error("shared direct operation has invalid domain");
+    }
+    operands[0] = builder.makeBinary(
+      AndInt32,
+      operands[0],
+      builder.makeConst(uint32_t(0x3fffffff)));
+    auto* operation = makeDirectOperation(
+      spec,
+      builder,
+      domain == DirectDomain::Global ? globalMemory : scopedMemory,
+      std::move(operands),
+      GlobalAperture,
+      false);
+    generatedDirectOperations.insert(operation);
+    return operation;
+  }
+
   Name helperFor(const HelperSpec& spec) {
     auto key = helperKey(spec);
     auto found = helperNames.find(key);
@@ -1471,16 +1549,22 @@ public:
   }
 
   void countAccess(const std::string& name,
-                   bool direct,
+                   DirectDomain direct,
                    const char* proof = nullptr) {
     auto& stat = functionStats[currentFunction.toString()];
     ++stat.operations[name];
-    if (direct) {
+    if (direct == DirectDomain::Private) {
       ++directPrivate[name];
       ++stat.directPrivateOperations[name];
       if (proof) {
         ++directPrivateProofs[proof];
       }
+    } else if (direct == DirectDomain::Global) {
+      ++directGlobal[name];
+      ++stat.directGlobalOperations[name];
+    } else if (direct == DirectDomain::Scoped) {
+      ++directScoped[name];
+      ++stat.directScopedOperations[name];
     } else {
       ++rewritten[name];
       ++stat.genericOperations[name];
@@ -2017,6 +2101,10 @@ public:
     writeMap(out, rewritten);
     out << ",\"directPrivate\":";
     writeMap(out, directPrivate);
+    out << ",\"directGlobal\":";
+    writeMap(out, directGlobal);
+    out << ",\"directScoped\":";
+    writeMap(out, directScoped);
     out << ",\"directPrivateProofs\":";
     writeMap(out, directPrivateProofs);
     out << ",\"privateReturnExports\":[";
@@ -2112,6 +2200,10 @@ public:
       writeMap(out, stat.operations);
       out << ",\"directPrivateOperations\":";
       writeMap(out, stat.directPrivateOperations);
+      out << ",\"directGlobalOperations\":";
+      writeMap(out, stat.directGlobalOperations);
+      out << ",\"directScopedOperations\":";
+      writeMap(out, stat.directScopedOperations);
       out << ",\"genericOperations\":";
       writeMap(out, stat.genericOperations);
       out << '}';
@@ -2346,14 +2438,21 @@ Rewriter::Provenance Rewriter::classify(Expression* expression) {
     bool leftConstant = binary->left->is<Const>();
     bool rightConstant = binary->right->is<Const>();
     if (binary->op == AddInt32) {
-      if (left == Provenance::Private && rightConstant) {
-        result = Provenance::Private;
-      } else if (right == Provenance::Private && leftConstant) {
-        result = Provenance::Private;
+      if ((left == Provenance::Private || left == Provenance::Global ||
+           left == Provenance::Scoped) &&
+          rightConstant) {
+        result = left;
+      } else if ((right == Provenance::Private ||
+                  right == Provenance::Global ||
+                  right == Provenance::Scoped) &&
+                 leftConstant) {
+        result = right;
       }
-    } else if (binary->op == SubInt32 && left == Provenance::Private &&
-               rightConstant) {
-      result = Provenance::Private;
+    } else if (binary->op == SubInt32 && rightConstant &&
+               (left == Provenance::Private ||
+                left == Provenance::Global ||
+                left == Provenance::Scoped)) {
+      result = left;
     }
   } else if (auto* select = expression->dynCast<Select>()) {
     result = join(classify(select->ifTrue), classify(select->ifFalse));
@@ -2449,14 +2548,45 @@ void Rewriter::replaceWithHelper(Expression* original,
   bool diagnosticDirect = !taggedImmediate &&
                           (transformer.usePrivateOnlyOracle() ||
                            transformer.useCurrentFunctionDirectPrivate());
-  bool provenDirect = provesPrivate(spec, operands);
+  DirectDomain provenDomain = DirectDomain::None;
+  if (provesPrivate(spec, operands)) {
+    provenDomain = DirectDomain::Private;
+  } else if (!taggedImmediate && transformer.useProvenance() &&
+             spec.kind != HelperKind::MemoryCopy &&
+             spec.kind != HelperKind::MemoryFill) {
+    switch (classify(operands[0])) {
+      case Provenance::Private:
+        provenDomain = DirectDomain::Private;
+        break;
+      case Provenance::Global:
+        provenDomain = DirectDomain::Global;
+        break;
+      case Provenance::Scoped:
+        provenDomain = DirectDomain::Scoped;
+        break;
+      case Provenance::Null:
+      case Provenance::Unknown:
+        break;
+    }
+  }
+  DirectDomain directDomain = diagnosticDirect ? DirectDomain::Private
+                                                : provenDomain;
   transformer.countAccess(operationName,
-                          diagnosticDirect || provenDirect,
-                          provenDirect ? "constant-local-flow" : nullptr);
-  if (diagnosticDirect || provenDirect) {
-    transformer.keepPrivateOracleOperation(original);
+                          directDomain,
+                          provenDomain == DirectDomain::Private
+                            ? "constant-local-flow"
+                            : nullptr);
+  if (directDomain != DirectDomain::None) {
+    Expression* directOperation = original;
+    if (directDomain == DirectDomain::Private) {
+      transformer.keepPrivateOracleOperation(original);
+    } else {
+      Builder builder(*getModule());
+      directOperation = transformer.makeInlineSharedOperation(
+        spec, builder, std::move(operands), directDomain);
+    }
     auto* profiled = withAccessProfile(
-      original, true, operationName, result);
+      directOperation, true, operationName, result);
     if (profiled != original) {
       replaceCurrent(profiled);
     }
