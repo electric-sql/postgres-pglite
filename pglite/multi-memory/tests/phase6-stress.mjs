@@ -142,6 +142,14 @@ try {
     baseline.livePrivateMemories,
     'session churn retained private Wasm memories',
   )
+  assert.ok(
+    afterChurn.v8BackingStoreCollections > beforeChurn.v8BackingStoreCollections,
+    'session churn did not collect retired V8 Wasm backing stores',
+  )
+  assert.ok(
+    afterChurn.retiredScopedMemoriesAwaitingCollection < 128,
+    'retired scoped memories exceeded the bounded collection interval',
+  )
 
   const dsa = await createSessionWhenReady(postmaster)
   await dsa.exec('CREATE EXTENSION test_dsa')
@@ -165,10 +173,20 @@ try {
     dsaWarm.globalMemoryBytes,
     'global DSM/DSA churn grew memory after its warm high-water mark',
   )
+  assert.equal(
+    dsaAfter.scopedMemoryBytes,
+    dsaWarm.scopedMemoryBytes,
+    'scoped DSM/DSA churn grew backing memory after its warm high-water mark',
+  )
+  assert.equal(
+    dsaAfter.scopedLifetime.allocatedBytes,
+    dsaWarm.scopedLifetime.allocatedBytes,
+    'scoped DSM/DSA churn retained allocated segments',
+  )
   assert.ok(
-    dsaAfter.globalShmAllocationGeneration >
-      dsaWarm.globalShmAllocationGeneration,
-    'DSM/DSA segments were not released and reused',
+    dsaAfter.scopedLifetime.allocationGeneration >
+      dsaWarm.scopedLifetime.allocationGeneration,
+    'scoped DSM/DSA segments were not released and reused',
   )
   await dsa.close()
 
@@ -210,6 +228,7 @@ try {
   const shutdown = postmaster.diagnostics()
   assert.equal(shutdown.livePrivateMemories, 0)
   assert.equal(shutdown.privateMemoriesStarted, shutdown.privateMemoriesReleased)
+  assert.equal(shutdown.retiredScopedMemoriesAwaitingCollection, 0)
 
   let abiCeiling
   try {
@@ -225,10 +244,15 @@ try {
   assert.match(String(abiCeiling), /1 GiB ABI/)
 
   peak = maximumSample(peak, processSample())
+  const reclaimedProcess = processSample()
   assert.ok(peak.rss < 2 * 1024 * 1024 * 1024, `RSS exceeded 2 GiB: ${peak.rss}`)
   assert.ok(
-    peak.virtualBytes < 512 * 1024 * 1024 * 1024,
-    `virtual address reservation exceeded 512 GiB: ${peak.virtualBytes}`,
+    reclaimedProcess.virtualBytes < 512 * 1024 * 1024 * 1024,
+    `released backing stores retained more than 512 GiB of virtual address space: ${reclaimedProcess.virtualBytes}`,
+  )
+  assert.ok(
+    reclaimedProcess.virtualBytes < peak.virtualBytes,
+    'backend shutdown did not reclaim V8 virtual address reservations',
   )
 
   await writeFile(
@@ -264,6 +288,12 @@ try {
         beforeShutdown,
         shutdown,
         peak,
+        virtualAddress: {
+          semantics: 'sparse-v8-guard-reservations-with-deferred-gc',
+          transientPeakBytes: peak.virtualBytes,
+          reclaimedBytes: reclaimedProcess.virtualBytes,
+          reclaimedLimitBytes: 512 * 1024 * 1024 * 1024,
+        },
       },
       null,
       2,
