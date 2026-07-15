@@ -42,7 +42,7 @@ install: all installdirs
 	$(INSTALL_PROGRAM) reindexdb$(X)  '$(DESTDIR)$(bindir)'/reindexdb$(X)
 	$(INSTALL_PROGRAM) pg_isready$(X) '$(DESTDIR)$(bindir)'/pg_isready$(X)
 ifeq ($(PORTNAME), emscripten)
-	$(INSTALL_PROGRAM) pg_isready.wasm '$(DESTDIR)$(bindir)'/pg_isready.wasm
+	$(foreach program,$(PROGRAMS),$(INSTALL_PROGRAM) $(program).wasm '$(DESTDIR)$(bindir)'/$(program).wasm;)
 endif
 
 installdirs:
@@ -53,7 +53,9 @@ uninstall:
 
 clean distclean:
 	rm -f $(addsuffix $(X), $(PROGRAMS)) $(addsuffix .o, $(PROGRAMS))
-	rm -f pg_isready.wasm
+ifeq ($(PORTNAME), emscripten)
+	rm -f $(addsuffix .wasm, $(PROGRAMS))
+endif
 	rm -f common.o $(WIN32RES)
 	rm -rf tmp_check
 

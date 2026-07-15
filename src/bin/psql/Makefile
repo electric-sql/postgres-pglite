@@ -66,6 +66,9 @@ tab-complete.c: gen_tabcomplete.pl tab-complete.in.c
 
 install: all installdirs
 	$(INSTALL_PROGRAM) psql$(X) '$(DESTDIR)$(bindir)/psql$(X)'
+ifeq ($(PORTNAME), emscripten)
+	$(INSTALL_PROGRAM) psql.wasm '$(DESTDIR)$(bindir)/psql.wasm'
+endif
 	$(INSTALL_DATA) $(srcdir)/psqlrc.sample '$(DESTDIR)$(datadir)/psqlrc.sample'
 
 installdirs:
@@ -76,6 +79,9 @@ uninstall:
 
 clean distclean:
 	rm -f psql$(X) $(OBJS) lex.backup
+ifeq ($(PORTNAME), emscripten)
+	rm -f psql.wasm
+endif
 	rm -rf tmp_check
 	rm -f sql_help.h sql_help.c psqlscanslash.c tab-complete.c
 
