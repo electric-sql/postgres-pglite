@@ -91,6 +91,14 @@ pgl_stack_get_current(void)
 {
 	return emscripten_stack_get_current() + pgl_stack_cursor_identity;
 }
+
+/* Expose allocator usage without leaking Emscripten internals into JS. */
+EMSCRIPTEN_KEEPALIVE
+uintptr_t
+pgl_heap_break(void)
+{
+	return (uintptr_t) sbrk(0);
+}
 #endif
 
 #ifdef __PGLITE_POSTMASTER__

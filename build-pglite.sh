@@ -29,8 +29,6 @@ if [ "${PGLITE_SHARED_MEMORY:-false}" = true ]; then
     PGLITE_WASM_FEATURE_FLAGS="-matomics -mbulk-memory"
     PGLITE_CFLAGS="$PGLITE_CFLAGS $PGLITE_WASM_FEATURE_FLAGS"
     PGLITE_MEMORY_LDFLAGS="$PGLITE_MEMORY_LDFLAGS -sSHARED_MEMORY=1 -sMAXIMUM_MEMORY=${POSTGRES_PGLITE_MAXIMUM_MEMORY}"
-    PGLITE_SHARED_MEMORY_RECONFIGURE=true
-
 fi
 if [ "$DEBUG" = true ]
 then
@@ -46,7 +44,6 @@ fi
 if [ "${PGLITE_MULTI_MEMORY_PROVENANCE:-false}" = true ]; then
     echo "pglite: enabling explicit multi-memory provenance markers."
     PGLITE_CFLAGS="$PGLITE_CFLAGS -D__PGLITE_MULTI_MEMORY__"
-    PGLITE_MULTI_MEMORY_RECONFIGURE=true
     # Make does not track command-line flags. Recompile the fenced source that
     # consumes the PGlite libc marker and force the final main-module relink.
     rm -f src/backend/executor/execExprInterp.o
@@ -57,7 +54,6 @@ fi
 if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
     echo "pglite: enabling the Worker-backed EXEC_BACKEND portability layer."
     PGLITE_CFLAGS="$PGLITE_CFLAGS -D__PGLITE_POSTMASTER__"
-    PGLITE_POSTMASTER_RECONFIGURE=true
     # The forced PGlite libc header redirects the dynamic-loader boundary.
     # Make does not otherwise notice a change to this injected header.
     rm -f src/backend/libpq/auth.o
@@ -94,7 +90,16 @@ fi
 
 # first build pglite-libc object WITHOUT the overriding flags
 # pushd pglite/src/pglitec && emcc -g --no-wasm-opt -gsource-map -static -fPIC -o pglitec.o -c pglitec.c && popd
-pushd pglite/src/pglitec && emcc $PGLITE_CFLAGS -DPGLITEC_IMPLEMENTATION -static -fpic -o pglitec.o -c pglitec.c && popd
+pushd pglite/src/pglitec
+if [ "${PGLITE_PROFILE_RECONFIGURE}" = true ] ||
+   [ ! -f pglitec.o ] || [ pglitec.c -nt pglitec.o ] ||
+   [ pglitec.h -nt pglitec.o ]; then
+    emcc $PGLITE_CFLAGS -DPGLITEC_IMPLEMENTATION -static -fpic \
+        -o pglitec.o -c pglitec.c
+else
+    echo "pglite: reusing the PGlite libc object for the effective build profile."
+fi
+popd
 
 # -Dread=pgl_read -Dwrite=pgl_write
 PGLITE_CFLAGS="$PGLITE_CFLAGS \
@@ -130,26 +135,19 @@ fi
 
 echo "pglite: PGLITE_CFLAGS=$PGLITE_CFLAGS"
 
-# run ./configure only if config.status is older than this file
-# TODO: we should ALSO check if any of the PGLITE_CFLAGS have changed and trigger a ./configure if they did!!!
-REF_FILE="build-pglite.sh"
+# The persisted profile above owns every configure-time PGlite flag. Script
+# timestamp changes alone do not invalidate PostgreSQL's configured graph.
 CONFIG_STATUS="config.status"
 RUN_CONFIGURE=false
 
-if [ "${PGLITE_MULTI_MEMORY_RECONFIGURE:-false}" = true ] ||
-   [ "${PGLITE_SHARED_MEMORY_RECONFIGURE:-false}" = true ] ||
-   [ "${PGLITE_POSTMASTER_RECONFIGURE:-false}" = true ] ||
-   [ "${PGLITE_PROFILE_RECONFIGURE}" = true ]; then
-    echo "multi-memory/shared build flags require ./configure."
+if [ "${PGLITE_PROFILE_RECONFIGURE}" = true ]; then
+    echo "the effective PGlite build profile requires ./configure."
     RUN_CONFIGURE=true
 elif [ ! -f "$CONFIG_STATUS" ]; then
     echo "$CONFIG_STATUS does not exist, need to run ./configure"
     RUN_CONFIGURE=true
-elif [ "$REF_FILE" -nt "$CONFIG_STATUS" ]; then
-    echo "$CONFIG_STATUS is older than $REF_FILE. Need to run ./configure."
-    RUN_CONFIGURE=true
 else
-    echo "$CONFIG_STATUS exists and is newer than $REF_FILE. ./configure will NOT be run."
+    echo "$CONFIG_STATUS matches the effective build profile. ./configure will NOT be run."
 fi
 
 PGLITE_LDFLAGS="-sWASM_BIGINT $PGLITE_MEMORY_LDFLAGS"
@@ -235,6 +233,19 @@ POSTGRES_PGLITE_FLAGS="\
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
 $PGPRELOAD \
 -lnodefs.js -lidbfs.js"
+
+# Multi-memory builds can provide a repository-owned postprocessor for the
+# installed runtime modules. Keep this as a narrow build boundary: PostgreSQL
+# continues to produce ordinary Emscripten side modules, while PGlite owns the
+# alternative memory ABI and its reports outside the PostgreSQL build system.
+postprocess_runtime_side_modules() {
+    if [ -z "${PGLITE_RUNTIME_SIDE_MODULE_POSTPROCESSOR:-}" ]; then
+        return
+    fi
+    "${PGLITE_RUNTIME_SIDE_MODULE_POSTPROCESSOR}" \
+        "$INSTALL_FOLDER/lib/postgresql" \
+        "${PGLITE_RUNTIME_SIDE_MODULE_REPORT_ROOT:-$INSTALL_FOLDER/multi-memory-runtime-modules}"
+}
 
 build_regression_test_modules() {
     REGRESS_DIR="src/test/regress"
@@ -546,6 +557,7 @@ if [ "${PGLITE_BACKEND_ONLY:-false}" = true ]; then
     if [ "${PGLITE_WITH_REGRESSION_TESTS:-false}" = true ]; then
         build_regression_test_modules
     fi
+    postprocess_runtime_side_modules || exit 65
     # /install is image-local, so rematerialize the Emscripten export list in
     # every backend-only container invocation from the persisted install tree.
     emmake make PORTNAME=emscripten -C src/backend \
@@ -555,6 +567,16 @@ if [ "${PGLITE_BACKEND_ONLY:-false}" = true ]; then
         emmake make PORTNAME=emscripten -C src/backend \
         -j"${PGLITE_BUILD_JOBS:-}" pglite || exit 59
     emmake make PORTNAME=emscripten -C src/backend install-pglite || exit 60
+    # A backend-only regression build can reuse a configured tree copied from
+    # another artifact root. PostgreSQL's generated bindir retains that old
+    # prefix, while INSTALL_FOLDER is the authoritative output requested by
+    # this invocation. Materialize the three generated files there as well.
+    mkdir -p "$INSTALL_FOLDER/bin"
+    install -m 755 \
+        src/backend/pglite.js \
+        src/backend/pglite.wasm \
+        src/backend/pglite.data \
+        "$INSTALL_FOLDER/bin/"
     exit 0
 fi
 
@@ -616,12 +638,67 @@ fi
 # third-party side modules remain separately gated.
 if [ "${PGLITE_SKIP_THIRD_PARTY_EXTENSIONS:-false}" != true ]; then
     SAVE_PATH=$PATH
-    PATH=$PATH:$INSTALL_FOLDER/bin
-    emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions -j"${PGLITE_BUILD_JOBS:-}" || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite/other_extensions' ; exit 41; }
-    # Step 4.1: special case: make PostGIS
-    cd ./pglite/ && ./build-postgis.sh && cd ../
-    emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist' ; exit 42; }
-    emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist-postgis' ; exit 43; }
+    # Fence third-party builds behind the PostgreSQL installation selected for
+    # this invocation. A builder image may also contain /pglite/bin from an
+    # earlier classic build, which must not leak its PGXS prefix into shared or
+    # postmaster side modules.
+    PATH=$INSTALL_FOLDER/bin:$PATH
+    if [ -n "${PGLITE_THIRD_PARTY_EXTENSION_TARGETS:-}" ]; then
+        read -r -a THIRD_PARTY_TARGETS <<<"${PGLITE_THIRD_PARTY_EXTENSION_TARGETS}"
+        for extension in "${THIRD_PARTY_TARGETS[@]}"; do
+            if [ "$extension" != postgis ]; then
+                # Object files are target-specific: reusing a classic object in
+                # a shared-memory side module fails wasm-ld feature validation.
+                # Keep this clean scoped to explicitly selected third-party
+                # extensions so the PostgreSQL core build remains incremental.
+                emmake make OPTFLAGS="" PORTNAME=emscripten \
+                    -C "pglite/other_extensions/$extension" clean \
+                    >/dev/null 2>&1 || true
+                emmake make OPTFLAGS="" PORTNAME=emscripten \
+                    -C "pglite/other_extensions/$extension" \
+                    LDFLAGS_SL="${PGLITE_LDFLAGS_SL}" \
+                    CFLAGS_SL="${PGLITE_CFLAGS}" \
+                    CXXFLAGS_SL="${PGLITE_CFLAGS}" \
+                    -j"${PGLITE_BUILD_JOBS:-}" \
+                    || { echo "failed to build third-party extension $extension"; exit 41; }
+            fi
+        done
+    else
+        emmake make OPTFLAGS="" PORTNAME=emscripten \
+            -C pglite/other_extensions -j"${PGLITE_BUILD_JOBS:-}" \
+            || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite/other_extensions' ; exit 41; }
+    fi
+    if [[ " ${PGLITE_THIRD_PARTY_EXTENSION_TARGETS:-postgis} " == *" postgis "* ]]; then
+        # Step 4.1: PostGIS has its own configure and dependency path.
+        # Run it in a subshell so an error cannot strand the main build in the
+        # pglite directory and make the following archive step fail obscurely.
+        ( cd ./pglite/ && \
+            PGLITE_CFLAGS="${PGLITE_CFLAGS}" \
+            PGLITE_LDFLAGS_SL="${PGLITE_LDFLAGS_SL}" \
+            ./build-postgis.sh \
+        ) || { echo 'failed to build third-party extension postgis'; exit 41; }
+    fi
+    DIST_TARGETS=(dist)
+    if [ -n "${PGLITE_THIRD_PARTY_EXTENSION_TARGETS:-}" ]; then
+        DIST_TARGETS=()
+        for extension in "${THIRD_PARTY_TARGETS[@]}"; do
+            DIST_TARGETS+=("${extension}.tar.gz")
+        done
+    fi
+    emmake make OPTFLAGS="" PORTNAME=emscripten \
+        -C pglite/other_extensions "${DIST_TARGETS[@]}" \
+        LDFLAGS_SL="${PGLITE_LDFLAGS_SL}" \
+        CFLAGS_SL="${PGLITE_CFLAGS}" \
+        CXXFLAGS_SL="${PGLITE_CFLAGS}" \
+        prefix="$INSTALL_FOLDER" \
+        ARCHIVE_DIR="$INSTALL_FOLDER/extensions/other" \
+        || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist' ; exit 42; }
+    if [[ " ${PGLITE_THIRD_PARTY_EXTENSION_TARGETS:-postgis} " == *" postgis "* ]]; then
+        emmake make OPTFLAGS="" PORTNAME=emscripten \
+            -C pglite/other_extensions dist-postgis \
+            ARCHIVE_DIR="$INSTALL_FOLDER/extensions/other" \
+            || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist-postgis' ; exit 43; }
+    fi
     PATH=$SAVE_PATH
 fi
 
@@ -629,6 +706,7 @@ fi
 emmake make PORTNAME=emscripten -j"${PGLITE_BUILD_JOBS:-}" -C src/backend pglite-exported-functions || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
+postprocess_runtime_side_modules || { echo 'error: postprocessing runtime side modules' ; exit 52; }
 PGLITE_EXTRA_OBJS="${PGLITE_STATIC_TEST_OBJECTS:-}" \
 POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS ${PGLITE_STATIC_TEST_LIBS:-}" emmake make PORTNAME=emscripten -C src/backend/ -j"${PGLITE_BUILD_JOBS:-}" pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
 emmake make PORTNAME=emscripten -C src/backend/ install-pglite || { echo 'emmake make PORTNAME=emscripten -C src/backend/ install-pglite' ; exit 62; }

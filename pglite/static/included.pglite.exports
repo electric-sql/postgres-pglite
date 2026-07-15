@@ -470,6 +470,7 @@ PostgresSendReadyForQueryIfNecessary
 pow
 pq_buffer_remaining_data
 pread
+pwrite
 ProcDiePending
 ProcessInterrupts
 ProcessStartupPacket

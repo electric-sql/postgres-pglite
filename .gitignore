@@ -38,6 +38,7 @@ lib*.pc
 /config.log
 /config.status
 /.pglite-build-profile
+/.pglite-postgis-build-profile
 /pgsql.sln
 /pgsql.sln.cache
 /Debug/

@@ -29,6 +29,7 @@ int pgl_getpwuid_r(uid_t uid, struct passwd *pwd, char *buffer,
 				   size_t buffer_size, struct passwd **result);
 #ifdef __PGLITE_POSTMASTER__
 uintptr_t pgl_stack_get_current(void);
+uintptr_t pgl_heap_break(void);
 static inline int
 pgl_uses_unrolled_main_loop(void)
 {
