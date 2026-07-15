@@ -41,6 +41,7 @@ install: all installdirs
 	$(INSTALL_PROGRAM) vacuumdb$(X)   '$(DESTDIR)$(bindir)'/vacuumdb$(X)
 	$(INSTALL_PROGRAM) reindexdb$(X)  '$(DESTDIR)$(bindir)'/reindexdb$(X)
 	$(INSTALL_PROGRAM) pg_isready$(X) '$(DESTDIR)$(bindir)'/pg_isready$(X)
+	$(INSTALL_PROGRAM) pg_isready.wasm '$(DESTDIR)$(bindir)'/pg_isready.wasm
 
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
@@ -50,6 +51,7 @@ uninstall:
 
 clean distclean:
 	rm -f $(addsuffix $(X), $(PROGRAMS)) $(addsuffix .o, $(PROGRAMS))
+	rm -f pg_isready.wasm
 	rm -f common.o $(WIN32RES)
 	rm -rf tmp_check
 

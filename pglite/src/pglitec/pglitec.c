@@ -2720,15 +2720,15 @@ pgl_getsockopt(int __fd, int __level, int __optname,
 			   void *__restrict __optval,
 			   socklen_t *__restrict __optlen)
 {
-#if defined(__PGLITE_POSTMASTER__)
 	/*
-	 * Virtual connects complete synchronously in the host adapter.  libpq
+	 * Host-adapted connects complete synchronously.  libpq
 	 * follows every successful connect() with SO_ERROR and requires the
 	 * returned integer to be initialized; the old generic success stub left
-	 * stack garbage in optval and made nested dblink/libpq connects fail
-	 * nondeterministically.
+	 * stack garbage in optval and made host-routed libpq connects fail
+	 * nondeterministically.  The callback is also used by standalone client
+	 * tools, so keep this behavior in PGlite libc rather than a frontend fork.
 	 */
-	if (__fd >= 0x3c000000 && __level == SOL_SOCKET &&
+	if (pglite_connect != NULL && __level == SOL_SOCKET &&
 		__optname == SO_ERROR)
 	{
 		int			no_error = 0;
@@ -2743,7 +2743,6 @@ pgl_getsockopt(int __fd, int __level, int __optname,
 		*__optlen = sizeof(no_error);
 		return 0;
 	}
-#endif
 #if defined(__PGLITE_POSTMASTER__) && defined(SO_PEERCRED)
 	/*
 	 * Node does not expose SO_PEERCRED for an accepted net.Socket.  A virtual
@@ -2818,9 +2817,9 @@ pgl_send(int __fd, const void *__buf, size_t __n, int __flags)
 int			EMSCRIPTEN_KEEPALIVE
 pgl_connect(int socket, const struct sockaddr *address, socklen_t address_len)
 {
-#ifdef __PGLITE_POSTMASTER__
 	if (pglite_connect != NULL)
 		return pglite_connect(socket, address, address_len);
+#ifdef __PGLITE_POSTMASTER__
 	return connect(socket, address, address_len);
 #else
 	/* dummy */
@@ -2888,11 +2887,11 @@ pgl_close(int fd)
 int			EMSCRIPTEN_KEEPALIVE
 pgl_poll(struct pollfd fds[], nfds_t nfds, int timeout)
 {
-#ifdef __PGLITE_POSTMASTER__
 	int			result;
 
 	if (pglite_poll != NULL)
 		result = pglite_poll(fds, nfds, timeout);
+#ifdef __PGLITE_POSTMASTER__
 	else
 		result = poll(fds, nfds, timeout);
 
@@ -2906,7 +2905,7 @@ pgl_poll(struct pollfd fds[], nfds_t nfds, int timeout)
 	pgl_dispatch_pending_signals();
 	return result;
 #else
-	/* The single-user input pump reports its one emulated socket as ready. */
-	return nfds;
+	/* The classic single-user input pump reports its emulated socket as ready. */
+	return pglite_poll != NULL ? result : nfds;
 #endif
 }

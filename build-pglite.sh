@@ -170,7 +170,7 @@ $PGLITE_MEMORY_LDFLAGS \
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
 $(pwd)/pglite/src/pglitec/pglitec.o \
--lproxyfs.js"
+-lproxyfs.js -lnodefs.js"
 
 # --with-blocksize=16 
 # --disable-largefile 
