@@ -18,6 +18,13 @@ top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 
 override CPPFLAGS := -DFRONTEND -I$(libpq_srcdir) $(CPPFLAGS)
+ifeq ($(PORTNAME), emscripten)
+# Wasm client programs link this frontend support library statically.
+override CPPFLAGS := \
+	-Dpg_char_to_encoding=pg_char_to_encoding_private \
+	-Dpg_valid_server_encoding_id=pg_valid_server_encoding_id_private \
+	$(CPPFLAGS)
+endif
 
 OBJS = \
 	archive.o \

@@ -46,6 +46,12 @@ OBJS = \
 	pqexpbuffer.o \
 	fe-auth.o
 
+ifeq ($(PORTNAME), emscripten)
+# Wasm client programs link libpq statically, so use the encoding helpers
+# supplied by the static frontend common library rather than shlib exports.
+$(OBJS): CPPFLAGS += -DUSE_PRIVATE_ENCODING_FUNCS
+endif
+
 # File shared across all SSL implementations supported.
 ifneq ($(with_ssl),no)
 OBJS += \

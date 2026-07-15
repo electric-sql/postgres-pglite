@@ -19,6 +19,9 @@ include $(top_builddir)/src/Makefile.global
 PROGRAMS = createdb createuser dropdb dropuser clusterdb vacuumdb reindexdb pg_isready
 
 override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS)
+ifeq ($(PORTNAME), emscripten)
+override CPPFLAGS := -Dpg_char_to_encoding=pg_char_to_encoding_private $(CPPFLAGS)
+endif
 LDFLAGS_INTERNAL += -L$(top_builddir)/src/fe_utils -lpgfeutils $(libpq_pgport)
 
 all: $(PROGRAMS)

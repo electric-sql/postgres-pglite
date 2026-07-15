@@ -22,6 +22,10 @@ export with_readline
 REFDOCDIR= $(top_srcdir)/doc/src/sgml/ref
 
 override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) $(CPPFLAGS)
+ifeq ($(PORTNAME), emscripten)
+# Static libpq exposes the frontend encoding helper under its private name.
+override CPPFLAGS := -Dpg_encoding_to_char=pg_encoding_to_char_private $(CPPFLAGS)
+endif
 LDFLAGS_INTERNAL += -L$(top_builddir)/src/fe_utils -lpgfeutils $(libpq_pgport)
 
 OBJS = \
