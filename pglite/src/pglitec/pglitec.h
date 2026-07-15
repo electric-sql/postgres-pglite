@@ -2,6 +2,7 @@
 #define PGLITEC_H
 
 #include <poll.h>
+#include <netdb.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdint.h>
@@ -21,6 +22,8 @@ int pgl_find_other_exec(const char *argv0, const char *target,
 						const char *version_string, char *result,
 						size_t result_size);
 int pgl_readdir_includes_dot_entries(void);
+int pgl_getaddrinfo(const char *host, const char *service,
+					const struct addrinfo *hints, struct addrinfo **result);
 struct passwd *pgl_getpwuid(uid_t uid);
 int pgl_getpwuid_r(uid_t uid, struct passwd *pwd, char *buffer,
 				   size_t buffer_size, struct passwd **result);

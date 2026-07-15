@@ -28,6 +28,8 @@
 #include <stdint.h>
 #include <signal.h>
 #include <poll.h>
+#include <netdb.h>
+#include <strings.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
 #include <dlfcn.h>
@@ -54,6 +56,29 @@ int
 pgl_readdir_includes_dot_entries(void)
 {
 	return 0;
+}
+
+/*
+ * Emscripten's DNS shim assigns synthetic 172.29.x.x addresses to hostnames,
+ * including "localhost".  Those addresses are meaningful only to its
+ * WebSocket transport and cannot be bound by the Node socket host.  Preserve
+ * the operating-system meaning of localhost at the PGlite libc boundary.
+ *
+ * Emscripten currently returns one address from its JS getaddrinfo path, so an
+ * unspecified family uses IPv4.  An explicitly requested IPv6 family still
+ * receives ::1, and explicit numeric IPv4/IPv6 addresses pass through.
+ */
+int
+pgl_getaddrinfo(const char *host, const char *service,
+				const struct addrinfo *hints, struct addrinfo **result)
+{
+	const char *resolved_host = host;
+
+	if (host != NULL && strcasecmp(host, "localhost") == 0 &&
+		(hints == NULL || (hints->ai_flags & AI_NUMERICHOST) == 0))
+		resolved_host = hints != NULL && hints->ai_family == AF_INET6 ?
+			"::1" : "127.0.0.1";
+	return getaddrinfo(resolved_host, service, hints, result);
 }
 
 #ifdef __PGLITE_POSTMASTER__

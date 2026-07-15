@@ -102,6 +102,7 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Dsystem=pgl_system -Dpopen=pgl_popen -Dpclose=pgl_pclose \
 -Dgeteuid=pgl_geteuid -Dgetuid=pgl_getuid \
 -Dgetpwuid=pgl_getpwuid -Dgetpwuid_r=pgl_getpwuid_r \
+-Dgetaddrinfo=pgl_getaddrinfo \
 -Dexit=pgl_exit \
 -Dmunmap=pgl_munmap \
 -Dfcntl=pgl_fcntl \
