@@ -41,7 +41,9 @@ install: all installdirs
 	$(INSTALL_PROGRAM) vacuumdb$(X)   '$(DESTDIR)$(bindir)'/vacuumdb$(X)
 	$(INSTALL_PROGRAM) reindexdb$(X)  '$(DESTDIR)$(bindir)'/reindexdb$(X)
 	$(INSTALL_PROGRAM) pg_isready$(X) '$(DESTDIR)$(bindir)'/pg_isready$(X)
+ifeq ($(PORTNAME), emscripten)
 	$(INSTALL_PROGRAM) pg_isready.wasm '$(DESTDIR)$(bindir)'/pg_isready.wasm
+endif
 
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
