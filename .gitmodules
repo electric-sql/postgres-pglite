@@ -29,3 +29,6 @@
 [submodule "pglite/other_extensions/pgmq"]
 	path = pglite/other_extensions/pgmq
 	url = https://github.com/pgmq/pgmq
+[submodule "pglite/other_extensions/plpgsql_check"]
+	path = pglite/other_extensions/plpgsql_check
+	url = https://github.com/okbob/plpgsql_check.git
