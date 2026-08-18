@@ -84,7 +84,6 @@ void EMSCRIPTEN_KEEPALIVE pgl_longjmp(jmp_buf env, int val) {
         // reset this as it is expected
         if (!ignore_till_sync)
 		    send_ready_for_query = true;	/* initially, or after error */
-        // exit(POSTGRES_MAIN_LONGJMP);
         pglite_exit_status = POSTGRES_MAIN_LONGJMP;
         emscripten_exit_with_live_runtime();
     }
