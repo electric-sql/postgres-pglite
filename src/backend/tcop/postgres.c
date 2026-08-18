@@ -190,6 +190,13 @@ static void log_disconnections(int code, Datum arg);
 static void enable_statement_timeout(void);
 static void disable_statement_timeout(void);
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
+#else
+#define EMSCRIPTEN_KEEPALIVE
+// TODO: an include for libpglite
+#endif
+
 /* these must be volatile to ensure state is preserved across longjmp: */
 #ifdef __PGLITE__
 extern bool send_ready_for_query;
@@ -206,6 +213,7 @@ static volatile bool idle_session_timeout_enabled = false;
 extern sigjmp_buf postgresmain_sigjmp_buf;
 extern int pgl_sigsetjmp(sigjmp_buf env, int savesigs);
 extern int is_pglite_active;
+extern int pgl_setPGliteExitStatus(int status);
 
 void initDummyPort() {
 	ClientSocket s;
@@ -4862,8 +4870,10 @@ void PostgresMainLoopOnce() {
 				 * scenarios.
 				 */
 				#ifdef __PGLITE__
-				if (is_pglite_active != 0)
-					exit(PGLITE_EXIT_ALIVE);
+				if (is_pglite_active != 0) {
+				    pgl_setPGliteExitStatus(PGLITE_EXIT_ALIVE);
+				    emscripten_exit_with_live_runtime();
+			    }
 				else 
 					proc_exit(0);
 				#else
