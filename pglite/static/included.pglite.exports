@@ -216,6 +216,7 @@ CallerFInfoFunctionCall2
 calloc
 cbrt
 chdir
+check_encoding_conversion_args
 check_stack_depth
 clearerr
 clock
