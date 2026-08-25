@@ -84,7 +84,8 @@ PGLITE_LDFLAGS_EX="\
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
 $(pwd)/pglite/src/pglitec/pglitec.o \
--lproxyfs.js"
+-lproxyfs.js \
+--post-js $(pwd)/pglite/scripts/doNotSetExitCode.js"
 
 # --with-blocksize=16 
 # --disable-largefile 
@@ -92,7 +93,7 @@ $(pwd)/pglite/src/pglitec/pglitec.o \
 
 CONFIGURE_PARAMS="\
 ac_cv_exeext=.js \
---host wasm32-unknown-linux-gnu \
+--host wasm32-emscripten \
 --disable-spinlocks \
 --without-llvm  \
 --without-pam \
