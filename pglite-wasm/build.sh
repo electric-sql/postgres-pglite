@@ -105,7 +105,7 @@ ________________________________________________________
              $LINK_ICU \
              ${PG_BUILD}/${BUILD}/src/backend/snowball/libdict_snowball.a \
              ${PG_BUILD}/${BUILD}/src/pl/plpgsql/src/libplpgsql.a \
-             -lxml2 -lz
+             -lxml2 -lz ${EXTRA_PG_LIBS:-}
         else
             echo "compilation of libpglite ${BUILD} support failed"
         fi
