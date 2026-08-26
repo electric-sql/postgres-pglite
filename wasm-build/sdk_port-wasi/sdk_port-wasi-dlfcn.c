@@ -81,7 +81,16 @@ ends_with(const char *str, const char *suffix)
 
 // dlfcn.h
 
-volatile dict_t* dltab[];
+/* dltab was a tentative (1-element) array indexed past its end, and slot
+ * 0 was never assigned: the first library landed at dltab[1] while the
+ * lookup loop read dltab[0..dltab_index), so every lookup dereferenced a
+ * NULL dict — i.e. guest address 0. That is harmless while address 0
+ * holds zeros, but the CMA wire channel places live request bytes at the
+ * bottom of memory, turning the NULL-dict read into wild loads and traps
+ * (observed as a crash on the first CREATE EXTENSION over CMA). Use a
+ * real array and keep every slot initialized. */
+#define DLTAB_MAX 64
+static dict_t dltab[DLTAB_MAX];
 volatile int dltab_index = 0;
 
 void *
@@ -126,24 +135,39 @@ extern void plpgsql_validator(void);
 
 extern void _PG_init(void);
 
+/* Statically-linked extension hook: a build may link an extra object that
+ * overrides these to resolve extension symbols (e.g. a generated table for
+ * pgvector) and run its _PG_init when the extension's .so is "opened".
+ * The weak defaults keep the stock build behavior. */
+__attribute__((weak)) void *
+pglite_extra_dlsym(const char *symbol) {
+    return NULL;
+}
+__attribute__((weak)) void
+pglite_extra_dlopen(const char *filename) {
+}
+
 
 void *
 dlopen(const char *filename, int flags) {
     dict_t tab = NULL;
     fprintf(stderr,"void *dlopen(const char *filename = %s, int flags=%d)\n", filename, flags);
     for (int i=0; i< dltab_index; i++) {
-        if ( dict_find_index(dltab[i], filename) > 0 )
-            return (void *)i;
+        if ( dltab[i] && dict_find_index(dltab[i], filename) >= 0 )
+            return (void *)(i + 1);
     }
     printf("dlopen: new lib '%s'\n", filename );
     if ( ends_with(filename,"/plpgsql.so") ){
         puts(" ========= CALLING _PG_init =========");
         _PG_init();
     }
+    pglite_extra_dlopen(filename);
 
+    if (dltab_index >= DLTAB_MAX)
+        return NULL;
     tab = dict_new();
-    dict_add(tab, filename, dltab_index++ );
-    dltab[dltab_index] = tab;
+    dict_add(tab, filename, dltab_index);
+    dltab[dltab_index++] = tab;
 
     return (void *)dltab_index;
 }
@@ -191,6 +215,8 @@ dlsym(void *__restrict handle, const char *__restrict symbol) {
     }
 
 report:;
+    if (sym == NULL)
+        sym = pglite_extra_dlsym(symbol);
     fprintf(stderr, "void *dlsym(void *handle = %p, const char *symbol = %s) => %p\n", handle, symbol, sym);
     return sym;
 }
