@@ -29,3 +29,6 @@
 [submodule "pglite/other_extensions/pgmq"]
 	path = pglite/other_extensions/pgmq
 	url = https://github.com/pgmq/pgmq
+[submodule "pglite/other_extensions/pg_bigm"]
+	path = pglite/other_extensions/pg_bigm
+	url = https://github.com/pgbigm/pg_bigm.git
