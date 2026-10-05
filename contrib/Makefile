@@ -59,6 +59,10 @@ else
 ALWAYS_SUBDIRS += pgcrypto sslinfo
 endif
 
+ifeq ($(PGLITE_WITH_PGCRYPTO), 1)
+SUBDIRS += pgcrypto
+endif
+
 ifneq ($(with_uuid),no)
 SUBDIRS += uuid-ossp
 else
@@ -91,6 +95,8 @@ endif
 
 # Missing:
 #		start-scripts	\ (does not have a makefile)
+
+include ./dist.mk
 
 
 $(recurse)

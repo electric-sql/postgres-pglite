@@ -2496,12 +2496,14 @@ XLogWrite(XLogwrtRqst WriteRqst, TimeLineID tli, bool flexible)
 				 * like a checkpoint is needed, forcibly update RedoRecPtr and
 				 * recheck.
 				 */
+#ifndef __PGLITE__					
 				if (IsUnderPostmaster && XLogCheckpointNeeded(openLogSegNo))
 				{
 					(void) GetRedoRecPtr();
 					if (XLogCheckpointNeeded(openLogSegNo))
 						RequestCheckpoint(CHECKPOINT_CAUSE_XLOG);
 				}
+#endif				
 			}
 		}
 

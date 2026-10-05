@@ -708,6 +708,12 @@ BaseInit(void)
  *		Be very careful with the order of calls in the InitPostgres function.
  * --------------------------------
  */
+
+// force the name used with --single
+#if !defined(WASM_USERNAME)
+#define WASM_USERNAME "postgres"
+#endif
+
 void
 InitPostgres(const char *in_dbname, Oid dboid,
 			 const char *username, Oid useroid,
@@ -870,8 +876,18 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	}
 	else if (!IsUnderPostmaster)
 	{
+#if defined(__EMSCRIPTEN__)
+if (!strcmp( username , WASM_USERNAME )) {
+#endif		
 		InitializeSessionUserIdStandalone();
 		am_superuser = true;
+#if defined(__EMSCRIPTEN__)
+} else {
+        //puts("# 894: switching session id");
+        InitializeSessionUserId(username, InvalidOid, false);
+		am_superuser = superuser();
+}
+#endif		
 		if (!ThereIsAtLeastOneRole())
 			ereport(WARNING,
 					(errcode(ERRCODE_UNDEFINED_OBJECT),
