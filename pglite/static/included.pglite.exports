@@ -228,6 +228,7 @@ construct_md_array
 cos
 cosh
 cosl
+creating_extension
 cstring_to_text
 cstring_to_text_with_len
 CurrentMemoryContext

@@ -214,7 +214,6 @@ static volatile bool idle_session_timeout_enabled = false;
 extern sigjmp_buf postgresmain_sigjmp_buf;
 extern int pgl_sigsetjmp(sigjmp_buf env, int savesigs);
 extern int is_pglite_active;
-extern int pgl_setPGliteExitStatus(int status);
 
 void initDummyPort() {
 	ClientSocket s;
@@ -4875,8 +4874,7 @@ void PostgresMainLoopOnce() {
 				 */
 				#ifdef __PGLITE__
 				if (is_pglite_active != 0) {
-				    pgl_setPGliteExitStatus(PGLITE_EXIT_ALIVE);
-				    emscripten_exit_with_live_runtime();
+				    exit(PGLITE_EXIT_ALIVE);
 			    }
 				else 
 					proc_exit(0);

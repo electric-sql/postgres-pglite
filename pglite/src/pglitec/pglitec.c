@@ -34,7 +34,6 @@
 #endif
 
 volatile int is_pglite_active = 0;
-volatile int pglite_exit_status = -1;
 
 void EMSCRIPTEN_KEEPALIVE clear_setitimer(void) {
     struct itimerval zero = {{0, 0}, {0, 0}};
@@ -48,16 +47,6 @@ int pgl_setPGliteActive(int newValue) {
         clear_setitimer();
     }
 	return current;
-}
-
-int EMSCRIPTEN_KEEPALIVE pgl_getPGliteExitStatus() {
-    return pglite_exit_status;
-}
-
-int EMSCRIPTEN_KEEPALIVE pgl_setPGliteExitStatus(int status) {
-    int prev = pglite_exit_status;
-    pglite_exit_status = status;
-    return prev;
 }
 
 /* ========== Top level exception handling ==========
@@ -84,8 +73,7 @@ void EMSCRIPTEN_KEEPALIVE pgl_longjmp(jmp_buf env, int val) {
         // reset this as it is expected
         if (!ignore_till_sync)
 		    send_ready_for_query = true;	/* initially, or after error */
-        pglite_exit_status = POSTGRES_MAIN_LONGJMP;
-        emscripten_exit_with_live_runtime();
+        exit(POSTGRES_MAIN_LONGJMP);
     }
     longjmp(env, val);
 }
@@ -243,7 +231,6 @@ pgl_exit(int status) {
         pgl_stdout = NULL;
     }
     optind = 1;
-    pglite_exit_status = -1;
     exit(status);
 }
 

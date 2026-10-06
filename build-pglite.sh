@@ -65,11 +65,11 @@ else
     echo "$CONFIG_STATUS exists and is newer than $REF_FILE. ./configure will NOT be run."
 fi
 
-PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0"
-PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
+PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0 -sFAKE_DYLIBS=1"
+PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=64MB \
 -sWASM_BIGINT \
@@ -83,6 +83,7 @@ PGLITE_LDFLAGS_EX="\
 -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
+-sFAKE_DYLIBS=1 \
 $(pwd)/pglite/src/pglitec/pglitec.o \
 -lproxyfs.js \
 --post-js $(pwd)/pglite/scripts/doNotSetExitCode.js"
@@ -139,11 +140,11 @@ PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist || { ech
 # Step 4: make and dist other extensions
 SAVE_PATH=$PATH
 PATH=$PATH:$INSTALL_FOLDER/bin
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions -j || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite/other_extensions' ; exit 41; }
+emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -j -C pglite/other_extensions' ; exit 41; }
 # Step 4.1: special case: make PostGIS
 cd ./pglite/ && ./build-postgis.sh && cd ../
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist' ; exit 42; }
-emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/other_extensions dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -C pglite/ dist-postgis' ; exit 43; }
+emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions dist' ; exit 42; }
+emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/ dist-postgis' ; exit 43; }
 PATH=$SAVE_PATH
 
 # Step 5: get exported functions
@@ -165,7 +166,7 @@ PGPRELOAD="\
 --preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a \
 --preload-file $(pwd)/pglite/static/minimal-icu/76.1@/pglite/icu"
 
-PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV,stackSave,stackRestore"
+PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV,stackSave,stackRestore,HEAPU8"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 POSTGRES_PGLITE_FLAGS="\
@@ -174,6 +175,7 @@ POSTGRES_PGLITE_FLAGS="\
 -sIMPORTED_MEMORY=1 \
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
+-sFAKE_DYLIBS=1 \
 $PGPRELOAD \
 -lnodefs.js -lidbfs.js"
 

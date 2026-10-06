@@ -1,4 +1,4 @@
-ARG EMSDK_VER=3.1.74
+ARG EMSDK_VER=6.0.5
 ARG BUILDPLATFORM
 # we only need to build on one platform, since we're interested in the WASM output
 # building on the native (BUILDPLATFORM) is much faster, so use that
@@ -25,8 +25,8 @@ WORKDIR /src
 ENV EMCC_COMMON_FLAGS="-O2 -fPIC -sWASM_BIGINT"
 
 WORKDIR /src
-RUN curl -L https://www.zlib.net/zlib-1.3.1.tar.gz | tar -xz
-WORKDIR /src/zlib-1.3.1
+RUN curl -L https://www.zlib.net/zlib-1.3.2.tar.gz | tar -xz
+WORKDIR /src/zlib-1.3.2
 RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --static --prefix=/install/libs
 RUN emmake make -j && emmake make install
 RUN ${LLVM_NM} /install/libs/lib/libz.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libz.exports
