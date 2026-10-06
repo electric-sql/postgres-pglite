@@ -4989,7 +4989,13 @@ void PostgresMainLongJmp() {
 		 * ReadyForQuery (until we get Sync).
 		 */
 		if (doing_extended_query_message)
+		{
 			ignore_till_sync = true;
+#ifdef __PGLITE__
+			/* pgl_longjmp() set this too early: no ReadyForQuery until Sync */
+			send_ready_for_query = false;
+#endif
+		}
 
 		/* We don't have a transaction command open anymore */
 		xact_started = false;
