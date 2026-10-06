@@ -9,7 +9,14 @@ SUBDIRS = \
 		pg_uuidv7 \
 		pg_hashids \
 		pg_textsearch \
-		pgmq/pgmq-extension
+		pgmq/pgmq-extension \
+		pg_bigm
+
+# Every other extension here includes PGXS unconditionally. pg_bigm gates it
+# behind USE_PGXS and otherwise assumes it sits in the postgres tree as
+# contrib/pg_bigm, which resolves contrib-global.mk to a path that does not
+# exist from here. Set the flag for its build and its packaging step only.
+all-pg_bigm-recurse pg_bigm.tar.gz: export USE_PGXS = 1
 
 prefix ?= /pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build
