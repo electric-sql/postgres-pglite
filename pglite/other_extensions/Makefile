@@ -10,7 +10,10 @@ SUBDIRS = \
 		pg_hashids \
 		pg_textsearch \
 		pgmq/pgmq-extension \
-		plpgsql_check
+		plpgsql_check \
+		pgaudit \
+		pg_repack \
+		hypopg
 
 prefix ?= /pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build
