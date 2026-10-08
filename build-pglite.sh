@@ -69,7 +69,7 @@ PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0 -sFAKE_DYLIBS=1"
 PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,FS,MEMFS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,MEMFS,IDBFS,FS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=64MB \
 -sWASM_BIGINT \
@@ -85,7 +85,7 @@ PGLITE_LDFLAGS_EX="\
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
 -sFAKE_DYLIBS=1 \
 $(pwd)/pglite/src/pglitec/pglitec.o \
--lproxyfs.js \
+-lproxyfs.js -lidbfs.js \
 --post-js $(pwd)/pglite/scripts/doNotSetExitCode.js"
 
 # --with-blocksize=16 
