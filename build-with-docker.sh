@@ -3,7 +3,9 @@
 DOCKER_WORKSPACE=$(pwd)
 echo "PGLITE_VERSION=${PGLITE_VERSION}"
 echo "DEBUG=${DEBUG}"
-  # electricsql/pglite-builder:3.1.74-7 \
+
+  # electricsql/pglite-builder:6.0.5-1 \  
+
 docker run $@ \
   --rm \
   -e DEBUG=${DEBUG:-false} \
@@ -11,5 +13,5 @@ docker run $@ \
   --workdir=${DOCKER_WORKSPACE} \
   -v .:${DOCKER_WORKSPACE}:rw \
   -v ./dist:/pglite:rw \
-  electricsql/pglite-builder:6.0.5-1 \
+  electricsql/pglite-builder:3.1.74-7 \
   ./build-pglite.sh
