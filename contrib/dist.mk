@@ -17,6 +17,8 @@ dist: $(addsuffix .tar.gz,$(CONTRIBS))
 	rm -rf $(CONTRIB_BUILD_ROOT)/$*
 	bash -c 'mkdir -p $(CONTRIB_BUILD_ROOT)/$*/$(prefix)/{bin,lib,share/extension,share/doc,share/postgresql/extension,share/postgresql/tsearch_data,include}'
 	$(MAKE) -C $* install DESTDIR=$(CONTRIB_BUILD_ROOT)/$*
+	mkdir -p $(CONTRIB_BUILD_ROOT)/$*/$(prefix)/share/doc/$*
+	cp $(top_srcdir)/COPYRIGHT $(CONTRIB_BUILD_ROOT)/$*/$(prefix)/share/doc/$*/
 	@echo "=== Packaging $* ==="
 	mkdir -p $(ARCHIVE_DIR)
 	cd $(CONTRIB_BUILD_ROOT)/$*/$(prefix) && \
