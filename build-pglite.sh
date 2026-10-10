@@ -65,10 +65,13 @@ else
     echo "$CONFIG_STATUS exists and is newer than $REF_FILE. ./configure will NOT be run."
 fi
 
-PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0 -sFAKE_DYLIBS=1"
-PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1"
+# -sFAKE_DYLIBS=1
+PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0"
+# -sFAKE_DYLIBS=1
+PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
+# -sFAKE_DYLIBS=1 \
 EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,MEMFS,IDBFS,FS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=64MB \
@@ -83,7 +86,6 @@ PGLITE_LDFLAGS_EX="\
 -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
--sFAKE_DYLIBS=1 \
 $(pwd)/pglite/src/pglitec/pglitec.o \
 -lproxyfs.js -lidbfs.js \
 --post-js $(pwd)/pglite/scripts/doNotSetExitCode.js"
@@ -169,13 +171,13 @@ PGPRELOAD="\
 PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV,stackSave,stackRestore,HEAPU8"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
+# -sFAKE_DYLIBS=1 \
 POSTGRES_PGLITE_FLAGS="\
 -sSTACK_SIZE=8MB \
 -sINITIAL_MEMORY=128MB \
 -sIMPORTED_MEMORY=1 \
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
--sFAKE_DYLIBS=1 \
 $PGPRELOAD \
 -lnodefs.js -lidbfs.js"
 
