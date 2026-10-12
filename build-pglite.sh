@@ -87,7 +87,7 @@ PGLITE_LDFLAGS_EX="\
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
 $(pwd)/pglite/src/pglitec/pglitec.o \
--lproxyfs.js -lidbfs.js \
+-lproxyfs.js \
 --post-js $(pwd)/pglite/scripts/doNotSetExitCode.js"
 
 # --with-blocksize=16 
