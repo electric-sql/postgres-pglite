@@ -72,7 +72,7 @@ PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
 # -sFAKE_DYLIBS=1 \
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,MEMFS,IDBFS,FS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,MEMFS,FS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=64MB \
 -sWASM_BIGINT \
@@ -155,18 +155,18 @@ emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions || {
 # Step 6: make and install pglite
 PGROOT=/pglite
 # PG_IMPORTS_DIR=$PGROOT/imports
-PGPRELOAD="\
---preload-file $(pwd)/pglite/static/PGPASSFILE@/home/postgres/.pgpass \
---preload-file $(pwd)/pglite/static/empty@/pglite/bin/initdb \
---preload-file $(pwd)/pglite/static/empty@/pglite/bin/pg_dump \
---preload-file $(pwd)/pglite/static/empty@/pglite/bin/postgres \
---preload-file $PGROOT/share/postgresql@/pglite/share/postgresql \
---preload-file $PGROOT/lib/postgresql@/pglite/lib/postgresql \
---preload-file $(pwd)/pglite/static/password@/pglite/password \
---preload-file $(pwd)/pglite/static/empty@/pglite/pgstdin \
---preload-file $(pwd)/pglite/static/empty@/pglite/pgstdout \
---preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a \
---preload-file $(pwd)/pglite/static/minimal-icu/76.1@/pglite/icu"
+PGEMBED="\
+--embed-file $(pwd)/pglite/static/PGPASSFILE@/home/postgres/.pgpass \
+--embed-file $(pwd)/pglite/static/empty@/pglite/bin/initdb \
+--embed-file $(pwd)/pglite/static/empty@/pglite/bin/pg_dump \
+--embed-file $(pwd)/pglite/static/empty@/pglite/bin/postgres \
+--embed-file $PGROOT/share/postgresql@/pglite/share/postgresql \
+--embed-file $PGROOT/lib/postgresql@/pglite/lib/postgresql \
+--embed-file $(pwd)/pglite/static/password@/pglite/password \
+--embed-file $(pwd)/pglite/static/empty@/pglite/pgstdin \
+--embed-file $(pwd)/pglite/static/empty@/pglite/pgstdout \
+--embed-file $(pwd)/pglite/static/locale-a@/pglite/locale-a \
+--embed-file $(pwd)/pglite/static/minimal-icu/76.1@/pglite/icu"
 
 PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV,stackSave,stackRestore,HEAPU8"
 
@@ -178,7 +178,7 @@ POSTGRES_PGLITE_FLAGS="\
 -sIMPORTED_MEMORY=1 \
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
-$PGPRELOAD \
+$PGEMBED \
 -lnodefs.js -lidbfs.js"
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
