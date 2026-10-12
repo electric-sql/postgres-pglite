@@ -759,6 +759,9 @@ extern int	pqRowProcessor(PGconn *conn, const char **errmsgp);
 extern void pqCommandQueueAdvance(PGconn *conn, bool isReadyForQuery,
 								  bool gotSync);
 extern int	PQsendQueryContinue(PGconn *conn, const char *query);
+extern PGresult *PQnfn(PGconn *conn, int fnid, int *result_buf, int buf_size,
+					   int *result_len, int result_is_int,
+					   const PQArgBlock *args, int nargs);
 
 /* === in fe-protocol3.c === */
 
@@ -774,7 +777,8 @@ extern int	pqGetline3(PGconn *conn, char *s, int maxlen);
 extern int	pqGetlineAsync3(PGconn *conn, char *buffer, int bufsize);
 extern int	pqEndcopy3(PGconn *conn);
 extern PGresult *pqFunctionCall3(PGconn *conn, Oid fnid,
-								 int *result_buf, int *actual_result_len,
+								 int *result_buf, int buf_size,
+								 int *actual_result_len,
 								 int result_is_int,
 								 const PQArgBlock *args, int nargs);
 
@@ -817,6 +821,7 @@ extern int	pqWriteReady(PGconn *conn);
 extern PostgresPollingStatusType pqsecure_open_client(PGconn *);
 extern void pqsecure_close(PGconn *);
 extern ssize_t pqsecure_read(PGconn *, void *ptr, size_t len);
+extern ssize_t pqsecure_bytes_pending(PGconn *);
 extern ssize_t pqsecure_write(PGconn *, const void *ptr, size_t len);
 extern ssize_t pqsecure_raw_read(PGconn *, void *ptr, size_t len);
 extern ssize_t pqsecure_raw_write(PGconn *, const void *ptr, size_t len);
@@ -853,9 +858,9 @@ extern void pgtls_close(PGconn *conn);
 extern ssize_t pgtls_read(PGconn *conn, void *ptr, size_t len);
 
 /*
- *	Is there unread data waiting in the SSL read buffer?
+ *	Return the number of bytes available in the transport buffer.
  */
-extern bool pgtls_read_pending(PGconn *conn);
+extern ssize_t pgtls_bytes_pending(PGconn *conn);
 
 /*
  *	Write data to a secure connection.
@@ -903,6 +908,7 @@ extern PostgresPollingStatusType pqsecure_open_gss(PGconn *conn);
  */
 extern ssize_t pg_GSS_write(PGconn *conn, const void *ptr, size_t len);
 extern ssize_t pg_GSS_read(PGconn *conn, void *ptr, size_t len);
+extern ssize_t pg_GSS_bytes_pending(PGconn *conn);
 #endif
 
 /* === in fe-trace.c === */

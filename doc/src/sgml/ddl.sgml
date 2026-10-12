@@ -2092,7 +2092,11 @@ REVOKE ALL ON accounts FROM PUBLIC;
      <listitem>
       <para>
        Allows creation of a foreign key constraint referencing a
-       table, or specific column(s) of a table.
+       table, or specific column(s) of a table. Great care should be taken when
+       granting this privilege, since a user who creates a foreign key can arrange
+       for enforcement of that foreign key to call an arbitrary function, such as
+       a cast function, and such functions will be called with the privileges of
+       the table owner.
       </para>
      </listitem>
     </varlistentry>
@@ -2101,7 +2105,9 @@ REVOKE ALL ON accounts FROM PUBLIC;
      <term><literal>TRIGGER</literal></term>
      <listitem>
       <para>
-       Allows creation of a trigger on a table, view, etc.
+       Allows creation of a trigger on a table, view, etc. Great care should be
+       taken when granting this privilege, since any triggers added to a table
+       or view will be executed with the privileges of users who modify it.
       </para>
      </listitem>
     </varlistentry>
@@ -5085,13 +5091,9 @@ EXPLAIN SELECT count(*) FROM measurement WHERE logdate &gt;= DATE '2008-01-01';
        It is possible to determine the number of partitions which were
        removed during this phase by observing the
        <quote>Subplans Removed</quote> property in the
-       <command>EXPLAIN</command> output.  The query planner obtains locks for
-       all partitions which are part of the plan.  However, when the executor
-       uses a cached plan, locks are only obtained on the partitions which
-       remain after partition pruning done during the initialization phase of
-       execution, i.e., the ones shown in the <command>EXPLAIN</command>
-       output and not the ones referred to by the
-       <quote>Subplans Removed</quote> property.
+       <command>EXPLAIN</command> output.  It's important to note that any
+       partitions removed by the partition pruning done at this stage are
+       still locked at the beginning of execution.
       </para>
      </listitem>
 

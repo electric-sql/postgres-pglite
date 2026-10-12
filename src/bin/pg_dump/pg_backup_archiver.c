@@ -42,6 +42,7 @@
 #include "pg_backup_archiver.h"
 #include "pg_backup_db.h"
 #include "pg_backup_utils.h"
+#include "pgtar.h"
 
 #define TEXT_DUMP_HEADER "--\n-- PostgreSQL database dump\n--\n\n"
 #define TEXT_DUMPALL_HEADER "--\n-- PostgreSQL database cluster dump\n--\n\n"
@@ -2371,7 +2372,7 @@ _discoverArchiveFormat(ArchiveHandle *AH)
 		}
 
 		if (!isValidTarHeader(AH->lookahead))
-			pg_fatal("input file does not appear to be a valid archive");
+			pg_fatal("input file does not appear to be a valid tar archive");
 
 		AH->format = archTar;
 	}
@@ -3104,7 +3105,9 @@ _tocEntryRequired(TocEntry *te, teSection curSection, ArchiveHandle *AH)
 	}
 
 	/* If it's a subscription, maybe ignore it */
-	if (ropt->no_subscriptions && strcmp(te->desc, "SUBSCRIPTION") == 0)
+	if (ropt->no_subscriptions &&
+		(strcmp(te->desc, "SUBSCRIPTION") == 0 ||
+		 strcmp(te->desc, "SUBSCRIPTION TABLE") == 0))
 		return 0;
 
 	/* Ignore it if section is not to be dumped/restored */
@@ -3136,7 +3139,6 @@ _tocEntryRequired(TocEntry *te, teSection curSection, ArchiveHandle *AH)
 	 */
 	if (strcmp(te->desc, "ACL") == 0 ||
 		strcmp(te->desc, "COMMENT") == 0 ||
-		strcmp(te->desc, "STATISTICS DATA") == 0 ||
 		strcmp(te->desc, "SECURITY LABEL") == 0)
 	{
 		/* Database properties react to createDB, not selectivity options. */
@@ -3207,14 +3209,52 @@ _tocEntryRequired(TocEntry *te, teSection curSection, ArchiveHandle *AH)
 
 		if (ropt->selTypes)
 		{
-			if (strcmp(te->desc, "TABLE") == 0 ||
-				strcmp(te->desc, "TABLE DATA") == 0 ||
-				strcmp(te->desc, "VIEW") == 0 ||
-				strcmp(te->desc, "FOREIGN TABLE") == 0 ||
-				strcmp(te->desc, "MATERIALIZED VIEW") == 0 ||
-				strcmp(te->desc, "MATERIALIZED VIEW DATA") == 0 ||
-				strcmp(te->desc, "SEQUENCE") == 0 ||
-				strcmp(te->desc, "SEQUENCE SET") == 0)
+			if (strcmp(te->desc, "STATISTICS DATA") == 0)
+			{
+				bool		dumpthis = false;
+
+				/*
+				 * Statistics data entries can be for tables or indexes. Check
+				 * the parent dependency to determine which type this entry
+				 * belongs to, then apply the appropriate name filter.
+				 */
+				for (int i = 0; i < te->nDeps; i++)
+				{
+					TocEntry   *pte = getTocEntryByDumpId(AH, te->dependencies[i]);
+
+					if (!pte)
+						continue;
+
+					if (ropt->selTable &&
+						(strcmp(pte->desc, "TABLE") == 0 ||
+						 strcmp(pte->desc, "VIEW") == 0 ||
+						 strcmp(pte->desc, "FOREIGN TABLE") == 0 ||
+						 strcmp(pte->desc, "MATERIALIZED VIEW") == 0))
+					{
+						if (ropt->tableNames.head == NULL ||
+							simple_string_list_member(&ropt->tableNames, pte->tag))
+							dumpthis = true;
+					}
+
+					if (ropt->selIndex &&
+						strcmp(pte->desc, "INDEX") == 0)
+					{
+						if (ropt->indexNames.head == NULL ||
+							simple_string_list_member(&ropt->indexNames, pte->tag))
+							dumpthis = true;
+					}
+				}
+				if (!dumpthis)
+					return 0;
+			}
+			else if (strcmp(te->desc, "TABLE") == 0 ||
+					 strcmp(te->desc, "TABLE DATA") == 0 ||
+					 strcmp(te->desc, "VIEW") == 0 ||
+					 strcmp(te->desc, "FOREIGN TABLE") == 0 ||
+					 strcmp(te->desc, "MATERIALIZED VIEW") == 0 ||
+					 strcmp(te->desc, "MATERIALIZED VIEW DATA") == 0 ||
+					 strcmp(te->desc, "SEQUENCE") == 0 ||
+					 strcmp(te->desc, "SEQUENCE SET") == 0)
 			{
 				if (!ropt->selTable)
 					return 0;

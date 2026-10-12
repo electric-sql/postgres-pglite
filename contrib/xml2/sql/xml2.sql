@@ -132,6 +132,9 @@ SELECT xpath_nodeset(article_xml::text, '/article/author|/article/pages',
 SELECT xpath_nodeset(article_xml::text, '/article/author|/article/pages',
                      'result', 'item')
   FROM articles;
+-- namespace node
+SELECT xpath_nodeset('<root xmlns:foo="http://icl.com/saxon"/>',
+                     '//namespace::foo');
 
 -- xpath_list()
 SELECT xpath_list(article_xml::text, '/article/author|/article/pages')
@@ -152,4 +155,10 @@ $$<xsl:stylesheet version="1.0"
       <xsl:apply-templates/>
     </sax:output>
   </xsl:template>
+</xsl:stylesheet>$$);
+
+-- empty output
+select xslt_process('<aaa/>',
+$$<xsl:stylesheet version="1.0"
+      xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
 </xsl:stylesheet>$$);

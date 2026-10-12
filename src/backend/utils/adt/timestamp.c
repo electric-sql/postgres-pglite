@@ -1691,15 +1691,19 @@ Datum
 timeofday(PG_FUNCTION_ARGS)
 {
 	struct timeval tp;
-	char		templ[128];
-	char		buf[128];
 	pg_time_t	tt;
+	struct pg_tm *tm;
+	char		part1[128];
+	char		part2[128];
+	char		buf[128 + 128 + 10];
 
 	gettimeofday(&tp, NULL);
 	tt = (pg_time_t) tp.tv_sec;
-	pg_strftime(templ, sizeof(templ), "%a %b %d %H:%M:%S.%%06d %Y %Z",
-				pg_localtime(&tt, session_timezone));
-	snprintf(buf, sizeof(buf), templ, tp.tv_usec);
+	tm = pg_localtime(&tt, session_timezone);
+
+	pg_strftime(part1, sizeof(part1), "%a %b %d %H:%M:%S", tm);
+	pg_strftime(part2, sizeof(part2), "%Y %Z", tm);
+	snprintf(buf, sizeof(buf), "%s.%06d %s", part1, (int) tp.tv_usec, part2);
 
 	PG_RETURN_TEXT_P(cstring_to_text(buf));
 }
@@ -4090,7 +4094,15 @@ interval_avg_combine(PG_FUNCTION_ARGS)
 	state2 = PG_ARGISNULL(1) ? NULL : (IntervalAggState *) PG_GETARG_POINTER(1);
 
 	if (state2 == NULL)
+	{
+		/*
+		 * NULL state2 is easy, just return state1, which we know is already
+		 * in the agg_context
+		 */
+		if (state1 == NULL)
+			PG_RETURN_NULL();
 		PG_RETURN_POINTER(state1);
+	}
 
 	if (state1 == NULL)
 	{

@@ -128,9 +128,22 @@ typedef struct
 								 * subquery belonging to a set operation */
 } standard_qp_extra;
 
+/*
+ * Context for find_having_conflicts.  This is the callback context passed to
+ * expression_has_grouping_conflict in clauses.c.
+ */
+typedef struct
+{
+	Query	   *parse;
+	Index		group_rtindex;
+} having_grouping_ctx;
+
 /* Local functions */
 static Node *preprocess_expression(PlannerInfo *root, Node *expr, int kind);
 static void preprocess_qual_conditions(PlannerInfo *root, Node *jtnode);
+static Bitmapset *find_having_conflicts(Query *parse, Index group_rtindex);
+static Oid	having_var_grouping_eqop(Var *var, void *context);
+static Oid	group_var_eqop(Query *parse, Var *var);
 static void grouping_planner(PlannerInfo *root, double tuple_fraction,
 							 SetOperationStmt *setops);
 static grouping_sets_data *preprocess_grouping_sets(PlannerInfo *root);
@@ -655,6 +668,8 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 	PlannerInfo *root;
 	List	   *newWithCheckOptions;
 	List	   *newHaving;
+	Bitmapset  *havingPushdownConflicts;
+	int			havingIdx;
 	bool		hasOuterJoins;
 	bool		hasResultRTEs;
 	RelOptInfo *final_rel;
@@ -1077,6 +1092,16 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 	}
 
 	/*
+	 * Before we flatten GROUP Vars, identify HAVING clauses whose equality
+	 * semantics disagree with the GROUP BY's.  See find_having_conflicts.
+	 */
+	if (parse->hasGroupRTE)
+		havingPushdownConflicts = find_having_conflicts(parse,
+														root->group_rtindex);
+	else
+		havingPushdownConflicts = NULL;
+
+	/*
 	 * Replace any Vars in the subquery's targetlist and havingQual that
 	 * reference GROUP outputs with the underlying grouping expressions.
 	 *
@@ -1120,6 +1145,14 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 	 * but it's okay: it's just an optimization to avoid running pull_varnos
 	 * when there cannot be any Vars in the HAVING clause.)
 	 *
+	 * We also cannot do this for HAVING clauses that conflict with GROUP BY
+	 * on collation or operator family.  Both kinds of conflict are detected
+	 * before flatten_group_exprs (see find_having_conflicts above) and
+	 * recorded in the havingPushdownConflicts bitmapset.  The bitmapset
+	 * indexes remain valid here because flatten_group_exprs uses
+	 * expression_tree_mutator, which preserves the list length and ordering
+	 * of havingQual.
+	 *
 	 * Also, it may be that the clause is so expensive to execute that we're
 	 * better off doing it only once per group, despite the loss of
 	 * selectivity.  This is hard to estimate short of doing the entire
@@ -1152,6 +1185,7 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 	 * as Node *.
 	 */
 	newHaving = NIL;
+	havingIdx = 0;
 	foreach(l, (List *) parse->havingQual)
 	{
 		Node	   *havingclause = (Node *) lfirst(l);
@@ -1159,6 +1193,7 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 		if (contain_agg_clause(havingclause) ||
 			contain_volatile_functions(havingclause) ||
 			contain_subplans(havingclause) ||
+			bms_is_member(havingIdx, havingPushdownConflicts) ||
 			(parse->groupClause && parse->groupingSets &&
 			 bms_is_member(root->group_rtindex, pull_varnos(root, havingclause))))
 		{
@@ -1195,6 +1230,8 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 			/* ... and also keep it in HAVING */
 			newHaving = lappend(newHaving, havingclause);
 		}
+
+		havingIdx++;
 	}
 	parse->havingQual = (Node *) newHaving;
 
@@ -1384,6 +1421,102 @@ preprocess_qual_conditions(PlannerInfo *root, Node *jtnode)
 	else
 		elog(ERROR, "unrecognized node type: %d",
 			 (int) nodeTag(jtnode));
+}
+
+/*
+ * find_having_conflicts
+ *	  Identify HAVING clauses that must not be moved to WHERE because they
+ *	  apply a different equivalence relation than GROUP BY.  Pushing such a
+ *	  clause to WHERE would filter individual rows before grouping happens,
+ *	  eliminating rows that GROUP BY would have merged into a single group
+ *	  and thereby changing aggregate results.
+ *
+ * The actual walking is done by expression_has_grouping_conflict; see that
+ * function for the kinds of conflict it looks for.  We just iterate over
+ * havingQual and supply a HAVING-specific callback that identifies GROUP
+ * Vars.
+ *
+ * This must be called before flatten_group_exprs, while the HAVING clause
+ * still contains GROUP Vars (Vars referencing RTE_GROUP).  These GROUP Vars
+ * carry the GROUP BY collation as their varcollid and let us recover the
+ * grouping eqop via varattno.  After flattening, those Vars are replaced by
+ * the underlying expressions, and matching back to grouping expressions is
+ * much harder.
+ *
+ * Returns a Bitmapset of zero-based indexes into the havingQual list for
+ * clauses that conflict and must stay in HAVING.
+ */
+static Bitmapset *
+find_having_conflicts(Query *parse, Index group_rtindex)
+{
+	Bitmapset  *result = NULL;
+	having_grouping_ctx ctx;
+	int			idx;
+
+	if (parse->havingQual == NULL)
+		return NULL;
+
+	ctx.parse = parse;
+	ctx.group_rtindex = group_rtindex;
+
+	idx = 0;
+	foreach_ptr(Node, clause, (List *) parse->havingQual)
+	{
+		if (expression_has_grouping_conflict(clause, having_var_grouping_eqop,
+											 &ctx))
+			result = bms_add_member(result, idx);
+		idx++;
+	}
+
+	return result;
+}
+
+/*
+ * having_var_grouping_eqop
+ *	  grouping_eqop_callback for find_having_conflicts.
+ *
+ * Returns the GROUP BY equality operator for 'var' if it references the
+ * query's RTE_GROUP, or InvalidOid otherwise.
+ */
+static Oid
+having_var_grouping_eqop(Var *var, void *context)
+{
+	having_grouping_ctx *ctx = (having_grouping_ctx *) context;
+
+	if (var->varno != ctx->group_rtindex || var->varlevelsup != 0)
+		return InvalidOid;
+
+	return group_var_eqop(ctx->parse, var);
+}
+
+/*
+ * group_var_eqop
+ *	  Return the equality operator that GROUP BY uses for the given GROUP Var.
+ *
+ * A GROUP Var's varattno is its 1-based position in the RTE_GROUP's groupexprs
+ * list, which addRangeTableEntryForGroup built by iterating parse->groupClause
+ * and including every SortGroupClause whose TLE was present in the targetlist.
+ * Replay that traversal here to recover the SortGroupClause for the given
+ * varattno.
+ */
+static Oid
+group_var_eqop(Query *parse, Var *var)
+{
+	int			counter = 0;
+
+	Assert(var->varlevelsup == 0);
+
+	foreach_node(SortGroupClause, sgc, parse->groupClause)
+	{
+		if (get_sortgroupclause_tle(sgc, parse->targetList) == NULL)
+			continue;
+		if (++counter == var->varattno)
+			return sgc->eqop;
+	}
+
+	elog(ERROR, "could not find GROUP clause for GROUP Var attno %d",
+		 var->varattno);
+	return InvalidOid;			/* keep compiler quiet */
 }
 
 /*

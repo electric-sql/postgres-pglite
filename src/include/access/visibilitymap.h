@@ -26,6 +26,8 @@
 #define VM_ALL_FROZEN(r, b, v) \
 	((visibilitymap_get_status((r), (b), (v)) & VISIBILITYMAP_ALL_FROZEN) != 0)
 
+extern bool visibilitymap_clear_locked(Relation rel, BlockNumber heapBlk,
+									   Buffer vmbuf, uint8 flags);
 extern bool visibilitymap_clear(Relation rel, BlockNumber heapBlk,
 								Buffer vmbuf, uint8 flags);
 extern void visibilitymap_pin(Relation rel, BlockNumber heapBlk,
@@ -41,5 +43,6 @@ extern uint8 visibilitymap_get_status(Relation rel, BlockNumber heapBlk, Buffer 
 extern void visibilitymap_count(Relation rel, BlockNumber *all_visible, BlockNumber *all_frozen);
 extern BlockNumber visibilitymap_prepare_truncate(Relation rel,
 												  BlockNumber nheapblocks);
+extern BlockNumber visibilitymap_truncation_length(BlockNumber nheapblocks);
 
 #endif							/* VISIBILITYMAP_H */

@@ -216,6 +216,7 @@ CallerFInfoFunctionCall2
 calloc
 cbrt
 chdir
+check_encoding_conversion_args
 check_stack_depth
 clearerr
 clock
@@ -227,6 +228,7 @@ construct_md_array
 cos
 cosh
 cosl
+creating_extension
 cstring_to_text
 cstring_to_text_with_len
 CurrentMemoryContext

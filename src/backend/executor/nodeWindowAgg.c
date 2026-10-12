@@ -37,6 +37,7 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_proc.h"
+#include "common/int.h"
 #include "executor/executor.h"
 #include "executor/nodeWindowAgg.h"
 #include "miscadmin.h"
@@ -1039,6 +1040,20 @@ eval_windowfunction(WindowAggState *winstate, WindowStatePerFunc perfuncstate,
 	oldContext = MemoryContextSwitchTo(winstate->ss.ps.ps_ExprContext->ecxt_per_tuple_memory);
 
 	/*
+	 * Protect fixed-size fcinfo.  Ordinarily this would have been checked
+	 * while creating the WindowFunc, but it's possible that we are looking at
+	 * a parsetree from a stored view that was made by a server executable
+	 * with a different value of FUNC_MAX_ARGS.
+	 */
+	if (perfuncstate->numArguments > FUNC_MAX_ARGS)
+		ereport(ERROR,
+				(errcode(ERRCODE_TOO_MANY_ARGUMENTS),
+				 errmsg_plural("cannot pass more than %d argument to a function",
+							   "cannot pass more than %d arguments to a function",
+							   FUNC_MAX_ARGS,
+							   FUNC_MAX_ARGS)));
+
+	/*
 	 * We don't pass any normal arguments to a window function, but we do pass
 	 * it the number of arguments, in order to permit window function
 	 * implementations to support varying numbers of arguments.  The real info
@@ -1465,12 +1480,21 @@ row_is_in_frame(WindowAggState *winstate, int64 pos, TupleTableSlot *slot)
 		if (frameOptions & FRAMEOPTION_ROWS)
 		{
 			int64		offset = DatumGetInt64(winstate->endOffsetValue);
+			int64		frameendpos = 0;
 
 			/* rows after current row + offset are out of frame */
 			if (frameOptions & FRAMEOPTION_END_OFFSET_PRECEDING)
 				offset = -offset;
 
-			if (pos > winstate->currentpos + offset)
+			/*
+			 * If we have an overflow, it means the frame end is beyond the
+			 * range of int64.  Since currentpos >= 0, this can only be a
+			 * positive overflow.  We treat this as meaning that the frame
+			 * extends to end of partition.
+			 */
+			if (!pg_add_s64_overflow(winstate->currentpos, offset,
+									 &frameendpos) &&
+				pos > frameendpos)
 				return -1;
 		}
 		else if (frameOptions & (FRAMEOPTION_RANGE | FRAMEOPTION_GROUPS))
@@ -1605,7 +1629,16 @@ update_frameheadpos(WindowAggState *winstate)
 			if (frameOptions & FRAMEOPTION_START_OFFSET_PRECEDING)
 				offset = -offset;
 
-			winstate->frameheadpos = winstate->currentpos + offset;
+			/*
+			 * If we have an overflow, it means the frame head is beyond the
+			 * range of int64.  Since currentpos >= 0, this can only be a
+			 * positive overflow.  We treat this as being beyond end of
+			 * partition.
+			 */
+			if (pg_add_s64_overflow(winstate->currentpos, offset,
+									&winstate->frameheadpos))
+				winstate->frameheadpos = PG_INT64_MAX;
+
 			/* frame head can't go before first row */
 			if (winstate->frameheadpos < 0)
 				winstate->frameheadpos = 0;
@@ -1717,12 +1750,21 @@ update_frameheadpos(WindowAggState *winstate)
 			 * framehead_slot empty.
 			 */
 			int64		offset = DatumGetInt64(winstate->startOffsetValue);
-			int64		minheadgroup;
+			int64		minheadgroup = 0;
 
 			if (frameOptions & FRAMEOPTION_START_OFFSET_PRECEDING)
 				minheadgroup = winstate->currentgroup - offset;
 			else
-				minheadgroup = winstate->currentgroup + offset;
+			{
+				/*
+				 * If we have an overflow, it means the target group is beyond
+				 * the range of int64.  We treat this as "infinity", which
+				 * ensures the loop below advances to end of partition.
+				 */
+				if (pg_add_s64_overflow(winstate->currentgroup, offset,
+										&minheadgroup))
+					minheadgroup = PG_INT64_MAX;
+			}
 
 			tuplestore_select_read_pointer(winstate->buffer,
 										   winstate->framehead_ptr);
@@ -1859,7 +1901,18 @@ update_frametailpos(WindowAggState *winstate)
 			if (frameOptions & FRAMEOPTION_END_OFFSET_PRECEDING)
 				offset = -offset;
 
-			winstate->frametailpos = winstate->currentpos + offset + 1;
+			/*
+			 * If we have an overflow, it means the frame tail is beyond the
+			 * range of int64.  Since currentpos >= 0, this can only be a
+			 * positive overflow.  We treat this as being beyond end of
+			 * partition.
+			 */
+			if (pg_add_s64_overflow(winstate->currentpos, offset,
+									&winstate->frametailpos) ||
+				pg_add_s64_overflow(winstate->frametailpos, 1,
+									&winstate->frametailpos))
+				winstate->frametailpos = PG_INT64_MAX;
+
 			/* smallest allowable value of frametailpos is 0 */
 			if (winstate->frametailpos < 0)
 				winstate->frametailpos = 0;
@@ -1971,12 +2024,21 @@ update_frametailpos(WindowAggState *winstate)
 			 * leave frametailpos = end+1 and frametail_slot empty.
 			 */
 			int64		offset = DatumGetInt64(winstate->endOffsetValue);
-			int64		maxtailgroup;
+			int64		maxtailgroup = 0;
 
 			if (frameOptions & FRAMEOPTION_END_OFFSET_PRECEDING)
 				maxtailgroup = winstate->currentgroup - offset;
 			else
-				maxtailgroup = winstate->currentgroup + offset;
+			{
+				/*
+				 * If we have an overflow, it means the target group is beyond
+				 * the range of int64.  We treat this as "infinity", which
+				 * ensures the loop below advances to end of partition.
+				 */
+				if (pg_add_s64_overflow(winstate->currentgroup, offset,
+										&maxtailgroup))
+					maxtailgroup = PG_INT64_MAX;
+			}
 
 			tuplestore_select_read_pointer(winstate->buffer,
 										   winstate->frametail_ptr);
@@ -2835,6 +2897,25 @@ initialize_peragg(WindowAggState *winstate, WindowFunc *wfunc,
 	ListCell   *lc;
 
 	numArguments = list_length(wfunc->args);
+
+	/*
+	 * Check the number of arguments, to protect fixed-size arrays here and
+	 * later in node execution.
+	 *
+	 * Aggregates can have at most FUNC_MAX_ARGS-1 args (compare
+	 * AggregateCreate, whose error message we want to match).  Ordinarily
+	 * this would have been checked while creating the WindowFunc, but it's
+	 * possible that we are looking at a parsetree from a stored view that was
+	 * made by a server executable with a different value of FUNC_MAX_ARGS, or
+	 * an executable in which parse_func.c didn't enforce the correct limit.
+	 */
+	if (numArguments > FUNC_MAX_ARGS - 1)
+		ereport(ERROR,
+				(errcode(ERRCODE_TOO_MANY_ARGUMENTS),
+				 errmsg_plural("aggregates cannot have more than %d argument",
+							   "aggregates cannot have more than %d arguments",
+							   FUNC_MAX_ARGS - 1,
+							   FUNC_MAX_ARGS - 1)));
 
 	i = 0;
 	foreach(lc, wfunc->args)

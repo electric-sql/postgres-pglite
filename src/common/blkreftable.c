@@ -497,7 +497,7 @@ WriteBlockRefTable(BlockRefTable *brtab,
 
 		/* Extract entries into serializable format and sort them. */
 		sdata =
-			palloc(brtab->hash->members * sizeof(BlockRefTableSerializedEntry));
+			palloc_array(BlockRefTableSerializedEntry, brtab->hash->members);
 		blockreftable_start_iterate(brtab->hash, &it);
 		while ((brtentry = blockreftable_iterate(brtab->hash, &it)) != NULL)
 		{
@@ -657,12 +657,48 @@ BlockRefTableReaderNextRelation(BlockRefTableReader *reader,
 		return false;
 	}
 
+	/* Sanity-check the fork number. */
+	if (sentry.forknum < 0 || sentry.forknum > MAX_FORKNUM)
+	{
+		reader->error_callback(reader->error_callback_arg,
+							   "file \"%s\" has invalid fork number %d",
+							   reader->error_filename, sentry.forknum);
+		return false;
+	}
+
+	/*
+	 * Sanity-check the nchunks value.  In the backend, palloc_array would
+	 * enforce this anyway (with a more generic error message); but in
+	 * frontend it would not, potentially allowing BlockRefTableRead's length
+	 * parameter to overflow.
+	 */
+	if (sentry.nchunks > MaxAllocSize / sizeof(uint16))
+	{
+		reader->error_callback(reader->error_callback_arg,
+							   "file \"%s\" has oversized chunk size array",
+							   reader->error_filename);
+		return false;
+	}
+
 	/* Read chunk size array. */
 	if (reader->chunk_size != NULL)
 		pfree(reader->chunk_size);
-	reader->chunk_size = palloc(sentry.nchunks * sizeof(uint16));
+	reader->chunk_size = palloc_array(uint16, sentry.nchunks);
 	BlockRefTableRead(reader, reader->chunk_size,
 					  sentry.nchunks * sizeof(uint16));
+
+	/* Sanity-check the chunk sizes. */
+	for (unsigned i = 0; i < sentry.nchunks; ++i)
+	{
+		if (reader->chunk_size[i] > MAX_ENTRIES_PER_CHUNK)
+		{
+			reader->error_callback(reader->error_callback_arg,
+								   "file \"%s\" chunk %u has invalid size %u",
+								   reader->error_filename, i,
+								   (unsigned) reader->chunk_size[i]);
+			return false;
+		}
+	}
 
 	/* Set up for chunk scan. */
 	reader->total_chunks = sentry.nchunks;
@@ -997,10 +1033,9 @@ BlockRefTableEntryMarkBlockModified(BlockRefTableEntry *entry,
 
 		if (entry->nchunks == 0)
 		{
-			entry->chunk_size = palloc0(sizeof(uint16) * max_chunks);
-			entry->chunk_usage = palloc0(sizeof(uint16) * max_chunks);
-			entry->chunk_data =
-				palloc0(sizeof(BlockRefTableChunk) * max_chunks);
+			entry->chunk_size = palloc0_array(uint16, max_chunks);
+			entry->chunk_usage = palloc0_array(uint16, max_chunks);
+			entry->chunk_data = palloc0_array(BlockRefTableChunk, max_chunks);
 		}
 		else
 		{
@@ -1029,7 +1064,7 @@ BlockRefTableEntryMarkBlockModified(BlockRefTableEntry *entry,
 	if (entry->chunk_size[chunkno] == 0)
 	{
 		entry->chunk_data[chunkno] =
-			palloc(sizeof(uint16) * INITIAL_ENTRIES_PER_CHUNK);
+			palloc_array(uint16, INITIAL_ENTRIES_PER_CHUNK);
 		entry->chunk_size[chunkno] = INITIAL_ENTRIES_PER_CHUNK;
 		entry->chunk_data[chunkno][0] = chunkoffset;
 		entry->chunk_usage[chunkno] = 1;

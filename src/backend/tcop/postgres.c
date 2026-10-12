@@ -57,6 +57,7 @@
 #include "postmaster/postmaster.h"
 #include "replication/logicallauncher.h"
 #include "replication/logicalworker.h"
+#include "replication/slotsync.h"
 #include "replication/slot.h"
 #include "replication/walsender.h"
 #include "rewrite/rewriteHandler.h"
@@ -189,6 +190,13 @@ static void drop_unnamed_stmt(void);
 static void log_disconnections(int code, Datum arg);
 static void enable_statement_timeout(void);
 static void disable_statement_timeout(void);
+
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
+#else
+#define EMSCRIPTEN_KEEPALIVE
+// TODO: an include for libpglite
+#endif
 
 /* these must be volatile to ensure state is preserved across longjmp: */
 #ifdef __PGLITE__
@@ -3634,6 +3642,9 @@ ProcessInterrupts(void)
 
 	if (ParallelApplyMessagePending)
 		ProcessParallelApplyMessages();
+
+	if (SlotSyncShutdownPending)
+		ProcessSlotSyncMessage();
 }
 
 /*
@@ -4862,8 +4873,9 @@ void PostgresMainLoopOnce() {
 				 * scenarios.
 				 */
 				#ifdef __PGLITE__
-				if (is_pglite_active != 0)
-					exit(PGLITE_EXIT_ALIVE);
+				if (is_pglite_active != 0) {
+				    exit(PGLITE_EXIT_ALIVE);
+			    }
 				else 
 					proc_exit(0);
 				#else

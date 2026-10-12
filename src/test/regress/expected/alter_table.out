@@ -2933,11 +2933,12 @@ begin;
 alter table alterlock2
 add constraint alterlock2nv foreign key (f1) references alterlock (f1) NOT VALID;
 select * from my_locks order by 1;
-  relname   |     max_lockmode      
-------------+-----------------------
- alterlock  | ShareRowExclusiveLock
- alterlock2 | ShareRowExclusiveLock
-(2 rows)
+    relname     |     max_lockmode      
+----------------+-----------------------
+ alterlock      | ShareRowExclusiveLock
+ alterlock2     | ShareRowExclusiveLock
+ alterlock_pkey | AccessShareLock
+(3 rows)
 
 commit;
 begin;
@@ -3844,6 +3845,16 @@ Referenced by:
 ALTER TABLE test_add_column
 	ADD COLUMN IF NOT EXISTS c5 SERIAL CHECK (c5 > 10);
 NOTICE:  column "c5" of relation "test_add_column" already exists, skipping
+ALTER TABLE test_add_column
+	ADD c6 integer; -- omit COLUMN
+ALTER TABLE test_add_column
+	ADD IF NOT EXISTS c6 integer;
+NOTICE:  column "c6" of relation "test_add_column" already exists, skipping
+ALTER TABLE test_add_column
+	DROP c6; -- omit COLUMN
+ALTER TABLE test_add_column
+	DROP IF EXISTS c6;
+NOTICE:  column "c6" of relation "test_add_column" does not exist, skipping
 \d test_add_column*
                             Table "public.test_add_column"
  Column |  Type   | Collation | Nullable |                   Default                   

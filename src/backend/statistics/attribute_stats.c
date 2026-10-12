@@ -93,8 +93,8 @@ enum clear_attribute_stats_argnum
 
 static struct StatsArgInfo cleararginfo[] =
 {
-	[C_ATTRELSCHEMA_ARG] = {"relation", TEXTOID},
-	[C_ATTRELNAME_ARG] = {"relation", TEXTOID},
+	[C_ATTRELSCHEMA_ARG] = {"schemaname", TEXTOID},
+	[C_ATTRELNAME_ARG] = {"relname", TEXTOID},
 	[C_ATTNAME_ARG] = {"attname", TEXTOID},
 	[C_INHERITED_ARG] = {"inherited", BOOLOID},
 	[C_NUM_ATTRIBUTE_STATS_ARGS] = {0}
@@ -384,10 +384,27 @@ attribute_statistics_update(FunctionCallInfo fcinfo)
 
 		if (converted)
 		{
-			set_stats_slot(values, nulls, replaces,
-						   STATISTIC_KIND_MCV,
-						   eq_opr, atttypcoll,
-						   stanumbers, false, stavalues, false);
+			ArrayType  *vals_arr = DatumGetArrayTypeP(stavalues);
+			ArrayType  *nums_arr = DatumGetArrayTypeP(stanumbers);
+			int			nvals = ARR_DIMS(vals_arr)[0];
+			int			nnums = ARR_DIMS(nums_arr)[0];
+
+			if (nvals != nnums)
+			{
+				ereport(WARNING,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("could not parse \"%s\": incorrect number of elements (same as \"%s\" required)",
+								"most_common_vals",
+								"most_common_freqs")));
+				result = false;
+			}
+			else
+			{
+				set_stats_slot(values, nulls, replaces,
+							   STATISTIC_KIND_MCV,
+							   eq_opr, atttypcoll,
+							   stanumbers, false, stavalues, false);
+			}
 		}
 		else
 			result = false;
@@ -475,11 +492,19 @@ attribute_statistics_update(FunctionCallInfo fcinfo)
 	{
 		bool		converted = false;
 		Datum		stavalues;
+		Oid			bounds_typid = atttypid;
+
+		/*
+		 * If it's a multirange, step down to the range type, as is done by
+		 * multirange_typanalyze().
+		 */
+		if (type_is_multirange(atttypid))
+			bounds_typid = get_multirange_range(atttypid);
 
 		stavalues = text_to_stavalues("range_bounds_histogram",
 									  &array_in_fn,
 									  PG_GETARG_DATUM(RANGE_BOUNDS_HISTOGRAM_ARG),
-									  atttypid, atttypmod,
+									  bounds_typid, atttypmod,
 									  &converted);
 
 		if (converted)
@@ -630,13 +655,6 @@ get_attr_stat_type(Oid reloid, AttrNumber attnum,
 	}
 	ReleaseSysCache(atup);
 
-	/*
-	 * If it's a multirange, step down to the range type, as is done by
-	 * multirange_typanalyze().
-	 */
-	if (type_is_multirange(*atttypid))
-		*atttypid = get_multirange_range(*atttypid);
-
 	/* finds the right operators even if atttypid is a domain */
 	typcache = lookup_type_cache(*atttypid, TYPECACHE_LT_OPR | TYPECACHE_EQ_OPR);
 	*atttyptype = typcache->typtype;
@@ -727,6 +745,15 @@ text_to_stavalues(const char *staname, FmgrInfo *array_in, Datum d, Oid typid,
 	{
 		escontext.error_data->elevel = WARNING;
 		ThrowErrorData(escontext.error_data);
+		*ok = false;
+		return (Datum) 0;
+	}
+
+	if (ARR_NDIM(DatumGetArrayTypeP(result)) != 1)
+	{
+		ereport(WARNING,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("\"%s\" must be a one-dimensional array", staname)));
 		*ok = false;
 		return (Datum) 0;
 	}

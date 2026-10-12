@@ -133,7 +133,8 @@ static void checkEnumOwner(HeapTuple tup);
 static char *domainAddCheckConstraint(Oid domainOid, Oid domainNamespace,
 									  Oid baseTypeOid,
 									  int typMod, Constraint *constr,
-									  const char *domainName, ObjectAddress *constrAddr);
+									  const char *domainName, ObjectAddress *constrAddr,
+									  bool is_readd);
 static Node *replace_domain_constraint_value(ParseState *pstate,
 											 ColumnRef *cref);
 static void domainAddNotNullConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
@@ -1048,6 +1049,13 @@ DefineDomain(ParseState *pstate, CreateDomainStmt *stmt)
 		}
 	}
 
+	/*
+	 * The below call to TypeCreate() calls GenerateTypeDependencies(), which
+	 * adds the dependencies on types.  We are responsible for checking USAGE.
+	 */
+	if (defaultValueBin)
+		CheckUsageOnTypesInExpr(stringToNode(defaultValueBin), NIL, GetUserId());
+
 	/* Allocate OID for array type */
 	domainArrayOid = AssignTypeArrayOid();
 
@@ -1145,7 +1153,7 @@ DefineDomain(ParseState *pstate, CreateDomainStmt *stmt)
 			case CONSTR_CHECK:
 				domainAddCheckConstraint(address.objectId, domainNamespace,
 										 basetypeoid, basetypeMod,
-										 constr, domainName, NULL);
+										 constr, domainName, NULL, false);
 				break;
 
 			case CONSTR_NOTNULL:
@@ -1487,6 +1495,13 @@ DefineRange(ParseState *pstate, CreateRangeStmt *stmt)
 			/* we can look up the subtype name immediately */
 			multirangeNamespace = QualifiedNameGetCreationNamespace(defGetQualifiedName(defel),
 																	&multirangeTypeName);
+
+			/* Check we have creation rights in target namespace */
+			aclresult = object_aclcheck(NamespaceRelationId, multirangeNamespace,
+										GetUserId(), ACL_CREATE);
+			if (aclresult != ACLCHECK_OK)
+				aclcheck_error(aclresult, OBJECT_SCHEMA,
+							   get_namespace_name(multirangeNamespace));
 		}
 		else
 			ereport(ERROR,
@@ -1506,6 +1521,10 @@ DefineRange(ParseState *pstate, CreateRangeStmt *stmt)
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
 				 errmsg("range subtype cannot be %s",
 						format_type_be(rangeSubtype))));
+
+	aclresult = object_aclcheck(TypeRelationId, rangeSubtype, GetUserId(), ACL_USAGE);
+	if (aclresult != ACLCHECK_OK)
+		aclcheck_error_type(aclresult, rangeSubtype);
 
 	/* Identify subopclass */
 	rangeSubOpclass = findRangeSubOpclass(rangeSubOpclassName, rangeSubtype);
@@ -2678,6 +2697,12 @@ AlterDomainDefault(List *names, Node *defaultRaw)
 		else
 		{
 			/*
+			 * The below call to GenerateTypeDependencies() creates the
+			 * dependencies on types.  We are responsible for checking USAGE.
+			 */
+			CheckUsageOnTypesInExpr(defaultExpr, NIL, GetUserId());
+
+			/*
 			 * Expression must be stored as a nodeToString result, but we also
 			 * require a valid textual representation (mainly to make life
 			 * easier for pg_dump).
@@ -2933,7 +2958,7 @@ AlterDomainDropConstraint(List *names, const char *constrName,
  */
 ObjectAddress
 AlterDomainAddConstraint(List *names, Node *newConstraint,
-						 ObjectAddress *constrAddr)
+						 ObjectAddress *constrAddr, bool is_readd)
 {
 	TypeName   *typename;
 	Oid			domainoid;
@@ -2977,7 +3002,8 @@ AlterDomainAddConstraint(List *names, Node *newConstraint,
 
 		ccbin = domainAddCheckConstraint(domainoid, typTup->typnamespace,
 										 typTup->typbasetype, typTup->typtypmod,
-										 constr, NameStr(typTup->typname), constrAddr);
+										 constr, NameStr(typTup->typname), constrAddr,
+										 is_readd);
 
 
 		/*
@@ -3504,7 +3530,8 @@ checkDomainOwner(HeapTuple tup)
 static char *
 domainAddCheckConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 						 int typMod, Constraint *constr,
-						 const char *domainName, ObjectAddress *constrAddr)
+						 const char *domainName, ObjectAddress *constrAddr,
+						 bool is_readd)
 {
 	Node	   *expr;
 	char	   *ccbin;
@@ -3566,6 +3593,13 @@ domainAddCheckConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 	 * Fix up collation information.
 	 */
 	assign_expr_collations(pstate, expr);
+
+	/*
+	 * The below call to CreateConstraintEntry() creates the dependencies on
+	 * types.  We are responsible for checking USAGE.
+	 */
+	if (!is_readd)
+		CheckUsageOnTypesInExpr(expr, NIL, GetUserId());
 
 	/*
 	 * Domains don't allow variables (this is probably dead code now that

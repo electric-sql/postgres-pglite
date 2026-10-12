@@ -1213,8 +1213,8 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 	}
 
 	/*
-	 * Build a list of the acceptable GROUP BY expressions for use by
-	 * substitute_grouped_columns().
+	 * Build a list of the acceptable GROUP BY expressions to save in the
+	 * RTE_GROUP RTE, and for use by substitute_grouped_columns().
 	 *
 	 * We get the TLE, not just the expr, because GROUPING wants to know the
 	 * sortgroupref.
@@ -1229,6 +1229,23 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 			continue;			/* probably cannot happen */
 
 		groupClauses = lappend(groupClauses, expr);
+	}
+
+	/*
+	 * If there are any acceptable GROUP BY expressions, build an RTE and
+	 * nsitem for the result of the grouping step.  (It's important to do this
+	 * before flattening join alias vars in groupClauses, because the RTE
+	 * should preserve any alias vars that were in the input.)
+	 */
+	if (groupClauses)
+	{
+		pstate->p_grouping_nsitem =
+			addRangeTableEntryForGroup(pstate, groupClauses);
+
+		/* Set qry->rtable again in case it was previously NIL */
+		qry->rtable = pstate->p_rtable;
+		/* Mark the Query as having RTE_GROUP RTE */
+		qry->hasGroupRTE = true;
 	}
 
 	/*
@@ -1264,21 +1281,6 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 		{
 			groupClauseCommonVars = lappend(groupClauseCommonVars, tle->expr);
 		}
-	}
-
-	/*
-	 * If there are any acceptable GROUP BY expressions, build an RTE and
-	 * nsitem for the result of the grouping step.
-	 */
-	if (groupClauses)
-	{
-		pstate->p_grouping_nsitem =
-			addRangeTableEntryForGroup(pstate, groupClauses);
-
-		/* Set qry->rtable again in case it was previously NIL */
-		qry->rtable = pstate->p_rtable;
-		/* Mark the Query as having RTE_GROUP RTE */
-		qry->hasGroupRTE = true;
 	}
 
 	/*
@@ -2052,7 +2054,23 @@ get_aggregate_argtypes(Aggref *aggref, Oid *inputTypes)
 	int			numArguments = 0;
 	ListCell   *lc;
 
-	Assert(list_length(aggref->aggargtypes) <= FUNC_MAX_ARGS);
+	/*
+	 * Check the number of arguments to protect fixed-size arrays in callers.
+	 *
+	 * Aggregates can have at most FUNC_MAX_ARGS-1 args (compare
+	 * AggregateCreate, whose error message we want to match).  Ordinarily
+	 * this would have been checked while creating the Aggref, but it's
+	 * possible that we are looking at a parsetree from a stored view that was
+	 * made by a server executable with a different value of FUNC_MAX_ARGS, or
+	 * an executable in which parse_func.c didn't enforce the correct limit.
+	 */
+	if (list_length(aggref->aggargtypes) > FUNC_MAX_ARGS - 1)
+		ereport(ERROR,
+				(errcode(ERRCODE_TOO_MANY_ARGUMENTS),
+				 errmsg_plural("aggregates cannot have more than %d argument",
+							   "aggregates cannot have more than %d arguments",
+							   FUNC_MAX_ARGS - 1,
+							   FUNC_MAX_ARGS - 1)));
 
 	foreach(lc, aggref->aggargtypes)
 	{

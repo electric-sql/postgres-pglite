@@ -604,7 +604,8 @@ scalarineqsel(PlannerInfo *root, Oid operator, bool isgt, bool iseq,
 		 * make an estimate based on comparing the constant to the table size.
 		 */
 		if (vardata->var && IsA(vardata->var, Var) &&
-			((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber)
+			((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber &&
+			consttype == TIDOID)
 		{
 			ItemPointer itemptr;
 			double		block;
@@ -2171,6 +2172,18 @@ estimate_array_length(PlannerInfo *root, Node *arrayexpr)
 		VariableStatData vardata;
 		AttStatsSlot sslot;
 		double		nelem = 0;
+
+		/*
+		 * Skip calling examine_variable for Var with varno 0, which has no
+		 * valid relation entry and would error in find_base_rel.  Such a Var
+		 * can appear when a nested set operation's output type doesn't match
+		 * the parent's expected type, because recurse_set_operations builds a
+		 * projection target list using generate_setop_tlist with varno 0, and
+		 * if the required type coercion involves an ArrayCoerceExpr, we can
+		 * be called on that Var.
+		 */
+		if (IsA(arrayexpr, Var) && ((Var *) arrayexpr)->varno == 0)
+			return 10;			/* default guess, should match scalararraysel */
 
 		examine_variable(root, arrayexpr, 0, &vardata);
 		if (HeapTupleIsValid(vardata.statsTuple))
@@ -4944,6 +4957,14 @@ convert_string_datum(Datum value, Oid typid, Oid collid, bool *failure)
 			return NULL;
 	}
 
+	/*
+	 * If we don't have a collation, act as though it's "C".  This would
+	 * normally happen only for the "char" type, but perhaps there are other
+	 * cases.
+	 */
+	if (!OidIsValid(collid))
+		return val;
+
 	mylocale = pg_newlocale_from_collation(collid);
 
 	if (!mylocale->collate_is_c)
@@ -5579,7 +5600,11 @@ examine_variable(PlannerInfo *root, Node *node, int varRelid,
 					vardata->statsTuple =
 						statext_expressions_load(info->statOid, rte->inh, pos);
 
-					vardata->freefunc = ReleaseDummy;
+					/* Nothing to release if no data found */
+					if (vardata->statsTuple != NULL)
+					{
+						vardata->freefunc = ReleaseDummy;
+					}
 
 					/*
 					 * Test if user has permission to access all rows from the

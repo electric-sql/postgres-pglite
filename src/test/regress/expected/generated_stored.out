@@ -1329,6 +1329,56 @@ Inherits: gtest30
 
 ALTER TABLE gtest30_1 ALTER COLUMN b DROP EXPRESSION;  -- error
 ERROR:  cannot drop generation expression from inherited column
+BEGIN;
+CREATE TABLE gtest30_1_1 () INHERITS (gtest30_1);
+ALTER TABLE gtest30 ALTER COLUMN b DROP EXPRESSION;
+\d gtest30_1_1
+    Table "generated_stored_tests.gtest30_1_1"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+ b      | integer |           |          | 
+Inherits: gtest30_1
+
+ROLLBACK;
+-- test drop expression with subpartitions
+CREATE TABLE gtest_root (a int, b int, c int GENERATED ALWAYS AS (a + b) STORED) PARTITION BY LIST (a);
+CREATE TABLE gtest_node PARTITION OF gtest_root FOR VALUES IN (1) PARTITION BY LIST (b);
+CREATE TABLE gtest_leaf PARTITION OF gtest_node FOR VALUES IN (1);
+ALTER TABLE gtest_node ALTER COLUMN c DROP EXPRESSION;  -- fails
+ERROR:  cannot drop generation expression from inherited column
+ALTER TABLE ONLY gtest_root ALTER COLUMN c DROP EXPRESSION;  -- fails
+ERROR:  ALTER TABLE / DROP EXPRESSION must be applied to child tables too
+ALTER TABLE gtest_root ALTER COLUMN c DROP EXPRESSION;
+\d gtest_(root|node|leaf)
+     Table "generated_stored_tests.gtest_leaf"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+ b      | integer |           |          | 
+ c      | integer |           |          | 
+Partition of: gtest_node FOR VALUES IN (1)
+
+Partitioned table "generated_stored_tests.gtest_node"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+ b      | integer |           |          | 
+ c      | integer |           |          | 
+Partition of: gtest_root FOR VALUES IN (1)
+Partition key: LIST (b)
+Number of partitions: 1 (Use \d+ to list them.)
+
+Partitioned table "generated_stored_tests.gtest_root"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+ b      | integer |           |          | 
+ c      | integer |           |          | 
+Partition key: LIST (a)
+Number of partitions: 1 (Use \d+ to list them.)
+
+DROP TABLE gtest_root;
 -- composite type dependencies
 CREATE TABLE gtest31_1 (a int, b text GENERATED ALWAYS AS ('hello') STORED, c text);
 CREATE TABLE gtest31_2 (x int, y gtest31_1);
@@ -1527,6 +1577,40 @@ CREATE TABLE gtest28b (LIKE gtest28a INCLUDING GENERATED);
  c      | integer |           |          | 
  x      | integer |           |          | generated always as (b * 2) stored
 
+-- rule actions referring to generated columns:
+-- NEW.b in a rule action should reflect the generated column's new value
+CREATE TABLE gtest_rule (a int, b int GENERATED ALWAYS AS (a * 2) STORED);
+CREATE TABLE gtest_rule_log (op text, old_b int, new_b int);
+CREATE RULE gtest_rule_upd AS ON UPDATE TO gtest_rule
+  DO ALSO INSERT INTO gtest_rule_log VALUES ('UPD', OLD.b, NEW.b);
+CREATE RULE gtest_rule_ins AS ON INSERT TO gtest_rule
+  DO ALSO INSERT INTO gtest_rule_log VALUES ('INS', NULL, NEW.b);
+INSERT INTO gtest_rule (a) VALUES (1);
+UPDATE gtest_rule SET a = 10;
+UPDATE gtest_rule SET a = (SELECT max(b) FROM gtest_rule);
+SELECT * FROM gtest_rule_log;
+ op  | old_b | new_b 
+-----+-------+-------
+ INS |       |     2
+ UPD |     2 |    20
+ UPD |    20 |    40
+(3 rows)
+
+DROP RULE gtest_rule_upd ON gtest_rule;
+DROP RULE gtest_rule_ins ON gtest_rule;
+DROP TABLE gtest_rule_log;
+-- rule quals referring to generated columns:
+-- NEW.b in the rule qual should reflect the generated column's new value
+CREATE RULE gtest_rule_qual AS ON UPDATE TO gtest_rule WHERE NEW.b > 100
+  DO INSTEAD NOTHING;
+UPDATE gtest_rule SET a = 100;
+SELECT * FROM gtest_rule;
+ a  | b  
+----+----
+ 20 | 40
+(1 row)
+
+DROP TABLE gtest_rule;
 -- sanity check of system catalog
 SELECT attrelid, attname, attgenerated FROM pg_attribute WHERE attgenerated NOT IN ('', 's', 'v');
  attrelid | attname | attgenerated 
