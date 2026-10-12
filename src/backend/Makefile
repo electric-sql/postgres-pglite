@@ -258,7 +258,7 @@ ifeq ($(PORTNAME), emscripten)
 install-pglite:
 	$(INSTALL_PROGRAM) pglite.wasm '$(DESTDIR)$(bindir)/pglite.wasm'
 	$(INSTALL_PROGRAM) pglite.js '$(DESTDIR)$(bindir)/pglite.js'
-	$(INSTALL_PROGRAM) pglite.data '$(DESTDIR)$(bindir)/pglite.data'
+# 	$(INSTALL_PROGRAM) pglite.data '$(DESTDIR)$(bindir)/pglite.data'
 endif
 
 .PHONY: install-pglite
