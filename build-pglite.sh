@@ -38,7 +38,7 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Dmunmap=pgl_munmap \
 -Dfcntl=pgl_fcntl \
 -Datexit=pgl_atexit \
--Dsetsockopt=pgl_setsockopt -Dgetsockopt=pgl_getsockopt -Dgetsockname=pgl_getsockname \
+-Dsocket=pgl_socket -Dsetsockopt=pgl_setsockopt -Dgetsockopt=pgl_getsockopt -Dgetsockname=pgl_getsockname \
 -Drecv=pgl_recv -Dsend=pgl_send -Dconnect=pgl_connect \
 -Dpoll=pgl_poll \
 -Dshmget=pgl_shmget -Dshmat=pgl_shmat -Dshmdt=pgl_shmdt -Dshmctl=pgl_shmctl \
@@ -72,7 +72,6 @@ PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1 
 EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,MEMFS,FS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=64MB \
--sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
 -sENVIRONMENT=node,web,worker \
 -sFORCE_FILESYSTEM=1 \
