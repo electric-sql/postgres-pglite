@@ -65,8 +65,8 @@ else
     echo "$CONFIG_STATUS exists and is newer than $REF_FILE. ./configure will NOT be run."
 fi
 
-PGLITE_LDFLAGS="-sUSE_PTHREADS=0 -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker"
-PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker"
+PGLITE_LDFLAGS="-sUSE_PTHREADS=0 -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker -sDEFAULT_TO_CXX"
+PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker -sDEFAULT_TO_CXX"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
 EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,MEMFS,FS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
@@ -78,6 +78,7 @@ PGLITE_LDFLAGS_EX="\
 -sUSE_PTHREADS=0 \
 -sEXIT_RUNTIME=1 \
 -sFAKE_DYLIBS=1 \
+-sDEFAULT_TO_CXX \
 -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
