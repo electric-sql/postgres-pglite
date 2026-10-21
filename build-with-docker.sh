@@ -12,5 +12,5 @@ docker run $@ \
   --workdir=${DOCKER_WORKSPACE} \
   -v .:${DOCKER_WORKSPACE}:rw \
   -v ./dist:/pglite:rw \
-  electricsql/pglite-builder:3.1.74-7 \
+  electricsql/pglite-builder:6.0.12-1  \
   ./build-pglite.sh

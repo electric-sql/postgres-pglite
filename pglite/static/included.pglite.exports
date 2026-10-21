@@ -39,7 +39,6 @@ __subtf3
 __trunctfdf2
 _ZdlPv
 _ZdlPvm
-_ZNKSt10bad_typeid4whatEv
 _ZNKSt11logic_error4whatEv
 _ZNKSt13bad_exception4whatEv
 _ZNKSt13runtime_error4whatEv
