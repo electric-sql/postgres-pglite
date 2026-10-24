@@ -44,3 +44,6 @@
 [submodule "pglite/other_extensions/pgaudit"]
 	path = pglite/other_extensions/pgaudit
 	url = https://github.com/pgaudit/pgaudit.git
+[submodule "pglite/other_extensions/pgrouting"]
+	path = pglite/other_extensions/pgrouting
+	url = https://github.com/pgRouting/pgrouting.git
