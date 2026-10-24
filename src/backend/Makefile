@@ -80,6 +80,7 @@ postgres: $(OBJS)
 # Extensions use functions from the core PG. These need to be exported by the emscripten compiler.
 # The following target gathers all extension imports + the default ones (included.pglite.imports),
 # excludes the one in excluded.pglite.imports and adds a leading _ to each.
+# invoke_* and __cxa_find_matching_catch_* are JS helpers that emscripten creates on demand when a side module is loaded.
 pglite-exported-functions:
 	$(MKDIR_P) /install/pglite
 	cat $(top_builddir)/pglite/static/excluded.pglite.exports \
@@ -96,7 +97,7 @@ pglite-exported-functions:
 	| sort -u > '/install/pglite/excluded.imports.gen'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite/static/included.pglite.exports' | \
 	sort -u | \
-	grep -v -E '^(invoke_|__indirect_function_table)' | \
+	grep -v -E '^(invoke_|__cxa_find_matching_catch_|__indirect_function_table)' | \
 	grep -Fvx -f '/install/pglite/excluded.imports.gen' | \
 	awk NF | \
 	sed 's/^/_/' \

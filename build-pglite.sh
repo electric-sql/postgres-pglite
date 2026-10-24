@@ -145,6 +145,8 @@ PATH=$PATH:$INSTALL_FOLDER/bin
 emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -j -C pglite/other_extensions' ; exit 41; }
 # Step 4.1: special case: make PostGIS
 cd ./pglite/ && ./build-postgis.sh && cd ../
+# Step 4.2: special case: make pgRouting (CMake based, see build-pgrouting.sh)
+cd ./pglite/ && ./build-pgrouting.sh && cd ../ || exit $?
 emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions dist' ; exit 42; }
 emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/ dist-postgis' ; exit 43; }
 PATH=$SAVE_PATH
@@ -178,6 +180,7 @@ POSTGRES_PGLITE_FLAGS="\
 -sIMPORTED_MEMORY=1 \
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
+-sDISABLE_EXCEPTION_CATCHING=0 \
 $PGPRELOAD \
 -lnodefs.js -lidbfs.js"
 
