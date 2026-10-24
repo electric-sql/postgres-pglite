@@ -178,6 +178,7 @@ POSTGRES_PGLITE_FLAGS="\
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
 -Wno-error=undefined \
+-sDISABLE_EXCEPTION_CATCHING=0 \
 $PGPRELOAD \
 -lproxyfs.js -lnodefs.js -lidbfs.js"
 
