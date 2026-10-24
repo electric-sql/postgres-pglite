@@ -21,6 +21,7 @@ ARCHIVE_DIR := /pglite/extensions/other
 
 EXTENSIONS := $(SUBDIRS)
 EXTENSIONS += postgis
+EXTENSIONS += pgrouting
 
 # NOTE: pg_partman is deliberately not in SUBDIRS: its default target would compile the
 # background worker, which cannot run in WASM. It is built SQL-only via its own
@@ -81,6 +82,17 @@ pg_partman.tar.gz:
 	cd $(EXTENSIONS_BUILD_ROOT)/pg_partman/$(prefix) && \
 	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
 	tar -czf $(ARCHIVE_DIR)/pg_partman.tar.gz $$files
+
+# pgRouting is built with CMake (see build-pgrouting.sh), not PGXS, so install it via cmake
+pgrouting.tar.gz:
+	@echo "=== Staging pgrouting ==="
+	rm -rf $(EXTENSIONS_BUILD_ROOT)/pgrouting
+	DESTDIR=$(EXTENSIONS_BUILD_ROOT)/pgrouting cmake --install pgrouting/build
+	@echo "=== Packaging pgrouting ==="
+	mkdir -p $(ARCHIVE_DIR)
+	cd $(EXTENSIONS_BUILD_ROOT)/pgrouting/$(prefix) && \
+	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
+	tar -czf $(ARCHIVE_DIR)/pgrouting.tar.gz $$files
 
 dist-postgis:
 	@echo "=== Adding proj data to postgis archive ==="
