@@ -11,6 +11,10 @@
 
 #define COPY_OFF
 #define PGDLLIMPORT
+// c.h turns this into "#define inline", which breaks C++ extensions including postgres.h (ie pgRouting):
+// inline functions of the C++ headers included afterwards become strong symbols -> duplicate symbols at link time
+#ifndef __cplusplus
 #define PG_FORCE_DISABLE_INLINE
+#endif
 
 #endif // I_WASM
