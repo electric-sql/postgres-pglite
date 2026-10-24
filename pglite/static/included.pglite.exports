@@ -11,8 +11,6 @@ __cxa_current_primary_exception
 __cxa_decrement_exception_refcount
 __cxa_end_catch
 __cxa_finalize
-__cxa_find_matching_catch_2
-__cxa_find_matching_catch_3
 __cxa_free_exception
 __cxa_get_exception_ptr
 __cxa_increment_exception_refcount
