@@ -397,18 +397,22 @@ pgl_munmap(void *addr, size_t length) {
 * we emulate a socket by overriding the following libc functions.
 */
 
+int pgl_socket(int domain, int type, int protocol) {
+    return 10;
+}
+
 /* 
 * read FROM JS
 * Callback used for reading data from the frontend
 */
 typedef ssize_t (*pgl_read_t)(void *buffer, size_t max_length);
-pgl_read_t pgl_read;
+pgl_read_t pgl_read = NULL;
 
 /* write TO JS
 * Callback used for writing data to the frontend
 */
 typedef ssize_t (*pgl_write_t)(void *buffer, size_t length);
-pgl_write_t pgl_write;
+pgl_write_t pgl_write = NULL;
 
 /*
 * Set the above callbacks

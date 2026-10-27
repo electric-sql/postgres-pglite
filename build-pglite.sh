@@ -10,7 +10,7 @@ emcc --clear-cache
 INSTALL_FOLDER=${INSTALL_FOLDER:-"/pglite"}
 
 # build with optimizations by default aka release
-PGLITE_CFLAGS="-m32 -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types"
+PGLITE_CFLAGS="-m32 -fpic -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types"
 if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
@@ -22,7 +22,7 @@ else
     unset DEBUG
 fi
 
-# PGLITE_OTHER_FLAGS="-sUSE_PTHREADS=0 -fPIC -m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn"
+# PGLITE_OTHER_FLAGS="-fPIC -m32 -mno-bulk-memory -mnontrapping-fptoint -mno-reference-types -mno-sign-ext -mno-extended-const -mno-atomics -mno-tail-call -mno-multivalue -mno-relaxed-simd -mno-simd128 -mno-multimemory -mno-exception-handling -Wno-unused-command-line-argument -Wno-unreachable-code-fallthrough -Wno-unused-function -Wno-invalid-noreturn -Wno-declaration-after-statement -Wno-invalid-noreturn"
 # PGLITE_CFLAGS="$PGLITE_CFLAGS"
 
 # first build pglite-libc object WITHOUT the overriding flags
@@ -38,7 +38,7 @@ PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -Dmunmap=pgl_munmap \
 -Dfcntl=pgl_fcntl \
 -Datexit=pgl_atexit \
--Dsetsockopt=pgl_setsockopt -Dgetsockopt=pgl_getsockopt -Dgetsockname=pgl_getsockname \
+-Dsocket=pgl_socket -Dsetsockopt=pgl_setsockopt -Dgetsockopt=pgl_getsockopt -Dgetsockname=pgl_getsockname \
 -Drecv=pgl_recv -Dsend=pgl_send -Dconnect=pgl_connect \
 -Dpoll=pgl_poll \
 -Dshmget=pgl_shmget -Dshmat=pgl_shmat -Dshmdt=pgl_shmdt -Dshmctl=pgl_shmctl \
@@ -65,21 +65,19 @@ else
     echo "$CONFIG_STATUS exists and is newer than $REF_FILE. ./configure will NOT be run."
 fi
 
-# -sFAKE_DYLIBS=1
-PGLITE_LDFLAGS="-sWASM_BIGINT -sUSE_PTHREADS=0"
-# -sFAKE_DYLIBS=1
-PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function"
+PGLITE_LDFLAGS="-sUSE_PTHREADS=0 -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker"
+PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-# -sFAKE_DYLIBS=1 \
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,MEMFS,IDBFS,FS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
+EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,MEMFS,FS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=64MB \
--sWASM_BIGINT \
 -sSUPPORT_LONGJMP=emscripten \
+-sENVIRONMENT=node,web,worker \
 -sFORCE_FILESYSTEM=1 \
 -sUSE_PTHREADS=0 \
--sEXIT_RUNTIME=1 -sENVIRONMENT=node,web,worker \
+-sEXIT_RUNTIME=1 \
+-sFAKE_DYLIBS=1 \
 -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
@@ -171,13 +169,14 @@ PGPRELOAD="\
 PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV,stackSave,stackRestore,HEAPU8"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
-# -sFAKE_DYLIBS=1 \
 POSTGRES_PGLITE_FLAGS="\
 -sSTACK_SIZE=8MB \
 -sINITIAL_MEMORY=128MB \
 -sIMPORTED_MEMORY=1 \
+-sFAKE_DYLIBS=1 \
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
+-Wno-error=undefined \
 $PGPRELOAD \
 -lnodefs.js -lidbfs.js"
 
