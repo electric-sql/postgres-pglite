@@ -61,9 +61,6 @@ To handle the longjmp, we override the `siglongjmp()` call, which calls `exit()`
 ```
 void EMSCRIPTEN_KEEPALIVE pgl_longjmp(jmp_buf env, int val) {
     if (is_pglite_active && memcmp(env, (void*)postgresmain_sigjmp_buf, sizeof(jmp_buf)) == 0) {
-        // reset this as it is expected
-        if (!ignore_till_sync)
-		    send_ready_for_query = true;	/* initially, or after error */
         exit(POSTGRES_MAIN_LONGJMP);
     }
     longjmp(env, val);
@@ -71,6 +68,8 @@ void EMSCRIPTEN_KEEPALIVE pgl_longjmp(jmp_buf env, int val) {
 ```
 
 This is also what happens in a regular Postgres implementation, albeit with a bit more indirection.
+
+`PostgresMainLongJmp()` schedules `ReadyForQuery` after error cleanup, only when not skipping extended-query messages until `Sync`.
 
 ## Data exchange
 

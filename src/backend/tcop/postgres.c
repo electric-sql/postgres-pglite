@@ -5011,6 +5011,9 @@ void PostgresMainLongJmp() {
 
 		/* Now we can allow interrupts again */
 		RESUME_INTERRUPTS();
+
+		if (!ignore_till_sync)
+			send_ready_for_query = true;	/* after error recovery */
 }
 
 /* ----------------------------------------------------------------
