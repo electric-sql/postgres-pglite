@@ -20,3 +20,10 @@ emscripten_base_dir := $(emscripten_include_dir)/base
 emscripten_imports_dir := /install/pglite/imports
 emscripten_extension_dir := $(emscripten_include_dir)/extension
 emscripten_extension_imports_dir := $(emscripten_extension_dir)/imports
+
+emscripten_extension_imports_dir := $(emscripten_extension_dir)/imports
+
+# configure adds -Wl,--export-dynamic to LDFLAGS_EX_BE. Since emsdk 4.x this is
+# honored with MAIN_MODULE=2 and exports every linked symbol (ICU, libxml2, libc++...),
+# bloating the wasm export section and the JS glue. Rely on EXPORTED_FUNCTIONS instead.
+LDFLAGS_EX_BE =
