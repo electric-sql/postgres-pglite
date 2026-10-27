@@ -1,4 +1,5 @@
 __addtf3
+__ashlti3
 __ctype_get_mb_cur_max
 __ctype_tolower_loc
 __ctype_toupper_loc
@@ -28,6 +29,10 @@ __dynamic_cast
 __eqtf2
 __errno_location
 __extenddftf2
+__fixtfsi
+__floatsitf
+__getf2
+__letf2
 __lshrti3
 __lttf2
 __multf3
@@ -37,7 +42,10 @@ __small_fprintf
 __small_printf
 __subtf3
 __trunctfdf2
+_dist_code
+_length_code
 abort
+accept
 access
 acos
 acosh
@@ -61,6 +69,7 @@ atanh
 atexit
 atof
 atoi
+bind
 BlessTupleDesc
 bsearch
 btowc
@@ -73,11 +82,14 @@ cbrt
 chdir
 check_encoding_conversion_args
 check_stack_depth
+chmod
 clearerr
 clock
 clock_gettime
 close
 closedir
+closelog
+connect
 construct_array
 construct_md_array
 cos
@@ -134,8 +146,10 @@ fcntl
 fdatasync
 fdopen
 fdopendir
+feof
 ferror
 fflush
+fgets
 fileno
 find_coercion_pathway
 find_option
@@ -151,6 +165,7 @@ fputwc
 fread
 free
 free_attstatsslot
+freeaddrinfo
 freelocale
 frexp
 fseek
@@ -246,6 +261,7 @@ link
 list_concat
 list_make1_impl
 list_make2_impl
+listen
 llround
 localeconv
 localtime
@@ -257,6 +273,7 @@ logb
 lookup_rowtype_tupdesc
 LookupFuncName
 lround
+lseek
 lstat
 main
 make_opclause
@@ -295,6 +312,7 @@ OidOutputFunctionCall
 open
 openat
 opendir
+openlog
 palloc
 palloc0
 ParseDateTime
@@ -375,6 +393,7 @@ readlink
 readstoplist
 realloc
 realpath
+recvfrom
 regclassin
 register_label_provider
 RegisterExtensibleNodeMethods
@@ -401,8 +420,12 @@ searchstoplist
 SearchSysCache1
 SearchSysCache2
 SearchSysCache3
+select
+sendto
 set_rel_pathlist_hook
 setlocale
+setTempRet0
+sigaction
 sin
 sinh
 sinl
@@ -471,6 +494,7 @@ strxfrm_l
 swprintf
 symlink
 sysconf
+syslog
 systable_beginscan
 systable_endscan
 systable_getnext
@@ -538,3 +562,6 @@ WinGetPartitionRowCount
 wmemchr
 wmemcmp
 write
+z_errmsg
+zcalloc
+zcfree
