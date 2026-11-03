@@ -1,4 +1,4 @@
-ARG EMSDK_VER=6.0.5
+ARG EMSDK_VER=6.0.13
 ARG BUILDPLATFORM
 # we only need to build on one platform, since we're interested in the WASM output
 # building on the native (BUILDPLATFORM) is much faster, so use that

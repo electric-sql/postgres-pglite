@@ -68,8 +68,10 @@ fi
 PGLITE_LDFLAGS="-sUSE_PTHREADS=0 -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker"
 PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker"
 
+PGLITE_FILESYSTEMS="NODEFS,MEMFS,IDBFS,FS,PROXYFS"
+
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="addFunction,removeFunction,MEMFS,FS,PROXYFS,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
+EXPORTED_RUNTIME_METHODS="$PGLITE_FILESYSTEMS,addFunction,removeFunction,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=64MB \
 -sSUPPORT_LONGJMP=emscripten \
@@ -78,6 +80,7 @@ PGLITE_LDFLAGS_EX="\
 -sUSE_PTHREADS=0 \
 -sEXIT_RUNTIME=1 \
 -sFAKE_DYLIBS=1 \
+-sDEFAULT_TO_CXX \
 -sMAIN_MODULE=2 -sMODULARIZE=1 -sEXPORT_ES6=1 \
 -sEXPORT_NAME=Module -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \
 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
@@ -85,7 +88,7 @@ PGLITE_LDFLAGS_EX="\
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
 $(pwd)/pglite/src/pglitec/pglitec.o \
--lproxyfs.js \
+-lproxyfs.js -lnodefs.js -lidbfs.js \
 --post-js $(pwd)/pglite/scripts/doNotSetExitCode.js"
 
 # --with-blocksize=16 
@@ -166,7 +169,7 @@ PGPRELOAD="\
 --preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a \
 --preload-file $(pwd)/pglite/static/minimal-icu/76.1@/pglite/icu"
 
-PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV,stackSave,stackRestore,HEAPU8"
+PGLITE_EXPORTED_RUNTIME_METHODS="$PGLITE_FILESYSTEMS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV,stackSave,stackRestore,HEAPU8"
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 POSTGRES_PGLITE_FLAGS="\
@@ -178,7 +181,7 @@ POSTGRES_PGLITE_FLAGS="\
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
 -Wno-error=undefined \
 $PGPRELOAD \
--lnodefs.js -lidbfs.js"
+-lproxyfs.js -lnodefs.js -lidbfs.js"
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS" emmake make PORTNAME=emscripten -C src/backend/ -j pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
