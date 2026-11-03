@@ -1,4 +1,4 @@
-ARG EMSDK_VER=6.0.5
+ARG EMSDK_VER=6.0.13
 ARG BUILDPLATFORM
 # we only need to build on one platform, since we're interested in the WASM output
 # building on the native (BUILDPLATFORM) is much faster, so use that
@@ -60,9 +60,9 @@ RUN ${LLVM_NM} /install/libs/lib/libssl.a | awk '$2 ~ /^[TDB]$/ {print $3}' | se
 RUN ${LLVM_NM} /install/libs/lib/libcrypto.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libcrypto.exports
 
 WORKDIR /src
-RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
-# COPY . .
-# RUN tar xvf uuid-1.6.2.tar.gz
+# RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
+COPY . .
+RUN tar xvf uuid-1.6.2.tar.gz
 WORKDIR /src/uuid-1.6.2
 RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" \
 emconfigure ./configure \
