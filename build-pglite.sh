@@ -69,9 +69,12 @@ PGLITE_LDFLAGS="-sUSE_PTHREADS=0 -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker"
 PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker"
 
 PGLITE_FILESYSTEMS="NODEFS,MEMFS,IDBFS,FS,PROXYFS"
+# executables (initdb, pg_dump, ...) only mount PGlite's FS via PROXYFS. Do not link
+# NODEFS: its static init calls process.binding(), which fails under `node --permission`.
+PGLITE_EX_FILESYSTEMS="MEMFS,FS,PROXYFS"
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
-EXPORTED_RUNTIME_METHODS="$PGLITE_FILESYSTEMS,addFunction,removeFunction,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
+EXPORTED_RUNTIME_METHODS="$PGLITE_EX_FILESYSTEMS,addFunction,removeFunction,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
 -sINITIAL_MEMORY=64MB \
 -sSUPPORT_LONGJMP=emscripten \
@@ -88,7 +91,7 @@ PGLITE_LDFLAGS_EX="\
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
 $(pwd)/pglite/src/pglitec/pglitec.o \
--lproxyfs.js -lnodefs.js -lidbfs.js \
+-lproxyfs.js \
 --post-js $(pwd)/pglite/scripts/doNotSetExitCode.js"
 
 # --with-blocksize=16 
