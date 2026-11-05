@@ -216,6 +216,11 @@ RUN find . -type f \( -name "*.o" -o -name "*.so" \) -exec ${LLVM_NM} --defined-
 RUN find . -name "*.o" -exec ${LLVM_NM} --undefined-only {} \; | awk '{print $2}' | sed '/^$/d' | sort -u > /tmp/libgdal.undef.txt
 RUN comm -23 /tmp/libgdal.undef.txt /tmp/libgdal.defs.txt > /install/imports/libgdal.imports
 
+# for pgrouting - only the (header-only) Boost Graph Library is needed, so we just install the headers
+WORKDIR /src
+RUN curl -L https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2 | tar -xj
+RUN cp -r /src/boost_1_86_0/boost /install/libs/include/
+
 ARG TARGETARCH
 FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
 FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
