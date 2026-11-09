@@ -4,6 +4,14 @@
 # $INSTALL_PREFIX is expected to point to the installation folder of various libraries built to wasm (see pglite-builder)
 #############
 
+# source folder: where this script lives
+SRC_DIR=$(cd "$(dirname "$0")" && pwd)
+# build folder: where all build artifacts (.o, .wasm etc) are written. Defaults to an in-tree build.
+BUILD_DIR=${BUILD_DIR:-$SRC_DIR}
+mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR" || exit 1
+BUILD_DIR=$(pwd)
+echo "pglite: building sources from $SRC_DIR in $BUILD_DIR"
+
 emcc --clear-cache
 
 # final output folder
@@ -27,7 +35,7 @@ fi
 
 # first build pglite-libc object WITHOUT the overriding flags
 # pushd pglite/src/pglitec && emcc -g --no-wasm-opt -gsource-map -static -fPIC -o pglitec.o -c pglitec.c && popd
-pushd pglite/src/pglitec && emcc $PGLITE_CFLAGS -static -fpic -o pglitec.o -c pglitec.c && popd
+mkdir -p pglite/src/pglitec && emcc $PGLITE_CFLAGS -static -fpic -o pglite/src/pglitec/pglitec.o -c $SRC_DIR/pglite/src/pglitec/pglitec.c || exit 1
 
 # -Dread=pgl_read -Dwrite=pgl_write
 PGLITE_CFLAGS="$PGLITE_CFLAGS \
@@ -51,7 +59,7 @@ echo "pglite: PGLITE_CFLAGS=$PGLITE_CFLAGS"
 
 # run ./configure only if config.status is older than this file
 # TODO: we should ALSO check if any of the PGLITE_CFLAGS have changed and trigger a ./configure if they did!!!
-REF_FILE="build-pglite.sh"
+REF_FILE="$SRC_DIR/build-pglite.sh"
 CONFIG_STATUS="config.status"
 RUN_CONFIGURE=false
 
@@ -85,9 +93,9 @@ PGLITE_LDFLAGS_EX="\
 -sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS \
 -sINVOKE_RUN=0 \
 -sEXPORTED_FUNCTIONS=_main,_fgets,_fputs,_pclose,_fopen,_fclose,_fflush,___errno_location,_strerror \
-$(pwd)/pglite/src/pglitec/pglitec.o \
+$BUILD_DIR/pglite/src/pglitec/pglitec.o \
 -lproxyfs.js \
---post-js $(pwd)/pglite/scripts/doNotSetExitCode.js"
+--post-js $SRC_DIR/pglite/scripts/doNotSetExitCode.js"
 
 # --with-blocksize=16 
 # --disable-largefile 
@@ -119,7 +127,7 @@ if [ "$RUN_CONFIGURE" = true ]; then
     LDFLAGS_EX=$PGLITE_LDFLAGS_EX \
     ICU_CFLAGS="-I/install/libs/include" \
     ICU_LIBS="-L/install/libs/lib -licui18n -licuuc -licudata" \
-    CFLAGS=${PGLITE_CFLAGS} emconfigure ./configure $CONFIGURE_PARAMS || { echo 'error: emconfigure failed' ; exit 11; }
+    CFLAGS=${PGLITE_CFLAGS} emconfigure $SRC_DIR/configure $CONFIGURE_PARAMS || { echo 'error: emconfigure failed' ; exit 11; }
 else
     echo "Warning: configure has not been run because RUN_CONFIGURE=${RUN_CONFIGURE}"
 fi
@@ -132,18 +140,26 @@ emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=e
 emmake make PORTNAME=emscripten -C contrib/ -j || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
 
 # Step 3.2 pgcrypto - special case
-cd ./pglite && ./build-pgcrypto.sh && cd ../
+cd ./pglite && $SRC_DIR/pglite/build-pgcrypto.sh && cd ../
 
 # Step 3.3: make dist contrib extensions - this will create an archive for each extension
 PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }
 # the above will also create a file with the imports that each extension needs - we pass these as input in the next step for emscripten to keep alive
 
 # Step 4: make and dist other extensions
+# Unlike PostgreSQL itself, most third-party extensions (and PostGIS) cannot be built outside their
+# source folder, so for an out-of-tree build we copy their sources into the build folder.
+# This also keeps the source tree clean, since build-postgis.sh patches PostGIS files in place.
+if [ "$BUILD_DIR" != "$SRC_DIR" ]; then
+    echo "pglite: copying other_extensions sources to $BUILD_DIR/pglite"
+    # .git is excluded: the submodules' .git files point to a relative path that is not valid in the copy
+    tar -C "$SRC_DIR/pglite" --exclude=.git -cf - other_extensions | tar -C "$BUILD_DIR/pglite" -xf - || exit 40
+fi
 SAVE_PATH=$PATH
 PATH=$PATH:$INSTALL_FOLDER/bin
 emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -j -C pglite/other_extensions' ; exit 41; }
 # Step 4.1: special case: make PostGIS
-cd ./pglite/ && ./build-postgis.sh && cd ../
+cd ./pglite/ && $SRC_DIR/pglite/build-postgis.sh && cd ../
 emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions dist || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions dist' ; exit 42; }
 emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/other_extensions dist-postgis || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten USE_PGXS=1 -C pglite/ dist-postgis' ; exit 43; }
 PATH=$SAVE_PATH
@@ -155,17 +171,17 @@ emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions || {
 PGROOT=/pglite
 # PG_IMPORTS_DIR=$PGROOT/imports
 PGPRELOAD="\
---preload-file $(pwd)/pglite/static/PGPASSFILE@/home/postgres/.pgpass \
---preload-file $(pwd)/pglite/static/empty@/pglite/bin/initdb \
---preload-file $(pwd)/pglite/static/empty@/pglite/bin/pg_dump \
---preload-file $(pwd)/pglite/static/empty@/pglite/bin/postgres \
+--preload-file $SRC_DIR/pglite/static/PGPASSFILE@/home/postgres/.pgpass \
+--preload-file $SRC_DIR/pglite/static/empty@/pglite/bin/initdb \
+--preload-file $SRC_DIR/pglite/static/empty@/pglite/bin/pg_dump \
+--preload-file $SRC_DIR/pglite/static/empty@/pglite/bin/postgres \
 --preload-file $PGROOT/share/postgresql@/pglite/share/postgresql \
 --preload-file $PGROOT/lib/postgresql@/pglite/lib/postgresql \
---preload-file $(pwd)/pglite/static/password@/pglite/password \
---preload-file $(pwd)/pglite/static/empty@/pglite/pgstdin \
---preload-file $(pwd)/pglite/static/empty@/pglite/pgstdout \
---preload-file $(pwd)/pglite/static/locale-a@/pglite/locale-a \
---preload-file $(pwd)/pglite/static/minimal-icu/76.1@/pglite/icu"
+--preload-file $SRC_DIR/pglite/static/password@/pglite/password \
+--preload-file $SRC_DIR/pglite/static/empty@/pglite/pgstdin \
+--preload-file $SRC_DIR/pglite/static/empty@/pglite/pgstdout \
+--preload-file $SRC_DIR/pglite/static/locale-a@/pglite/locale-a \
+--preload-file $SRC_DIR/pglite/static/minimal-icu/76.1@/pglite/icu"
 
 PGLITE_EXPORTED_RUNTIME_METHODS="NODEFS,MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV,stackSave,stackRestore,HEAPU8"
 

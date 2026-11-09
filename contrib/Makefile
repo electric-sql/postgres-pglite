@@ -96,7 +96,7 @@ endif
 # Missing:
 #		start-scripts	\ (does not have a makefile)
 
-include ./dist.mk
+include $(srcdir)/dist.mk
 
 
 $(recurse)
