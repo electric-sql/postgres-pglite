@@ -42,6 +42,12 @@
 #include "utils/timeout.h"
 #include "utils/varlena.h"
 
+// #if defined(__PGLITE__)
+// #if defined(__EMSCRIPTEN__)
+// #include "emscripten.h"
+// #endif
+// #endif
+
 /* GUCs */
 bool		Trace_connection_negotiation = false;
 uint32		log_connections = 0;

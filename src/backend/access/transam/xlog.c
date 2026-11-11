@@ -2515,6 +2515,7 @@ XLogWrite(XLogwrtRqst WriteRqst, TimeLineID tli, bool flexible)
 				XLogCtl->lastSegSwitchTime = (pg_time_t) time(NULL);
 				XLogCtl->lastSegSwitchLSN = LogwrtResult.Flush;
 
+#ifndef __PGLITE__				
 				/*
 				 * Request a checkpoint if we've consumed too much xlog since
 				 * the last one.  For speed, we first check using the local
@@ -2528,6 +2529,7 @@ XLogWrite(XLogwrtRqst WriteRqst, TimeLineID tli, bool flexible)
 					if (XLogCheckpointNeeded(openLogSegNo))
 						RequestCheckpoint(CHECKPOINT_CAUSE_XLOG);
 				}
+#endif				
 			}
 		}
 

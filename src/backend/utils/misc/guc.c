@@ -2551,7 +2551,7 @@ ReportGUCOption(struct config_generic *record)
 		pq_sendstring(&msgbuf, record->name);
 		pq_sendstring(&msgbuf, val);
 		pq_endmessage(&msgbuf);
-
+#ifndef __PGLITE__
 		/*
 		 * We need a long-lifespan copy.  If guc_strdup() fails due to OOM,
 		 * we'll set last_reported to NULL and thereby possibly make a
@@ -2559,6 +2559,7 @@ ReportGUCOption(struct config_generic *record)
 		 */
 		guc_free(record->last_reported);
 		record->last_reported = guc_strdup(LOG, val);
+#endif		
 	}
 
 	pfree(val);
