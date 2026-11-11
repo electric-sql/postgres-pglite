@@ -77,7 +77,11 @@ typedef struct PendingCancelRequest
 
 static void BackendInitialize(ClientSocket *client_sock, CAC_state cac);
 static int	ProcessSSLStartup(Port *port);
+#if defined(__EMSCRIPTEN__)
+int	ProcessStartupPacket(Port *port, PendingCancelRequest *cancel_req);
+#else
 static int	ProcessStartupPacket(Port *port, PendingCancelRequest *cancel_req);
+#endif
 static void ProcessCancelRequestPacket(Port *port, void *pkt, int pktlen,
 									   PendingCancelRequest *cancel_req);
 static void SendNegotiateProtocolVersion(List *unrecognized_protocol_options);
@@ -511,7 +515,14 @@ reject:
  * if we detect a communications failure.)
  *
  */
+#ifdef __PGLITE__
+#ifdef __EMSCRIPTEN__
+#include "emscripten.h"
+int EMSCRIPTEN_KEEPALIVE
+#endif
+#else
 static int
+#endif
 ProcessStartupPacket(Port *port, PendingCancelRequest *cancel_req)
 {
 	int32		len;

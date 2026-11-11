@@ -1,6 +1,7 @@
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 
+# pg_textsearch 
 SUBDIRS = \
 		pg_ivm \
 		vector \
@@ -8,7 +9,6 @@ SUBDIRS = \
 		age \
 		pg_uuidv7 \
 		pg_hashids \
-		pg_textsearch \
 		pgmq/pgmq-extension \
 		plpgsql_check \
 		pgaudit \

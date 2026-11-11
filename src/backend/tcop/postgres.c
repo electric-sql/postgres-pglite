@@ -4360,43 +4360,128 @@ PostgresSingleUserMain(int argc, char *argv[],
 }
 
 /*
-PostgresMainLoopOnce
+__PGLITE__
 */
-
 void
-PostgresMainLoopOnce()
+PostgresMainLongJmp()
 {
-		int			firstchar;
-		StringInfoData input_message;
-
-		/*
-		 * At top of loop, reset extended-query-message flag, so that any
-		 * errors encountered in "idle" state don't provoke skip.
+	/*
+		 * NOTE: if you are tempted to add more code in this if-block,
+		 * consider the high probability that it should be in
+		 * AbortTransaction() instead.  The only stuff done directly here
+		 * should be stuff that is guaranteed to apply *only* for outer-level
+		 * error recovery, such as adjusting the FE/BE protocol status.
 		 */
-		doing_extended_query_message = false;
+
+		/* Since not using PG_TRY, must reset error stack by hand */
+		error_context_stack = NULL;
+
+		/* Prevent interrupts while cleaning up */
+		HOLD_INTERRUPTS();
 
 		/*
-		 * For valgrind reporting purposes, the "current query" begins here.
+		 * Forget any pending QueryCancel request, since we're returning to
+		 * the idle loop anyway, and cancel any active timeout requests.  (In
+		 * future we might want to allow some timeout requests to survive, but
+		 * at minimum it'd be necessary to do reschedule_timeouts(), in case
+		 * we got here because of a query cancel interrupting the SIGALRM
+		 * interrupt handler.)	Note in particular that we must clear the
+		 * statement and lock timeout indicators, to prevent any future plain
+		 * query cancels from being misreported as timeouts in case we're
+		 * forgetting a timeout cancel.
 		 */
-#ifdef USE_VALGRIND
-		old_valgrind_error_count = VALGRIND_COUNT_ERRORS;
-#endif
+		disable_all_timeouts(false);	/* do first to avoid race condition */
+		QueryCancelPending = false;
+		idle_in_transaction_timeout_enabled = false;
+		idle_session_timeout_enabled = false;
+
+		/* Not reading from the client anymore. */
+		DoingCommandRead = false;
+
+		/* Make sure libpq is in a good state */
+		pq_comm_reset();
+
+		/* Report the error to the client and/or server log */
+		EmitErrorReport();
 
 		/*
-		 * Release storage left over from prior query cycle, and create a new
-		 * query input buffer in the cleared MessageContext.
+		 * If Valgrind noticed something during the erroneous query, print the
+		 * query string, assuming we have one.
+		 */
+		valgrind_report_error_query(debug_query_string);
+
+		/*
+		 * Make sure debug_query_string gets reset before we possibly clobber
+		 * the storage it points at.
+		 */
+		debug_query_string = NULL;
+
+		/*
+		 * Abort the current transaction in order to recover.
+		 */
+		AbortCurrentTransaction();
+
+		if (am_walsender)
+			WalSndErrorCleanup();
+
+		PortalErrorCleanup();
+
+		/*
+		 * We can't release replication slots inside AbortTransaction() as we
+		 * need to be able to start and abort transactions while having a slot
+		 * acquired. But we never need to hold them across top level errors,
+		 * so releasing here is fine. There also is a before_shmem_exit()
+		 * callback ensuring correct cleanup on FATAL errors.
+		 */
+		if (MyReplicationSlot != NULL)
+			ReplicationSlotRelease();
+
+		/* We also want to cleanup temporary slots on error. */
+		ReplicationSlotCleanup(false);
+
+		jit_reset_after_error();
+
+		/*
+		 * Now return to normal top-level context and clear ErrorContext for
+		 * next time.
 		 */
 		MemoryContextSwitchTo(MessageContext);
-		MemoryContextReset(MessageContext);
-
-		initStringInfo(&input_message);
+		FlushErrorState();
 
 		/*
-		 * Also consider releasing our catalog snapshot if any, so that it's
-		 * not preventing advance of global xmin while we wait for the client.
+		 * If we were handling an extended-query-protocol message, initiate
+		 * skip till next Sync.  This also causes us not to issue
+		 * ReadyForQuery (until we get Sync).
 		 */
-		InvalidateCatalogSnapshotConditionally();
+		if (doing_extended_query_message)
+			ignore_till_sync = true;
 
+		/* We don't have a transaction command open anymore */
+		xact_started = false;
+
+		/*
+		 * If an error occurred while we were reading a message from the
+		 * client, we have potentially lost track of where the previous
+		 * message ends and the next one begins.  Even though we have
+		 * otherwise recovered from the error, we cannot safely read any more
+		 * messages from the client, so there isn't much we can do with the
+		 * connection anymore.
+		 */
+		if (pq_is_reading_msg())
+			ereport(FATAL,
+					(errcode(ERRCODE_PROTOCOL_VIOLATION),
+					 errmsg("terminating connection because protocol synchronization was lost")));
+
+		/* Now we can allow interrupts again */
+		RESUME_INTERRUPTS();
+}
+
+/*
+__PGLITE__
+*/
+void
+PostgresSendReadyForQueryIfNecessary() 
+{
 		/*
 		 * (1) If we've reached idle state, tell the frontend we're ready for
 		 * a new query.
@@ -4534,6 +4619,45 @@ PostgresMainLoopOnce()
 			ReadyForQuery(whereToSendOutput);
 			send_ready_for_query = false;
 		}
+}
+/*
+PostgresMainLoopOnce
+*/
+void
+PostgresMainLoopOnce()
+{
+		int			firstchar;
+		StringInfoData input_message;
+
+		/*
+		 * At top of loop, reset extended-query-message flag, so that any
+		 * errors encountered in "idle" state don't provoke skip.
+		 */
+		doing_extended_query_message = false;
+
+		/*
+		 * For valgrind reporting purposes, the "current query" begins here.
+		 */
+#ifdef USE_VALGRIND
+		old_valgrind_error_count = VALGRIND_COUNT_ERRORS;
+#endif
+
+		/*
+		 * Release storage left over from prior query cycle, and create a new
+		 * query input buffer in the cleared MessageContext.
+		 */
+		MemoryContextSwitchTo(MessageContext);
+		MemoryContextReset(MessageContext);
+
+		initStringInfo(&input_message);
+
+		/*
+		 * Also consider releasing our catalog snapshot if any, so that it's
+		 * not preventing advance of global xmin while we wait for the client.
+		 */
+		InvalidateCatalogSnapshotConditionally();
+
+		PostgresSendReadyForQueryIfNecessary();
 
 		/*
 		 * (2) Allow asynchronous signals to be executed immediately if they
@@ -5109,115 +5233,7 @@ PostgresMain(const char *dbname, const char *username)
 
 	if (sigsetjmp(postgresmain_sigjmp_buf, 1) != 0)
 	{
-		/*
-		 * NOTE: if you are tempted to add more code in this if-block,
-		 * consider the high probability that it should be in
-		 * AbortTransaction() instead.  The only stuff done directly here
-		 * should be stuff that is guaranteed to apply *only* for outer-level
-		 * error recovery, such as adjusting the FE/BE protocol status.
-		 */
-
-		/* Since not using PG_TRY, must reset error stack by hand */
-		error_context_stack = NULL;
-
-		/* Prevent interrupts while cleaning up */
-		HOLD_INTERRUPTS();
-
-		/*
-		 * Forget any pending QueryCancel request, since we're returning to
-		 * the idle loop anyway, and cancel any active timeout requests.  (In
-		 * future we might want to allow some timeout requests to survive, but
-		 * at minimum it'd be necessary to do reschedule_timeouts(), in case
-		 * we got here because of a query cancel interrupting the SIGALRM
-		 * interrupt handler.)	Note in particular that we must clear the
-		 * statement and lock timeout indicators, to prevent any future plain
-		 * query cancels from being misreported as timeouts in case we're
-		 * forgetting a timeout cancel.
-		 */
-		disable_all_timeouts(false);	/* do first to avoid race condition */
-		QueryCancelPending = false;
-		idle_in_transaction_timeout_enabled = false;
-		idle_session_timeout_enabled = false;
-
-		/* Not reading from the client anymore. */
-		DoingCommandRead = false;
-
-		/* Make sure libpq is in a good state */
-		pq_comm_reset();
-
-		/* Report the error to the client and/or server log */
-		EmitErrorReport();
-
-		/*
-		 * If Valgrind noticed something during the erroneous query, print the
-		 * query string, assuming we have one.
-		 */
-		valgrind_report_error_query(debug_query_string);
-
-		/*
-		 * Make sure debug_query_string gets reset before we possibly clobber
-		 * the storage it points at.
-		 */
-		debug_query_string = NULL;
-
-		/*
-		 * Abort the current transaction in order to recover.
-		 */
-		AbortCurrentTransaction();
-
-		if (am_walsender)
-			WalSndErrorCleanup();
-
-		PortalErrorCleanup();
-
-		/*
-		 * We can't release replication slots inside AbortTransaction() as we
-		 * need to be able to start and abort transactions while having a slot
-		 * acquired. But we never need to hold them across top level errors,
-		 * so releasing here is fine. There also is a before_shmem_exit()
-		 * callback ensuring correct cleanup on FATAL errors.
-		 */
-		if (MyReplicationSlot != NULL)
-			ReplicationSlotRelease();
-
-		/* We also want to cleanup temporary slots on error. */
-		ReplicationSlotCleanup(false);
-
-		jit_reset_after_error();
-
-		/*
-		 * Now return to normal top-level context and clear ErrorContext for
-		 * next time.
-		 */
-		MemoryContextSwitchTo(MessageContext);
-		FlushErrorState();
-
-		/*
-		 * If we were handling an extended-query-protocol message, initiate
-		 * skip till next Sync.  This also causes us not to issue
-		 * ReadyForQuery (until we get Sync).
-		 */
-		if (doing_extended_query_message)
-			ignore_till_sync = true;
-
-		/* We don't have a transaction command open anymore */
-		xact_started = false;
-
-		/*
-		 * If an error occurred while we were reading a message from the
-		 * client, we have potentially lost track of where the previous
-		 * message ends and the next one begins.  Even though we have
-		 * otherwise recovered from the error, we cannot safely read any more
-		 * messages from the client, so there isn't much we can do with the
-		 * connection anymore.
-		 */
-		if (pq_is_reading_msg())
-			ereport(FATAL,
-					(errcode(ERRCODE_PROTOCOL_VIOLATION),
-					 errmsg("terminating connection because protocol synchronization was lost")));
-
-		/* Now we can allow interrupts again */
-		RESUME_INTERRUPTS();
+		PostgresMainLongJmp();
 	}
 
 	/* We can now handle ereport(ERROR) */
