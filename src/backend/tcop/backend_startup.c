@@ -42,6 +42,10 @@
 #include "utils/timeout.h"
 #include "utils/varlena.h"
 
+#if defined(__EMSCRIPTEN__)
+#include "emscripten.h"
+#endif
+
 /* GUCs */
 bool		Trace_connection_negotiation = false;
 uint32		log_connections = 0;
@@ -71,8 +75,13 @@ typedef struct PendingCancelRequest
 
 static void BackendInitialize(ClientSocket *client_sock, CAC_state cac);
 static int	ProcessSSLStartup(Port *port);
+#if defined(__EMSCRIPTEN__)
+int	ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done,
+						 PendingCancelRequest *cancel_req);
+#else
 static int	ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done,
 								 PendingCancelRequest *cancel_req);
+#endif
 static void ProcessCancelRequestPacket(Port *port, void *pkt, int pktlen,
 									   PendingCancelRequest *cancel_req);
 static void SendNegotiateProtocolVersion(List *unrecognized_protocol_options);
@@ -512,9 +521,13 @@ reject:
  * should make no assumption here about the order in which the client may make
  * requests.
  */
+#if defined(__EMSCRIPTEN__)
+int EMSCRIPTEN_KEEPALIVE
+#else
 static int
+#endif
 ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done,
-					 PendingCancelRequest *cancel_req)
+					 PendingCancelRequest *cancel_req);
 {
 	int32		len;
 	char	   *buf;

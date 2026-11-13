@@ -249,6 +249,11 @@ ifdef MODULES
 ifeq ($(with_llvm), yes)
 	$(foreach mod, $(MODULES), $(call install_llvm_module,$(mod),$(mod).bc))
 endif # with_llvm
+ifeq ($(PORTNAME), emscripten)
+	find . -name "*.o" -exec $(LLVM_NM) --undefined-only {} \; | awk '{print $$2}' | sed '/^$$/d' | sort -u > '$(MODULES).undef.txt'
+	find . -type f \( -name "*.o" -o -name "*.so" \) -exec $(LLVM_NM) --defined-only {} \;   | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > '$(MODULES).defs.txt'
+	comm -23 '$(MODULES).undef.txt' '$(MODULES).defs.txt' > '$(emscripten_extension_imports_dir)/$(MODULES).imports'
+endif # PORTNAME=emscripten
 endif # MODULES
 ifdef DOCS
 ifdef docdir
@@ -271,6 +276,11 @@ ifdef MODULE_big
 ifeq ($(with_llvm), yes)
 	$(call install_llvm_module,$(MODULE_big),$(OBJS))
 endif # with_llvm
+ifeq ($(PORTNAME), emscripten)
+	find . -name "*.o" -exec $(LLVM_NM) --undefined-only {} \; | awk '{print $$2}' | sed '/^$$/d' | sort -u > '$(MODULE_big).undef.txt'
+	find . -type f \( -name "*.o" -o -name "*.so" \) -exec $(LLVM_NM) --defined-only   {} \; | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > '$(MODULE_big).defs.txt'
+	comm -23 '$(MODULE_big).undef.txt' '$(MODULE_big).defs.txt' > '$(emscripten_extension_imports_dir)/$(MODULE_big).imports'
+endif # PORTNAME=emscripten
 
 install: install-lib
 endif # MODULE_big
@@ -297,6 +307,9 @@ endif # DOCS
 ifneq (,$(PROGRAM)$(SCRIPTS)$(SCRIPTS_built))
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
 endif
+ifeq ($(PORTNAME), emscripten)
+	$(MKDIR_P) '$(DESTDIR)$(emscripten_extension_imports_dir)'
+endif
 
 ifdef MODULE_big
 installdirs: installdirs-lib
@@ -318,6 +331,9 @@ ifdef MODULES
 ifeq ($(with_llvm), yes)
 	$(foreach mod, $(MODULES), $(call uninstall_llvm_module,$(mod)))
 endif # with_llvm
+ifeq ($(PORTNAME), emscripten)
+	rm -f '$(DESTDIR)$(emscripten_extension_imports_dir)/$(MODULES).imports'
+endif
 endif # MODULES
 ifdef DOCS
 	rm -f $(addprefix '$(DESTDIR)$(docdir)/$(docmoduledir)'/, $(DOCS))
@@ -339,6 +355,9 @@ ifdef MODULE_big
 ifeq ($(with_llvm), yes)
 	$(call uninstall_llvm_module,$(MODULE_big))
 endif # with_llvm
+ifeq ($(PORTNAME), emscripten)
+	rm -f '$(DESTDIR)$(emscripten_extension_imports_dir)/$(MODULE_big).imports'
+endif
 
 uninstall: uninstall-lib
 endif # MODULE_big
