@@ -58,6 +58,13 @@ uninstall: uninstall-lib uninstall-data uninstall-headers
 
 install-data: installdirs
 	$(INSTALL_DATA) $(addprefix $(srcdir)/, $(DATA)) '$(DESTDIR)$(datadir)/extension/'
+ifeq ($(PORTNAME), emscripten) # __PGLITE__
+	$(LLVM_NM) -u $(OBJS)    | awk '{print $$2}'              | sed '/^$$/d' | sort -u > undef.txt
+	$(LLVM_NM)    $(OBJS)    | awk '$$2 ~ /^[TDB]$$/ {print $$3}' | sed '/^$$/d' | sort -u > defs.txt
+	mkdir -p $(DESTDIR)$(emscripten_extension_imports_dir)
+	comm -23 undef.txt defs.txt > '$(DESTDIR)$(emscripten_extension_imports_dir)/$(NAME).imports'
+	rm -f undef.txt defs.txt
+endif
 
 # The plpgsql.h header file is needed by instrumentation plugins
 install-headers: installdirs

@@ -21,7 +21,7 @@ dist: $(addsuffix .tar.gz,$(CONTRIBS))
 	mkdir -p $(ARCHIVE_DIR)
 	cd $(CONTRIB_BUILD_ROOT)/$*/$(prefix) && \
 	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
-	tar -czf $(ARCHIVE_DIR)/$*.tar.gz $$files
+	tar -czfv $(ARCHIVE_DIR)/$*.tar.gz $$files
 # 	tar -C $(CONTRIB_BUILD_ROOT)/$*/$(prefix) -czf $(ARCHIVE_DIR)/$*.tar.gz .
 
 .PHONY: dist

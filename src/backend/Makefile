@@ -96,7 +96,7 @@ endif
 endif
 endif
 
-ifeq ($(PORTNAME), emscripten)
+ifeq ($(PORTNAME), emscripten) # __PGLITE__
 
 postgres: $(OBJS)
 	$(CC) $(CFLAGS) $(call expand_subsys,$^) $(LDFLAGS) $(LIBS) -o $@$(X)

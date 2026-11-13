@@ -15,6 +15,7 @@ if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
     PGLITE_CFLAGS="$PGLITE_CFLAGS -g -gsource-map --no-wasm-opt"
+    INITIAL_MEMORY="-sINITIAL_MEMORY=18MB"
 else
     echo "pglite: building release version."
     PGLITE_CFLAGS="$PGLITE_CFLAGS -O2"
@@ -67,11 +68,14 @@ fi
 
 PGLITE_LDFLAGS="-sUSE_PTHREADS=0 -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker"
 PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1 -sENVIRONMENT=node,web,worker"
+INCOMING_MODULE_JS_API=wasmMemory,arguments,locateFile,onAbort,onRuntimeInitialized,noExitRuntime,noInitialRun,preInit,preRun,postRun,print,printErr,getPreloadedPackage,instantiateWasm,stdin,stdout,thisProgram
 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
 EXPORTED_RUNTIME_METHODS="MEMFS,FS,PROXYFS,addFunction,removeFunction,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
--sINITIAL_MEMORY=64MB \
+-sINCOMING_MODULE_JS_API=$INCOMING_MODULE_JS_API \
+$INITIAL_MEMORY \
+-sIMPORTED_MEMORY=1 \
 -sSUPPORT_LONGJMP=emscripten \
 -sENVIRONMENT=node,web,worker \
 -sFORCE_FILESYSTEM=1 \
@@ -171,8 +175,10 @@ PGLITE_EXPORTED_RUNTIME_METHODS="NODEFS,MEMFS,IDBFS,FS,PROXYFS,setValue,getValue
 
 # -sDYLINK_DEBUG=2 use this for debugging missing exported symbols (ex when an extension calls a pgcore function that hasn't been exported)
 POSTGRES_PGLITE_FLAGS="\
+-sINCOMING_MODULE_JS_API=$INCOMING_MODULE_JS_API \
 -sSTACK_SIZE=8MB \
 -sINITIAL_MEMORY=128MB \
+-sALLOW_MEMORY_GROWTH \
 -sIMPORTED_MEMORY=1 \
 -sFAKE_DYLIBS=1 \
 -sEXPORTED_RUNTIME_METHODS=$PGLITE_EXPORTED_RUNTIME_METHODS \
