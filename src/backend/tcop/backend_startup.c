@@ -527,7 +527,7 @@ int EMSCRIPTEN_KEEPALIVE
 static int
 #endif
 ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done,
-					 PendingCancelRequest *cancel_req);
+					 PendingCancelRequest *cancel_req)
 {
 	int32		len;
 	char	   *buf;
