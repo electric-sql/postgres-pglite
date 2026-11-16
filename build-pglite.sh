@@ -15,7 +15,6 @@ if [ "$DEBUG" = true ]
 then
     echo "pglite: building debug version."
     PGLITE_CFLAGS="$PGLITE_CFLAGS -g -gsource-map --no-wasm-opt"
-    INITIAL_MEMORY="-sINITIAL_MEMORY=18MB"
 else
     echo "pglite: building release version."
     PGLITE_CFLAGS="$PGLITE_CFLAGS -O2"
@@ -74,7 +73,7 @@ INCOMING_MODULE_JS_API=wasmMemory,arguments,locateFile,onAbort,onRuntimeInitiali
 EXPORTED_RUNTIME_METHODS="MEMFS,FS,PROXYFS,addFunction,removeFunction,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
 -sINCOMING_MODULE_JS_API=$INCOMING_MODULE_JS_API \
-$INITIAL_MEMORY \
+-sINITIAL_MEMORY=18MB \
 -sIMPORTED_MEMORY=1 \
 -sSUPPORT_LONGJMP=emscripten \
 -sENVIRONMENT=node,web,worker \
