@@ -13,7 +13,8 @@ SUBDIRS = \
 		plpgsql_check \
 		pgaudit \
 		pg_repack \
-		hypopg
+		hypopg \
+		pg_textsearch
 
 prefix ?= /pglite
 EXTENSIONS_BUILD_ROOT := /tmp/extensions/build
