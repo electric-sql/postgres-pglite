@@ -59,25 +59,6 @@ RUN emmake make -j && emmake make install_sw install_ssldirs
 RUN ${LLVM_NM} /install/libs/lib/libssl.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libssl.exports
 RUN ${LLVM_NM} /install/libs/lib/libcrypto.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libcrypto.exports
 
-WORKDIR /src
-# RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
-COPY . .
-RUN tar xvf uuid-1.6.2.tar.gz
-WORKDIR /src/uuid-1.6.2
-RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" \
-emconfigure ./configure \
-  ac_cv_header_ifaddrs_h=no \
-  ac_cv_header_net_if_h=no \
-  ac_cv_header_net_if_dl_h=no \
-  ac_cv_header_net_if_arp_h=no \
-  ac_cv_header_sys_ioctl_h=no \
-  ac_cv_func_getifaddrs=no \
-  --build=wasm32-unknown-linux-gnu --enable-shared=no --enable-static=yes --with-perl=no --with-perl-compat=no --prefix=/install/libs --with-php=no --with-pic=yes
-RUN emmake make -j && emmake make install || true # install tries to strip the wasm, but it doesnt recognize the format, so ignore atm
-WORKDIR /install/libs/lib
-RUN ln -s libuuid.a libossp-uuid.a # contrib extensions use -lossp-uuid
-RUN ${LLVM_NM} /install/libs/lib/libossp-uuid.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libossp-uuid.exports
-
 # Build ICU from source
 WORKDIR /src
 RUN curl -L https://github.com/unicode-org/icu/releases/download/release-76-1/icu4c-76_1-src.tgz | tar -xz
@@ -216,6 +197,34 @@ RUN find . -type f \( -name "*.o" -o -name "*.so" \) -exec ${LLVM_NM} --defined-
 RUN find . -name "*.o" -exec ${LLVM_NM} --undefined-only {} \; | awk '{print $2}' | sed '/^$/d' | sort -u > /tmp/libgdal.undef.txt
 RUN comm -23 /tmp/libgdal.undef.txt /tmp/libgdal.defs.txt > /install/imports/libgdal.imports
 
+WORKDIR /src
+# RUN wget https://gmplib.org/download/gmp/gmp-6.3.0.tar.xz
+COPY bin/gmp-6.3.0.tar.xz .
+RUN tar -xvf gmp-6.3.0.tar.xz
+WORKDIR /src/gmp-6.3.0
+RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" emconfigure ./configure --enable-assembly=no --host=wasm32-unknown-emscripten --prefix=/install/libs
+RUN emmake make -j 
+RUN emmake make install
+
+WORKDIR /src
+# RUN curl -L ftp://ftp.ossp.org/pkg/lib/uuid/uuid-1.6.2.tar.gz | tar xz
+COPY bin/uuid-1.6.2.tar.gz .
+RUN tar xvf uuid-1.6.2.tar.gz
+WORKDIR /src/uuid-1.6.2
+RUN CFLAGS="${EMCC_COMMON_FLAGS}" CXXFLAGS="${EMCC_COMMON_FLAGS}" \
+emconfigure ./configure \
+  ac_cv_header_ifaddrs_h=no \
+  ac_cv_header_net_if_h=no \
+  ac_cv_header_net_if_dl_h=no \
+  ac_cv_header_net_if_arp_h=no \
+  ac_cv_header_sys_ioctl_h=no \
+  ac_cv_func_getifaddrs=no \
+  --build=wasm32-unknown-linux-gnu --enable-shared=no --enable-static=yes --with-perl=no --with-perl-compat=no --prefix=/install/libs --with-php=no --with-pic=yes
+RUN emmake make -j && emmake make install || true # install tries to strip the wasm, but it doesnt recognize the format, so ignore atm
+WORKDIR /install/libs/lib
+RUN ln -s libuuid.a libossp-uuid.a # contrib extensions use -lossp-uuid
+RUN ${LLVM_NM} /install/libs/lib/libossp-uuid.a | awk '$2 ~ /^[TDB]$/ {print $3}' | sed '/^$/d' | sort -u > /install/exports/libossp-uuid.exports
+
 ARG TARGETARCH
 FROM emscripten/emsdk:${EMSDK_VER} AS base-amd64
 FROM emscripten/emsdk:${EMSDK_VER}-arm64 AS base-arm64
@@ -241,3 +250,6 @@ RUN chmod -R 777 /install
 
 # needed in building pglite.wasm
 ENV LLVM_NM=/emsdk/upstream/bin/llvm-nm
+
+#needed to find the wasm built libs
+ENV EM_PKG_CONFIG_PATH=/install/libs/lib/pkgconfig

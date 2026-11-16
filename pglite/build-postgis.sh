@@ -1,4 +1,13 @@
 #!/bin/bash
+# echo "=== PKG_CONFIG_PATH ==="
+# echo "$PKG_CONFIG_PATH"
+# pkg-config --debug --exists gmp
+# export PKG_CONFIG_PATH=/install/libs/lib/pkgconfig
+# unset PKG_CONFIG_LIBDIR
+
+# export GMP_CFLAGS="-I/install/libs/include"
+# export GMP_LIBS="-L/install/libs/lib -lgmp"
+
 echo "=== Building postgis ==="
 pushd other_extensions/postgis
 # hack - building loader/pgsql2shp.wasm fails, we don't need it anyway
