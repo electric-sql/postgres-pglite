@@ -4474,6 +4474,11 @@ PostgresMainLongJmp()
 
 		/* Now we can allow interrupts again */
 		RESUME_INTERRUPTS();
+
+		/* __PGLITE__ */
+		/* added for pglite from the main loop here*/
+		if (!ignore_till_sync)
+			send_ready_for_query = true;	/* after error recovery */		
 }
 
 /*

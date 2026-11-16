@@ -1,5 +1,5 @@
 # contrib/dist.mk
-#
+# __PGLITE__
 # Package each contrib extension into its own .tar.gz archive
 
 prefix ?= /pglite
@@ -21,7 +21,7 @@ dist: $(addsuffix .tar.gz,$(CONTRIBS))
 	mkdir -p $(ARCHIVE_DIR)
 	cd $(CONTRIB_BUILD_ROOT)/$*/$(prefix) && \
 	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
-	tar -czfv $(ARCHIVE_DIR)/$*.tar.gz $$files
+	tar -czf $(ARCHIVE_DIR)/$*.tar.gz $$files
 # 	tar -C $(CONTRIB_BUILD_ROOT)/$*/$(prefix) -czf $(ARCHIVE_DIR)/$*.tar.gz .
 
 .PHONY: dist
