@@ -71,7 +71,6 @@ PGLITE_LDFLAGS_SL="-shared -sSIDE_MODULE=1 -Wno-unused-function -sFAKE_DYLIBS=1 
 # we define here "all" emscripten flags in order to allow native builds (like libpglite)
 EXPORTED_RUNTIME_METHODS="MEMFS,FS,PROXYFS,addFunction,removeFunction,callMain,ENV,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,stackSave,stackRestore,HEAPU8"
 PGLITE_LDFLAGS_EX="\
--sINITIAL_MEMORY=64MB \
 -sSUPPORT_LONGJMP=emscripten \
 -sENVIRONMENT=node,web,worker \
 -sFORCE_FILESYSTEM=1 \
