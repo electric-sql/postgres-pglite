@@ -157,6 +157,7 @@ fiprintf
 Float8GetDatum
 fmax
 fmin
+fma
 fmod
 fopen
 fputc
