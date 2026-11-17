@@ -58,13 +58,13 @@ plpgsql_check.tar.gz:
 	files=$$(find . -type f -o -type l | sed 's|^\./||') && \
 	tar -czf $(ARCHIVE_DIR)/plpgsql_check.tar.gz $$files
 
-# AGE requires SIZEOF_DATUM=4 for 32-bit WASM compatibility (strips PASSEDBYVALUE from graphid)
+# Datum is 8 bytes on all platforms since PG19, so graphid stays PASSEDBYVALUE (do not pass SIZEOF_DATUM=4)
 age.tar.gz:
-	@echo "=== Staging age (with 32-bit support) ==="
+	@echo "=== Staging age ==="
 	rm -rf $(EXTENSIONS_BUILD_ROOT)/age
 	bash -c 'mkdir -p $(EXTENSIONS_BUILD_ROOT)/age/$(prefix)/{bin,lib,share/extension,share/doc,share/postgresql/extension,share/postgresql/tsearch_data,include}'
-	rm -f age/age--*.sql
-	$(MAKE) -C age install DESTDIR=$(EXTENSIONS_BUILD_ROOT)/age SIZEOF_DATUM=4
+	find age -maxdepth 1 -type f -regex '.*/age--[0-9]+\.[0-9]+\.[0-9]+\.sql' -delete
+	$(MAKE) -C age install DESTDIR=$(EXTENSIONS_BUILD_ROOT)/age
 	@echo "=== Packaging age ==="
 	mkdir -p $(ARCHIVE_DIR)
 	cd $(EXTENSIONS_BUILD_ROOT)/age/$(prefix) && \
