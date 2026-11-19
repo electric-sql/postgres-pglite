@@ -334,6 +334,7 @@ getgid
 GetMemoryChunkContext
 getmissingattr
 getpid
+getrlimit
 GetSysCacheOid
 getTempRet0
 gettimeofday
@@ -467,6 +468,7 @@ post_parse_analyze_hook
 PostgresMainLongJmp
 PostgresMainLoopOnce
 PostgresSendReadyForQueryIfNecessary
+posix_memalign
 pow
 pq_buffer_remaining_data
 pread
@@ -506,6 +508,10 @@ pthread_mutexattr_settype
 pthread_once
 pthread_self
 pthread_setspecific
+pthread_spin_destroy
+pthread_spin_init
+pthread_spin_lock
+pthread_spin_unlock
 putchar
 puts
 qsort

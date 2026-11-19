@@ -4,6 +4,7 @@ echo "=== Building postgis ==="
 POSTGIS_PROFILE_FILE=../../../.pglite-postgis-build-profile
 POSTGIS_LDFLAGS_SL=${PGLITE_LDFLAGS_SL//-shared/}
 POSTGIS_PROFILE=$(printf '%s\n' \
+  "emcc_cflags=${EMCC_CFLAGS:-}" \
   "cflags=${PGLITE_CFLAGS}" \
   "ldflags=${POSTGIS_LDFLAGS_SL}")
 POSTGIS_RECONFIGURE=false
@@ -49,14 +50,24 @@ fi
 emmake make raster-sql || true
 # these flags are used in pgxs.mk (postgresql extension makefile) and passed to the build process of that extension
 find . -name '*.so' -delete
-# PostGIS and its bundled C++ libraries require the same Emscripten ABI flags
-# as the objects, notably SUPPORT_LONGJMP. SIDE_MODULE already selects dynamic
-# linking, so remove PGXS's redundant `-shared` driver option. Link libc++abi
-# normally after the whole-archive group so the side module carries the guard
-# implementation required by its function-local C++ statics.
-emmake make LDFLAGS_SL="$PGLITE_CFLAGS $POSTGIS_LDFLAGS_SL -Wl,--whole-archive -lstdc++ -lsqlite3 -lgeos -ljson-c -lgdal -Wl,--no-whole-archive -lc++abi" \
-CFLAGS_SL="-sWASM_BIGINT $PGLITE_CFLAGS" \
-CXXFLAGS_SL="-sWASM_BIGINT $PGLITE_CFLAGS" -j1 || { echo 'emmake make postgis failed' ; exit 442; }
+# Preserve the compiler ABI flags and bundle libc++ explicitly: Emscripten
+# ignores -lstdc++. Link libc++abi after the whole-archive group for C++ guards.
+POSTGIS_COMMON_LDFLAGS="$PGLITE_CFLAGS $POSTGIS_LDFLAGS_SL -Wl,--whole-archive -lc++ -lsqlite3 -lgeos -ljson-c"
+POSTGIS_MAKE_FLAGS=(
+  "CFLAGS_SL=-sWASM_BIGINT $PGLITE_CFLAGS"
+  "CXXFLAGS_SL=-sWASM_BIGINT $PGLITE_CFLAGS"
+  -j1
+)
+emmake make LIBGDAL_LDFLAGS= \
+  LDFLAGS_SL="$POSTGIS_COMMON_LDFLAGS -Wl,--no-whole-archive -lc++abi" \
+  "${POSTGIS_MAKE_FLAGS[@]}" || { echo 'emmake make postgis failed' ; exit 442; }
+
+# All raster datasets must use one GDAL copy, including its shared-dataset
+# registry. Mixing copies leaves stale handles after a dataset is closed.
+find postgis -maxdepth 1 -type f -name '*.so' -delete
+emmake make -C postgis \
+  LDFLAGS_SL="$POSTGIS_COMMON_LDFLAGS -lgdal -ltiff -lz -ldeflate -Wl,--no-whole-archive -lc++abi" \
+  "${POSTGIS_MAKE_FLAGS[@]}" || { echo 'emmake make PostGIS GDAL provider failed' ; exit 442; }
 printf '%s\n' "${POSTGIS_PROFILE}" >"${POSTGIS_PROFILE_FILE}"
 # emmake make PG_LDFLAGS="-L/install/libs/lib -lpgport -lpgcommon -sSIDE_MODULE=1" -j
 

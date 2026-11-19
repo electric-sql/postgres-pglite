@@ -71,6 +71,8 @@ fi
 PGLITE_BUILD_PROFILE_FILE=.pglite-build-profile
 PGLITE_BUILD_PROFILE=$(printf '%s\n' \
     "workspace=$(pwd)" \
+    "install_folder=${INSTALL_FOLDER}" \
+    "emcc_cflags=${EMCC_CFLAGS:-}" \
     "cflags=${PGLITE_CFLAGS}" \
     "memory_ldflags=${PGLITE_MEMORY_LDFLAGS}" \
     "initial_memory=${POSTGRES_PGLITE_INITIAL_MEMORY}" \
@@ -80,7 +82,7 @@ if [ ! -f "${PGLITE_BUILD_PROFILE_FILE}" ] ||
    [ "$(cat "${PGLITE_BUILD_PROFILE_FILE}" 2>/dev/null || true)" != "${PGLITE_BUILD_PROFILE}" ]; then
     echo "pglite: build profile changed; cleaning and reconfiguring."
     PGLITE_PROFILE_RECONFIGURE=true
-    if [ -f Makefile ]; then
+    if [ -f GNUmakefile ]; then
         emmake make clean || { echo 'error: cleaning stale Wasm build profile' ; exit 8; }
     fi
 fi
@@ -664,7 +666,17 @@ if [ "${PGLITE_SKIP_THIRD_PARTY_EXTENSIONS:-false}" != true ]; then
             fi
         done
     else
+        # The top-level PostgreSQL clean does not descend into third-party
+        # submodules. Their objects must follow the effective build profile.
+        if [ "${PGLITE_PROFILE_RECONFIGURE}" = true ]; then
+            emmake make OPTFLAGS="" PORTNAME=emscripten \
+                -C pglite/other_extensions clean \
+                || { echo 'failed to clean third-party extension build profile'; exit 41; }
+        fi
         emmake make OPTFLAGS="" PORTNAME=emscripten \
+            LDFLAGS_SL="${PGLITE_LDFLAGS_SL}" \
+            CFLAGS_SL="${PGLITE_CFLAGS}" \
+            CXXFLAGS_SL="${PGLITE_CFLAGS}" \
             -C pglite/other_extensions -j"${PGLITE_BUILD_JOBS:-}" \
             || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite/other_extensions' ; exit 41; }
     fi

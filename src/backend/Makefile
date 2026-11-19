@@ -93,6 +93,7 @@ pglite-exported-functions:
 	$(LIB_EXPORTS_DIR)/libsqlite3.exports \
 	$(LIB_EXPORTS_DIR)/libproj.exports \
 	$(LIB_EXPORTS_DIR)/libgeos.exports \
+	$(LIB_EXPORTS_DIR)/libgdal.exports \
 	| sort -u > '/install/pglite/excluded.imports.gen'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite/static/included.pglite.exports' | \
 	sort -u | \
