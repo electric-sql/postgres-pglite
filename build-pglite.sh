@@ -113,6 +113,7 @@ ac_cv_exeext=.js \
 --with-libxml \
 --with-libxslt \
 --with-template=emscripten \
+--with-lz4 \
 --prefix=$INSTALL_FOLDER"
 
 # Step 1: configure the project

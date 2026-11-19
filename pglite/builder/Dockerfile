@@ -198,6 +198,13 @@ RUN find . -name "*.o" -exec ${LLVM_NM} --undefined-only {} \; | awk '{print $2}
 RUN comm -23 /tmp/libgdal.undef.txt /tmp/libgdal.defs.txt > /install/imports/libgdal.imports
 
 WORKDIR /src
+RUN wget https://github.com/lz4/lz4/archive/refs/tags/v1.11.1.tar.gz
+RUN tar xvf v1.11.1.tar.gz
+WORKDIR /src/lz4-1.11.1/
+RUN emmake make -j
+RUN emmake make install prefix=/install/libs
+
+WORKDIR /src
 # RUN wget https://gmplib.org/download/gmp/gmp-6.3.0.tar.xz
 COPY bin/gmp-6.3.0.tar.xz .
 RUN tar -xvf gmp-6.3.0.tar.xz
