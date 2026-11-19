@@ -374,6 +374,7 @@ remove_useless_groupby_columns(PlannerInfo *root)
 	Bitmapset **groupbyattnos;
 	List	  **groupbycols;
 	Bitmapset **surplusvars;
+	Relids		nullable_relids = NULL;
 	bool		tryremove = false;
 	ListCell   *lc;
 	int			relid;
@@ -419,6 +420,10 @@ remove_useless_groupby_columns(PlannerInfo *root)
 		/* OK, remember we have this Var */
 		relid = var->varno;
 		Assert(relid <= list_length(parse->rtable));
+
+		/* Remember rels whose GROUP BY Vars can be nulled by an outer join */
+		if (!bms_is_empty(var->varnullingrels))
+			nullable_relids = bms_add_member(nullable_relids, relid);
 
 		/*
 		 * If this isn't the first column for this relation then we now have
@@ -517,9 +522,12 @@ remove_useless_groupby_columns(PlannerInfo *root)
 				 * can relax this check when the index is defined with NULLS
 				 * NOT DISTINCT as there can only be 1 NULL row, therefore
 				 * functional dependency on the unique columns is maintained,
-				 * despite the NULL.
+				 * despite the NULL.  That doesn't hold if the rel is nullable
+				 * by an outer join, though, as null-extended rows would be
+				 * conflated with that NULL row.
 				 */
-				if (!index->nullsnotdistinct &&
+				if ((!index->nullsnotdistinct ||
+					 bms_is_member(relid, nullable_relids)) &&
 					!bms_is_member(indkey_attno, rel->notnullattnums))
 				{
 					index_check_ok = false;
@@ -3164,10 +3172,9 @@ distribute_qual_to_rels(PlannerInfo *root, Node *clause,
 	 *
 	 * If it is a full outer-join qualification, we add it to
 	 * root->full_join_clauses.  (Ideally we'd discard cases that aren't
-	 * leftvar = rightvar, as we do for left/right joins, but this routine
-	 * doesn't have the info needed to do that; and the current usage of the
-	 * full_join_clauses list doesn't require that, so it's not currently
-	 * worth complicating this routine's API to make it possible.)
+	 * leftvar = rightvar, as we do for left/right joins, but we leave that to
+	 * reconsider_full_join_clause(), which has to work out which side of the
+	 * join each operand comes from anyway.)
 	 *
 	 * If none of the above hold, pass it off to
 	 * distribute_restrictinfo_to_rels().

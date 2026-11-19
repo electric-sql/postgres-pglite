@@ -1990,6 +1990,89 @@ select * from int8_tbl t1 left join int8_tbl t2 on t1.q2 = t2.q1,
   lateral (select * from int8_tbl t3 where t2.q1 = t2.q2) ss;
 
 --
+-- check deductions from FULL JOIN clauses and COALESCE() = constant: the
+-- join clause's operands may appear in either order, but must come from
+-- different inputs of the join
+--
+
+-- operands in reverse order: constants are still deduced for both inputs
+explain (costs off)
+select * from int4_tbl a full join int4_tbl c on c.f1 = a.f1
+  where coalesce(c.f1, a.f1) = 0;
+
+select * from int4_tbl a full join int4_tbl c on c.f1 = a.f1
+  where coalesce(c.f1, a.f1) = 0;
+
+-- ... also when the left input is a join
+explain (costs off)
+select * from (int4_tbl a join int4_tbl b on a.f1 = b.f1)
+  full join int4_tbl c on c.f1 = a.f1
+  where coalesce(c.f1, a.f1) = 0;
+
+select * from (int4_tbl a join int4_tbl b on a.f1 = b.f1)
+  full join int4_tbl c on c.f1 = a.f1
+  where coalesce(c.f1, a.f1) = 0;
+
+-- the gating qual must be applied to the join's left input
+explain (costs off)
+select * from (int4_tbl a join int4_tbl b on a.f1 = b.f1 and a.f1 = (select 1))
+  full join int4_tbl c on c.f1 = a.f1
+  where coalesce(c.f1, a.f1) = 0;
+
+select * from (int4_tbl a join int4_tbl b on a.f1 = b.f1 and a.f1 = (select 1))
+  full join int4_tbl c on c.f1 = a.f1
+  where coalesce(c.f1, a.f1) = 0;
+
+-- an operand may be nulled by a lower outer join, in either order
+explain (costs off)
+select * from (int4_tbl a left join int4_tbl b on a.f1 = b.f1)
+  full join int4_tbl c on b.f1 = c.f1
+  where coalesce(b.f1, c.f1) = 0;
+
+select * from (int4_tbl a left join int4_tbl b on a.f1 = b.f1)
+  full join int4_tbl c on b.f1 = c.f1
+  where coalesce(b.f1, c.f1) = 0;
+
+explain (costs off)
+select * from (int4_tbl a left join int4_tbl b on a.f1 = b.f1)
+  full join int4_tbl c on c.f1 = b.f1
+  where coalesce(c.f1, b.f1) = 0;
+
+select * from (int4_tbl a left join int4_tbl b on a.f1 = b.f1)
+  full join int4_tbl c on c.f1 = b.f1
+  where coalesce(c.f1, b.f1) = 0;
+
+-- nothing can be deduced from a clause relating two vars of the same input
+explain (costs off)
+select * from (int4_tbl a cross join int4_tbl b)
+  full join int4_tbl c on a.f1 = b.f1 and a.f1 = c.f1
+  where coalesce(a.f1, b.f1) = 0
+  order by b.f1;
+
+select * from (int4_tbl a cross join int4_tbl b)
+  full join int4_tbl c on a.f1 = b.f1 and a.f1 = c.f1
+  where coalesce(a.f1, b.f1) = 0
+  order by b.f1;
+
+-- ... nor from a clause with an operand that references both inputs
+explain (costs off)
+select * from (int4_tbl a cross join int4_tbl b)
+  full join int4_tbl c on a.f1 - c.f1 = b.f1 and a.f1 = c.f1
+  where coalesce(a.f1 - c.f1, b.f1) = 123456
+  order by a.f1;
+
+select * from (int4_tbl a cross join int4_tbl b)
+  full join int4_tbl c on a.f1 - c.f1 = b.f1 and a.f1 = c.f1
+  where coalesce(a.f1 - c.f1, b.f1) = 123456
+  order by a.f1;
+
+-- if the only join condition relates two vars of the same input, the FULL
+-- JOIN can't be planned, just as without the WHERE condition
+select * from (int4_tbl a cross join int4_tbl b)
+  full join int4_tbl c on a.f1 = b.f1
+  where coalesce(a.f1, b.f1) = 0;
+
+--
 -- check handling of join aliases when flattening multiple levels of subquery
 --
 
@@ -2250,6 +2333,21 @@ select 1 from t t1
   on true;
 
 rollback;
+
+--
+-- check a similar case where the parameterization refers to an outer join
+-- that was pushed down per outer-join identity 3
+--
+
+explain (costs off)
+select 1 from tenk1 t1
+where t1.thousand in
+  (select t2.thousand
+   from tenk1 t2
+     left join tenk1 t3 on t2.thousand = t3.thousand
+     left join (tenk1 t4 left join tenk1 t5 on t4.thousand = t5.thousand)
+       on t3.thousand = t4.thousand
+   where coalesce(t5.tenthous, 0) = t2.tenthous);
 
 --
 -- check a case in which a PlaceHolderVar forces join order
