@@ -122,7 +122,7 @@
  * fork()).  On other platforms, it's only useful for verifying those
  * otherwise Windows-specific code paths.
  */
-#if (defined(WIN32) && !defined(__CYGWIN__)) || defined(__PGLITE_POSTMASTER__)
+#if defined(WIN32) && !defined(__CYGWIN__)
 #define EXEC_BACKEND
 #endif
 

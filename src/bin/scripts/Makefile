@@ -19,9 +19,6 @@ include $(top_builddir)/src/Makefile.global
 PROGRAMS = createdb createuser dropdb dropuser clusterdb vacuumdb reindexdb pg_isready
 
 override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS)
-ifeq ($(PORTNAME), emscripten)
-override CPPFLAGS := -Dpg_char_to_encoding=pg_char_to_encoding_private $(CPPFLAGS)
-endif
 LDFLAGS_INTERNAL += -L$(top_builddir)/src/fe_utils -lpgfeutils $(libpq_pgport)
 
 all: $(PROGRAMS)
@@ -44,9 +41,6 @@ install: all installdirs
 	$(INSTALL_PROGRAM) vacuumdb$(X)   '$(DESTDIR)$(bindir)'/vacuumdb$(X)
 	$(INSTALL_PROGRAM) reindexdb$(X)  '$(DESTDIR)$(bindir)'/reindexdb$(X)
 	$(INSTALL_PROGRAM) pg_isready$(X) '$(DESTDIR)$(bindir)'/pg_isready$(X)
-ifeq ($(PORTNAME), emscripten)
-	$(foreach program,$(PROGRAMS),$(INSTALL_PROGRAM) $(program).wasm '$(DESTDIR)$(bindir)'/$(program).wasm;)
-endif
 
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
@@ -56,9 +50,6 @@ uninstall:
 
 clean distclean:
 	rm -f $(addsuffix $(X), $(PROGRAMS)) $(addsuffix .o, $(PROGRAMS))
-ifeq ($(PORTNAME), emscripten)
-	rm -f $(addsuffix .wasm, $(PROGRAMS))
-endif
 	rm -f common.o $(WIN32RES)
 	rm -rf tmp_check
 

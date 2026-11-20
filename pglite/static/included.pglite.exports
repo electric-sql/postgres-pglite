@@ -246,6 +246,14 @@ dlerror
 dlopen
 dlsym
 downcase_truncate_identifier
+dsa_create_ext
+dsa_create_in_place_ext
+dsm_create_in_domain
+PGSemaphoreShmemSize
+PGSemaphoreReset
+PGSemaphoreLock
+PGSemaphoreUnlock
+PGSemaphoreTryLock
 dup
 duplocale
 emscripten_force_exit

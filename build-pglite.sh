@@ -15,7 +15,7 @@ INSTALL_FOLDER=${INSTALL_FOLDER:-"/pglite"}
 
 # build with optimizations by default aka release
 PGLITE_CFLAGS="-m32 -sWASM_BIGINT -fpic -sENVIRONMENT=node,web,worker -sSUPPORT_LONGJMP=emscripten -Wno-declaration-after-statement -Wno-macro-redefined -Wno-unused-function -Wno-missing-prototypes -Wno-incompatible-pointer-types \
--I$(pwd)/pglite/src/pglitec -include $(pwd)/pglite/src/pglitec/pglitec.h"
+-I$(pwd)/pglite/src/pglitec -iquote $(pwd)/pglite/src/postgres-headers -include $(pwd)/pglite/src/pglitec/pglitec.h"
 PGLITE_WASM_FEATURE_FLAGS=""
 PGLITE_MEMORY_LDFLAGS="-sUSE_PTHREADS=0"
 POSTGRES_PGLITE_INITIAL_MEMORY=${PGLITE_PRIVATE_INITIAL_MEMORY:-128MB}
@@ -62,6 +62,19 @@ if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
     rm -f src/backend/postmaster/checkpointer.o
 fi
 
+export PGLITE_MEMORY_PLACEMENT_MODE=classic
+if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
+    export PGLITE_MEMORY_PLACEMENT_MODE=postmaster
+fi
+PGLITE_MEMORY_PLACEMENT_DRIVER="$(pwd)/pglite/tools/memory-placement/cc.mjs"
+export PGLITE_MEMORY_PLACEMENT_ROOT="$(pwd)"
+export PGLITE_MEMORY_PLACEMENT_REPORT_DIR="$INSTALL_FOLDER/memory-placement"
+PGLITE_MEMORY_PLACEMENT_FINGERPRINT=$(node22 "$PGLITE_MEMORY_PLACEMENT_DRIVER" --pglite-fingerprint) || exit 66
+PGLITE_MEMORY_PLACEMENT_CC="$INSTALL_FOLDER/memory-placement/cc"
+node22 "$PGLITE_MEMORY_PLACEMENT_DRIVER" --pglite-wrapper "$PGLITE_MEMORY_PLACEMENT_CC" || exit 66
+export MAKEFLAGS="${MAKEFLAGS:+$MAKEFLAGS }CC=$PGLITE_MEMORY_PLACEMENT_CC"
+PGLITE_BUILD_RULES="$(pwd)/pglite/build-rules.mk"
+
 # PostgreSQL's generated Makefiles capture the absolute workspace, compiler
 # flags, and linker flags from configure.  Make itself does not notice when a
 # checkout switches between the ordinary single-user build and the
@@ -72,7 +85,9 @@ PGLITE_BUILD_PROFILE_FILE=.pglite-build-profile
 PGLITE_BUILD_PROFILE=$(printf '%s\n' \
     "workspace=$(pwd)" \
     "install_folder=${INSTALL_FOLDER}" \
+    "version=${PGLITE_VERSION:-}" \
     "emcc_cflags=${EMCC_CFLAGS:-}" \
+    "memory_placement=${PGLITE_MEMORY_PLACEMENT_FINGERPRINT}" \
     "cflags=${PGLITE_CFLAGS}" \
     "memory_ldflags=${PGLITE_MEMORY_LDFLAGS}" \
     "initial_memory=${POSTGRES_PGLITE_INITIAL_MEMORY}" \
@@ -82,6 +97,7 @@ if [ ! -f "${PGLITE_BUILD_PROFILE_FILE}" ] ||
    [ "$(cat "${PGLITE_BUILD_PROFILE_FILE}" 2>/dev/null || true)" != "${PGLITE_BUILD_PROFILE}" ]; then
     echo "pglite: build profile changed; cleaning and reconfiguring."
     PGLITE_PROFILE_RECONFIGURE=true
+    rm -f src/bin/psql/psql.wasm src/bin/scripts/*.wasm
     if [ -f GNUmakefile ]; then
         emmake make clean || { echo 'error: cleaning stale Wasm build profile' ; exit 8; }
     fi
@@ -209,6 +225,10 @@ else
     echo "Warning: configure has not been run because RUN_CONFIGURE=${RUN_CONFIGURE}"
 fi
 
+if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
+    ln -sf "$(pwd)/pglite/src/pglitec/semaphore.c" src/backend/port/pg_sema.c
+fi
+
 # Prepare the final main-module link. The backend-only path uses the already
 # installed PostgreSQL data and extension set while rebuilding just the core
 # objects and generated module.
@@ -228,6 +248,7 @@ PGPRELOAD="\
 
 PGLITE_EXPORTED_RUNTIME_METHODS="MEMFS,IDBFS,FS,PROXYFS,setValue,getValue,UTF8ToString,stringToNewUTF8,stringToUTF8OnStack,addFunction,removeFunction,callMain,ENV"
 POSTGRES_PGLITE_FLAGS="\
+--pre-js $(pwd)/pglite/src/pglitec/directory-entries.js \
 -sSTACK_SIZE=8MB \
 -sINITIAL_MEMORY=${POSTGRES_PGLITE_INITIAL_MEMORY} \
 -sIMPORTED_MEMORY=1 \
@@ -524,6 +545,14 @@ build_regression_test_modules() {
     PGLITE_STATIC_TEST_OBJECTS="$(tr '\n' ' ' < "$STATIC_TEST_DIR/objects.rsp") $STATIC_TEST_DIR/static-test-modules.o $STATIC_TEST_DIR/static-libpq-encoding.o $(pwd)/src/interfaces/libpq/libpq.a"
 }
 
+emmake make PORTNAME=emscripten -C src/backend generated-headers || exit 67
+PGLITE_MEMORY_PLACEMENT_OBJECT="$(pwd)/pglite/src/pglitec/memory-placement.o"
+emcc $PGLITE_CFLAGS -I"$(pwd)/src/include" \
+    -c pglite/src/pglitec/memory-placement.c \
+    -o "$PGLITE_MEMORY_PLACEMENT_OBJECT" || exit 67
+export PGLITE_BACKEND_RUNTIME_OBJECT="$PGLITE_MEMORY_PLACEMENT_OBJECT"
+export MAKEFILES="$PGLITE_BUILD_RULES"
+
 if [ "${PGLITE_BACKEND_ONLY:-false}" = true ]; then
     if [ "${PGLITE_CLEAN_BACKEND:-false}" = true ]; then
         emmake make PORTNAME=emscripten -C src/backend clean || exit 51
@@ -563,8 +592,8 @@ if [ "${PGLITE_BACKEND_ONLY:-false}" = true ]; then
     # /install is image-local, so rematerialize the Emscripten export list in
     # every backend-only container invocation from the persisted install tree.
     emmake make PORTNAME=emscripten -C src/backend \
-        pglite-exported-functions || exit 58
-    PGLITE_EXTRA_OBJS="${PGLITE_STATIC_TEST_OBJECTS:-}" \
+        pglite-owned-exports || exit 58
+    PGLITE_EXTRA_OBJS="${PGLITE_STATIC_TEST_OBJECTS:-} ${PGLITE_MEMORY_PLACEMENT_OBJECT:-}" \
     POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS ${PGLITE_STATIC_TEST_LIBS:-}" \
         emmake make PORTNAME=emscripten -C src/backend \
         -j"${PGLITE_BUILD_JOBS:-}" pglite || exit 59
@@ -611,6 +640,11 @@ if [ "${PGLITE_POSTMASTER:-false}" = true ]; then
 fi
 emmake make PORTNAME=emscripten -j"${PGLITE_BUILD_JOBS:-}" || { echo 'error: emmake make PORTNAME=emscripten -j' ; exit 21; }
 emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=emscripten install' ; exit 23; }
+for program in psql createdb createuser dropdb dropuser clusterdb vacuumdb reindexdb pg_isready; do
+    program_directory=src/bin/scripts
+    if [ "$program" = psql ]; then program_directory=src/bin/psql; fi
+    install -m 755 "$program_directory/$program.wasm" "$INSTALL_FOLDER/bin/$program.wasm" || exit 23
+done
 
 # Step 3.1: make ported contrib extensions - do not install
 emmake make PORTNAME=emscripten -C contrib/ -j"${PGLITE_BUILD_JOBS:-}" || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
@@ -715,10 +749,10 @@ if [ "${PGLITE_SKIP_THIRD_PARTY_EXTENSIONS:-false}" != true ]; then
 fi
 
 # Step 5: get exported functions
-emmake make PORTNAME=emscripten -j"${PGLITE_BUILD_JOBS:-}" -C src/backend pglite-exported-functions || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
+emmake make PORTNAME=emscripten -j"${PGLITE_BUILD_JOBS:-}" -C src/backend pglite-owned-exports || { echo 'emmake make PORTNAME=emscripten -j -C src/backend pglite-exported-functions' ; exit 51; }
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.
 postprocess_runtime_side_modules || { echo 'error: postprocessing runtime side modules' ; exit 52; }
-PGLITE_EXTRA_OBJS="${PGLITE_STATIC_TEST_OBJECTS:-}" \
+PGLITE_EXTRA_OBJS="${PGLITE_STATIC_TEST_OBJECTS:-} ${PGLITE_MEMORY_PLACEMENT_OBJECT:-}" \
 POSTGRES_PGLITE_FLAGS="$PGLITE_CFLAGS $POSTGRES_PGLITE_FLAGS ${PGLITE_STATIC_TEST_LIBS:-}" emmake make PORTNAME=emscripten -C src/backend/ -j"${PGLITE_BUILD_JOBS:-}" pglite || { echo 'emmake make OPTFLAGS="" PORTNAME=emscripten -j -C pglite' ; exit 61; }
 emmake make PORTNAME=emscripten -C src/backend/ install-pglite || { echo 'emmake make PORTNAME=emscripten -C src/backend/ install-pglite' ; exit 62; }

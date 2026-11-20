@@ -70,14 +70,12 @@
 #include "utils/lsyscache.h"
 #include "utils/typcache.h"
 
-#ifdef __PGLITE_MULTI_MEMORY__
-#include "pglite_provenance.h"
-#endif
+#include "pglite_tuple_access.h"
 
 static TupleDesc ExecTypeFromTLInternal(List *targetList,
 										bool skipjunk);
 static pg_attribute_always_inline void slot_deform_heap_tuple(TupleTableSlot *slot, HeapTuple tuple, uint32 *offp,
-														  int natts);
+															  int natts);
 static inline void tts_buffer_heap_store_tuple(TupleTableSlot *slot,
 											   HeapTuple tuple,
 											   Buffer buffer,
@@ -351,9 +349,7 @@ tts_heap_getsomeattrs(TupleTableSlot *slot, int natts)
 {
 	HeapTupleTableSlot *hslot;
 
-#ifdef __PGLITE_MULTI_MEMORY__
 	slot = PGLITE_PRIVATE_POINTER(slot);
-#endif
 	hslot = (HeapTupleTableSlot *) slot;
 
 	Assert(!TTS_EMPTY(slot));
@@ -554,9 +550,7 @@ tts_minimal_getsomeattrs(TupleTableSlot *slot, int natts)
 {
 	MinimalTupleTableSlot *mslot;
 
-#ifdef __PGLITE_MULTI_MEMORY__
 	slot = PGLITE_PRIVATE_POINTER(slot);
-#endif
 	mslot = (MinimalTupleTableSlot *) slot;
 
 	Assert(!TTS_EMPTY(slot));
@@ -1045,7 +1039,6 @@ slot_deform_heap_tuple_internal(TupleTableSlot *slot, HeapTupleHeader tup,
 #ifndef __PGLITE_MULTI_MEMORY__
 	(void) payload_private;
 #endif
-#ifdef __PGLITE_MULTI_MEMORY__
 	/*
 	 * Slot, descriptor and deformation arrays are backend control objects.
 	 * tup is deliberately left unmarked: it may point into a shared buffer in
@@ -1055,15 +1048,12 @@ slot_deform_heap_tuple_internal(TupleTableSlot *slot, HeapTupleHeader tup,
 	slot = PGLITE_PRIVATE_POINTER(slot);
 	offp = PGLITE_PRIVATE_POINTER(offp);
 	slowp = PGLITE_PRIVATE_POINTER(slowp);
-#endif
 	tupleDesc = slot->tts_tupleDescriptor;
 	values = slot->tts_values;
 	isnull = slot->tts_isnull;
-#ifdef __PGLITE_MULTI_MEMORY__
 	tupleDesc = PGLITE_PRIVATE_POINTER(tupleDesc);
 	values = PGLITE_PRIVATE_POINTER(values);
 	isnull = PGLITE_PRIVATE_POINTER(isnull);
-#endif
 	bp = tup->t_bits;
 	tp = (char *) tup + tup->t_hoff;
 
@@ -1074,26 +1064,15 @@ slot_deform_heap_tuple_internal(TupleTableSlot *slot, HeapTupleHeader tup,
 		bool	   *null = isnull + attnum;
 		char	   *attptr;
 
-#ifdef __PGLITE_MULTI_MEMORY__
 		thisatt = PGLITE_PRIVATE_POINTER(thisatt);
 		value = PGLITE_PRIVATE_POINTER(value);
 		null = PGLITE_PRIVATE_POINTER(null);
-#endif
 
 		if (hasnulls)
 		{
 			bool		attnull;
 
-#ifdef __PGLITE_MULTI_MEMORY__
-			if (payload_private)
-			{
-				bits8 *bitmap_byte = PGLITE_PRIVATE_POINTER(bp + (attnum >> 3));
-
-				attnull = !(*bitmap_byte & (1 << (attnum & 0x07)));
-			}
-			else
-#endif
-				attnull = att_isnull(attnum, bp);
+			PGLITE_TEST_TUPLE_NULL(attnull, attnum, bp, payload_private);
 
 			if (attnull)
 			{
@@ -1126,11 +1105,7 @@ slot_deform_heap_tuple_internal(TupleTableSlot *slot, HeapTupleHeader tup,
 				thisatt->attcacheoff = *offp;
 			else
 			{
-				attptr = tp + *offp;
-#ifdef __PGLITE_MULTI_MEMORY__
-				if (payload_private)
-					attptr = PGLITE_PRIVATE_POINTER(attptr);
-#endif
+				PGLITE_SET_TUPLE_PAYLOAD_POINTER(attptr, tp + *offp, payload_private);
 				*offp = att_pointer_alignby(*offp,
 											thisatt->attalignby,
 											-1,
@@ -1149,11 +1124,7 @@ slot_deform_heap_tuple_internal(TupleTableSlot *slot, HeapTupleHeader tup,
 				thisatt->attcacheoff = *offp;
 		}
 
-		attptr = tp + *offp;
-#ifdef __PGLITE_MULTI_MEMORY__
-		if (payload_private)
-			attptr = PGLITE_PRIVATE_POINTER(attptr);
-#endif
+		PGLITE_SET_TUPLE_PAYLOAD_POINTER(attptr, tp + *offp, payload_private);
 		*value = fetchatt(thisatt, attptr);
 
 		*offp = att_addlength_pointer(*offp, thisatt->attlen, attptr);
@@ -1176,46 +1147,7 @@ slot_deform_heap_tuple_internal(TupleTableSlot *slot, HeapTupleHeader tup,
 	return natts;
 }
 
-#ifdef __PGLITE_MULTI_MEMORY__
-/*
- * Keep the private payload proof outside the always-inlined generic helper.
- * This gives the post-linker one compact, loop-scoped specialization while
- * preserving the generic body for shared buffer pages. Separate fast wrappers
- * retain PostgreSQL's compile-time slow/null specializations.
- */
-static pg_noinline int
-slot_deform_heap_tuple_private_fast_no_nulls(TupleTableSlot *slot,
-											 HeapTupleHeader tup,
-											 int attnum, int natts,
-											 uint32 *offp, bool *slowp)
-{
-	tup = PGLITE_PRIVATE_POINTER(tup);
-	return slot_deform_heap_tuple_internal(slot, tup, attnum, natts,
-											false, false, true, offp, slowp);
-}
-
-static pg_noinline int
-slot_deform_heap_tuple_private_fast_nulls(TupleTableSlot *slot,
-										 HeapTupleHeader tup,
-										 int attnum, int natts,
-										 uint32 *offp, bool *slowp)
-{
-	tup = PGLITE_PRIVATE_POINTER(tup);
-	return slot_deform_heap_tuple_internal(slot, tup, attnum, natts,
-											false, true, true, offp, slowp);
-}
-
-static pg_noinline int
-slot_deform_heap_tuple_private_slow(TupleTableSlot *slot,
-								   HeapTupleHeader tup,
-								   int attnum, int natts, bool hasnulls,
-								   uint32 *offp, bool *slowp)
-{
-	tup = PGLITE_PRIVATE_POINTER(tup);
-	return slot_deform_heap_tuple_internal(slot, tup, attnum, natts,
-											true, hasnulls, true, offp, slowp);
-}
-#endif
+#include "pglite_tuple_deform.h"
 
 /*
  * slot_deform_heap_tuple
@@ -1241,11 +1173,9 @@ slot_deform_heap_tuple(TupleTableSlot *slot, HeapTuple tuple, uint32 *offp,
 	uint32		off;			/* offset in tuple data */
 	bool		slow;			/* can we use/set attcacheoff? */
 
-#ifdef __PGLITE_MULTI_MEMORY__
 	slot = PGLITE_PRIVATE_POINTER(slot);
 	tuple = PGLITE_PRIVATE_POINTER(tuple);
 	offp = PGLITE_PRIVATE_POINTER(offp);
-#endif
 	tup = tuple->t_data;
 	hasnulls = HeapTupleHasNulls(tuple);
 
@@ -1285,73 +1215,35 @@ slot_deform_heap_tuple(TupleTableSlot *slot, HeapTuple tuple, uint32 *offp,
 	{
 		/* Tuple without any NULLs? We can skip doing any NULL checking */
 		if (!hasnulls)
-		{
-#ifdef __PGLITE_MULTI_MEMORY__
-			if (PGLITE_POINTER_IS_PRIVATE(tup))
-				attnum = slot_deform_heap_tuple_private_fast_no_nulls(slot,
-																 tup,
-																 attnum,
-																 natts,
-																 &off,
-																 &slow);
-			else
-#endif
-			attnum = slot_deform_heap_tuple_internal(slot,
+			PGLITE_DEFORM_HEAP_TUPLE(slot,
 													 tup,
 													 attnum,
 													 natts,
 													 false, /* slow */
 													 false, /* hasnulls */
-													 false, /* payload_private */
 													 &off,
 													 &slow);
-		}
 		else
-		{
-#ifdef __PGLITE_MULTI_MEMORY__
-			if (PGLITE_POINTER_IS_PRIVATE(tup))
-				attnum = slot_deform_heap_tuple_private_fast_nulls(slot,
-															 tup,
-															 attnum,
-															 natts,
-															 &off,
-															 &slow);
-			else
-#endif
-			attnum = slot_deform_heap_tuple_internal(slot,
+			PGLITE_DEFORM_HEAP_TUPLE(slot,
 													 tup,
 													 attnum,
 													 natts,
 													 false, /* slow */
 													 true,	/* hasnulls */
-													 false, /* payload_private */
 													 &off,
 													 &slow);
-		}
 	}
 
 	/* If there's still work to do then we must be in slow mode */
 	if (attnum < natts)
 	{
 		/* XXX is it worth adding a separate call when hasnulls is false? */
-#ifdef __PGLITE_MULTI_MEMORY__
-		if (PGLITE_POINTER_IS_PRIVATE(tup))
-			attnum = slot_deform_heap_tuple_private_slow(slot,
-														 tup,
-														 attnum,
-														 natts,
-														 hasnulls,
-														 &off,
-														 &slow);
-		else
-#endif
-		attnum = slot_deform_heap_tuple_internal(slot,
+		PGLITE_DEFORM_HEAP_TUPLE(slot,
 												 tup,
 												 attnum,
 												 natts,
 												 true,	/* slow */
 												 hasnulls,
-												 false, /* payload_private */
 												 &off,
 												 &slow);
 	}
@@ -2250,9 +2142,7 @@ slot_getmissingattrs(TupleTableSlot *slot, int startAttNum, int lastAttNum)
 void
 slot_getsomeattrs_int(TupleTableSlot *slot, int attnum)
 {
-#ifdef __PGLITE_MULTI_MEMORY__
 	slot = PGLITE_PRIVATE_POINTER(slot);
-#endif
 
 	/* Check for caller errors */
 	Assert(slot->tts_nvalid < attnum);	/* checked in slot_getsomeattrs */

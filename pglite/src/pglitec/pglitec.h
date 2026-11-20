@@ -1,6 +1,10 @@
 #ifndef PGLITEC_H
 #define PGLITEC_H
 
+#if defined(__PGLITE_POSTMASTER__) && !defined(EXEC_BACKEND)
+#define EXEC_BACKEND
+#endif
+
 #include <poll.h>
 #include <netdb.h>
 #include <pwd.h>
@@ -21,7 +25,6 @@ extern "C" {
 int pgl_find_other_exec(const char *argv0, const char *target,
 						const char *version_string, char *result,
 						size_t result_size);
-int pgl_readdir_includes_dot_entries(void);
 int pgl_getaddrinfo(const char *host, const char *service,
 					const struct addrinfo *hints, struct addrinfo **result);
 struct passwd *pgl_getpwuid(uid_t uid);
@@ -90,47 +93,19 @@ void pgl_set_scoped_shmem_mode(int mode);
 uint32_t pgl_shm_registry_offset(void);
 uint32_t pgl_shm_compact_frontier(void);
 
-typedef enum PglSharedScopeKind
+typedef enum PglSharedMemoryDomain
 {
-	PGL_SHARED_SCOPE_GLOBAL = 0,
-	PGL_SHARED_SCOPE_ROOT,
-	PGL_SHARED_SCOPE_SESSION,
-	PGL_SHARED_SCOPE_TRANSACTION,
-	PGL_SHARED_SCOPE_SUBTRANSACTION,
-	PGL_SHARED_SCOPE_PORTAL,
-	PGL_SHARED_SCOPE_QUERY,
-	PGL_SHARED_SCOPE_PARALLEL_CONTEXT
-} PglSharedScopeKind;
+	PGL_SHARED_MEMORY_GLOBAL = 0,
+	PGL_SHARED_MEMORY_ROOT
+} PglSharedMemoryDomain;
 
-typedef uint64_t PglSharedScopeHandle;
-
-#define PGL_SHARED_SCOPE_INVALID UINT64_C(0)
-
-typedef enum PglSharedScopeState
-{
-	PGL_SHARED_SCOPE_UNUSED = 0,
-	PGL_SHARED_SCOPE_ACTIVE,
-	PGL_SHARED_SCOPE_CLOSING,
-	PGL_SHARED_SCOPE_DEAD
-} PglSharedScopeState;
-
-PglSharedScopeHandle pgl_shm_scope_root(void);
-PglSharedScopeHandle pgl_shm_scope_create(PglSharedScopeKind kind,
-										  PglSharedScopeHandle parent);
-PglSharedScopeHandle pgl_shm_scope_enter(PglSharedScopeHandle scope);
-void pgl_shm_scope_leave(PglSharedScopeHandle previous_scope);
-int pgl_shm_scope_close(PglSharedScopeHandle scope);
-int pgl_shm_scope_promote(PglSharedScopeHandle scope);
-int pgl_shm_scope_worker_attach(PglSharedScopeHandle scope);
-int pgl_shm_scope_worker_detach(PglSharedScopeHandle scope);
-PglSharedScopeHandle pgl_shm_scope_current(void);
-PglSharedScopeHandle pgl_shm_scope_handle_for_pointer(const void *address);
-uint32_t pgl_shm_scope_count(PglSharedScopeKind kind,
-							 PglSharedScopeState state);
-uint64_t pgl_shm_scope_bytes(PglSharedScopeKind kind);
-PglSharedScopeKind pgl_shm_scope_push(PglSharedScopeKind scope);
-void pgl_shm_scope_pop(PglSharedScopeKind previous_scope);
-PglSharedScopeKind pgl_shm_scope_for_pointer(const void *address);
+PglSharedMemoryDomain pgl_shm_domain_current(void);
+PglSharedMemoryDomain pgl_shm_domain_push(PglSharedMemoryDomain domain);
+void pgl_shm_domain_pop(PglSharedMemoryDomain previous_domain);
+PglSharedMemoryDomain pgl_shm_domain_for_pointer(const void *address);
+struct dsm_segment;
+struct dsm_segment *dsm_create_in_domain(size_t size, int flags,
+										PglSharedMemoryDomain domain);
 ssize_t pgl_fd_read(int fd, void *buffer, size_t length);
 ssize_t pgl_fd_write(int fd, const void *buffer, size_t length);
 ssize_t pgl_fd_pread(int fd, void *buffer, size_t length, off_t offset);

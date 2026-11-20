@@ -48,6 +48,7 @@ lib*.pc
 
 # emscripten build excludes
 *.js
+!/pglite/src/pglitec/directory-entries.js
 *.data
 *.cjs
 *.wasm

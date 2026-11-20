@@ -1469,13 +1469,8 @@ getInstallationPaths(const char *argv0)
 
 #ifdef EXEC_BACKEND
 	/* Locate executable backend before we change working directory */
-#ifdef __PGLITE_POSTMASTER__
-	if (pgl_find_other_exec(argv0, "postgres", PG_BACKEND_VERSIONSTR,
-							postgres_exec_path, MAXPGPATH) < 0)
-#else
 	if (find_other_exec(argv0, "postgres", PG_BACKEND_VERSIONSTR,
 						postgres_exec_path) < 0)
-#endif
 		ereport(FATAL,
 				(errmsg("%s: could not locate matching postgres executable",
 						argv0)));

@@ -523,6 +523,12 @@ dsm_create(Size size, int flags)
 	FreePageManager *dsm_main_space_fpm = dsm_main_space_begin;
 	bool		using_main_dsm_region = false;
 
+#ifdef __PGLITE_POSTMASTER__
+	/* Root allocations must not consume the cluster-global DSM reserve. */
+	if (pgl_shm_domain_current() == PGL_SHARED_MEMORY_ROOT)
+		dsm_main_space_fpm = NULL;
+#endif
+
 	/*
 	 * Unsafe in postmaster. It might seem pointless to allow use of dsm in
 	 * single user mode, but otherwise some subsystems will need dedicated
@@ -644,72 +650,6 @@ dsm_create(Size size, int flags)
 
 	return seg;
 }
-
-#ifdef __PGLITE_POSTMASTER__
-/*
- * PGlite fence: select memory 2 only while the libc-backed SysV provider is
- * creating this segment.  PG_FINALLY restores placement after allocation
- * errors, so an aborted scoped allocation cannot redirect later global DSM.
- */
-dsm_segment *
-dsm_create_in_scope(Size size, int flags, PglSharedScopeKind scope)
-{
-	dsm_segment *volatile seg = NULL;
-	PglSharedScopeKind previous_scope;
-
-	previous_scope = pgl_shm_scope_push(scope);
-	PG_TRY();
-	{
-		seg = dsm_create(size, flags);
-	}
-	PG_FINALLY();
-	{
-		pgl_shm_scope_pop(previous_scope);
-	}
-	PG_END_TRY();
-	return (dsm_segment *) seg;
-}
-
-/*
- * PGlite fence: the hierarchical variant selects a generation-checked scope
- * instance rather than only a scope kind.  The libc layer owns validation,
- * parentage, and allocation accounting.
- */
-dsm_segment *
-dsm_create_in_scope_handle(Size size, int flags, PglSharedScopeHandle scope)
-{
-	dsm_segment *volatile seg = NULL;
-	PglSharedScopeHandle previous_scope;
-
-	if (scope == PGL_SHARED_SCOPE_INVALID)
-		return dsm_create(size, flags);
-	previous_scope = pgl_shm_scope_enter(scope);
-	PG_TRY();
-	{
-		seg = dsm_create(size, flags);
-	}
-	PG_FINALLY();
-	{
-		pgl_shm_scope_leave(previous_scope);
-	}
-	PG_END_TRY();
-	return (dsm_segment *) seg;
-}
-
-PglSharedScopeKind
-dsm_segment_scope(dsm_segment *seg)
-{
-	Assert(seg->mapped_address != NULL);
-	return pgl_shm_scope_for_pointer(seg->mapped_address);
-}
-
-PglSharedScopeHandle
-dsm_segment_scope_handle(dsm_segment *seg)
-{
-	Assert(seg->mapped_address != NULL);
-	return pgl_shm_scope_handle_for_pointer(seg->mapped_address);
-}
-#endif
 
 /*
  * Attach a dynamic shared memory segment.

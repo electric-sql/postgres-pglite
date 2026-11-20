@@ -425,13 +425,8 @@ ld_library_path_var = LD_LIBRARY_PATH
 # with_temp_install_extra is for individual ports to define if they
 # need something more here. If not defined then the expansion does
 # nothing.
-# PGLITE: an executable-compatible test provider overrides only server
-# lifecycle programs while retaining the temporary installation and all
-# upstream test recipes.  The empty case expands to the native path exactly.
-pglite_test_provider_path = $(if $(PGLITE_TEST_PROVIDER),$(PGLITE_TEST_PROVIDER)/bin:)
-pglite_test_provider_bindir = $(if $(PGLITE_TEST_PROVIDER),$(PGLITE_TEST_PROVIDER)/bin,)
 with_temp_install = \
-	PATH="$(pglite_test_provider_path)$(abs_top_builddir)/tmp_install$(bindir):$(CURDIR):$$PATH" \
+	PATH="$(abs_top_builddir)/tmp_install$(bindir):$(CURDIR):$$PATH" \
 	$(call add_to_path,$(strip $(ld_library_path_var)),$(abs_top_builddir)/tmp_install$(libdir)) \
 	INITDB_TEMPLATE='$(abs_top_builddir)'/tmp_install/initdb-template \
 	$(with_temp_install_extra)
@@ -713,7 +708,7 @@ pg_regress_check = \
     $(top_builddir)/src/test/regress/pg_regress \
     --temp-instance=./tmp_check \
     --inputdir=$(srcdir) \
-    --bindir=$(pglite_test_provider_bindir) \
+    --bindir= \
     $(TEMP_CONF) \
     $(pg_regress_locale_flags) $(EXTRA_REGRESS_OPTS)
 pg_regress_installcheck = \
@@ -729,7 +724,7 @@ pg_isolation_regress_check = \
     $(top_builddir)/src/test/isolation/pg_isolation_regress \
     --temp-instance=./tmp_check_iso \
     --inputdir=$(srcdir) --outputdir=output_iso \
-    --bindir=$(pglite_test_provider_bindir) \
+    --bindir= \
     $(TEMP_CONF) \
     $(pg_regress_locale_flags) $(EXTRA_REGRESS_OPTS)
 pg_isolation_regress_installcheck = \
@@ -917,17 +912,11 @@ endif
 # $1: target name, e.g., all
 # $2: subdir name
 # $3: target to run in subdir, usually same as $1
-# PGLITE: The recursive foreach below temporarily shadows $(subdir).  Capture
-# the including Makefile's path only when the external capability fence is in
-# use, so canonical PostgreSQL recursion remains byte-for-byte unchanged.
-ifdef PGLITE_TEST_CAPABILITY_RUNNER
-pglite_capability_parent_subdir := $(subdir)
-endif
 define _create_recursive_target
 .PHONY: $(1)-$(2)-recurse
 $(1): $(1)-$(2)-recurse
 $(1)-$(2)-recurse: $(if $(filter all install check installcheck, $(3)), submake-generated-headers) $(if $(filter check, $(3)), temp-install)
-	$(if $(and $(filter check,$(3)),$(PGLITE_TEST_CAPABILITY_RUNNER)),$(PGLITE_TEST_CAPABILITY_RUNNER) --suite '$(if $(pglite_capability_parent_subdir),$(pglite_capability_parent_subdir)/)$(2)' --target '$(3)' --) $$(MAKE) -C $(2) $(3)
+	$$(MAKE) -C $(2) $(3)
 endef
 # Note that the use of $$ on the last line above is important; we want
 # $(MAKE) to be evaluated when the rule is run, not when the $(eval) is run

@@ -304,10 +304,6 @@ typedef struct
 	size_t		total_segment_size;
 	/* The maximum total size of backing storage we are allowed. */
 	size_t		max_total_segment_size;
-#ifdef __PGLITE_POSTMASTER__
-	/* PGlite memory-2 placement inherited by extension DSM segments. */
-	PglSharedScopeHandle pgl_scope_handle;
-#endif
 	/* Highest used segment index in the history of this area. */
 	dsa_segment_index high_segment_index;
 	/* The reference count for this area. */
@@ -404,7 +400,6 @@ static dsa_area *create_internal(void *place, size_t size,
 								 int tranche_id,
 								 dsm_handle control_handle,
 								 dsm_segment *control_segment,
-								 uint64 pgl_scope_handle,
 								 size_t init_segment_size,
 								 size_t max_segment_size);
 static dsa_area *attach_internal(void *place, dsm_segment *segment,
@@ -427,16 +422,12 @@ dsa_create_ext(int tranche_id, size_t init_segment_size, size_t max_segment_size
 {
 	dsm_segment *segment;
 	dsa_area   *area;
-	uint64		pgl_scope_handle = 0;
 
 	/*
 	 * Create the DSM segment that will hold the shared control object and the
 	 * first segment of usable space.
 	 */
 	segment = dsm_create(init_segment_size, 0);
-#ifdef __PGLITE_POSTMASTER__
-	pgl_scope_handle = dsm_segment_scope_handle(segment);
-#endif
 
 	/*
 	 * All segments backing this area are pinned, so that DSA can explicitly
@@ -451,7 +442,6 @@ dsa_create_ext(int tranche_id, size_t init_segment_size, size_t max_segment_size
 						   init_segment_size,
 						   tranche_id,
 						   dsm_segment_handle(segment), segment,
-						   pgl_scope_handle,
 						   init_segment_size, max_segment_size);
 
 	/* Clean up when the control segment detaches. */
@@ -460,34 +450,6 @@ dsa_create_ext(int tranche_id, size_t init_segment_size, size_t max_segment_size
 
 	return area;
 }
-
-#ifdef __PGLITE_POSTMASTER__
-/*
- * PGlite fence: most DSA follows the active session/query root, but a small
- * number of PostgreSQL registries are cluster-global by contract.  Keep the
- * placement switch here so error unwinding cannot leak it into later DSM.
- */
-dsa_area *
-dsa_create_in_scope_ext(int tranche_id, size_t init_segment_size,
-						size_t max_segment_size, PglSharedScopeKind scope)
-{
-	dsa_area   *volatile area = NULL;
-	PglSharedScopeKind previous_scope;
-
-	previous_scope = pgl_shm_scope_push(scope);
-	PG_TRY();
-	{
-		area = dsa_create_ext(tranche_id, init_segment_size,
-							  max_segment_size);
-	}
-	PG_FINALLY();
-	{
-		pgl_shm_scope_pop(previous_scope);
-	}
-	PG_END_TRY();
-	return (dsa_area *) area;
-}
-#endif
 
 /*
  * Create a new shared area in an existing shared memory space, which may be
@@ -511,16 +473,9 @@ dsa_create_in_place_ext(void *place, size_t size,
 						size_t init_segment_size, size_t max_segment_size)
 {
 	dsa_area   *area;
-	uint64		pgl_scope_handle = 0;
-
-#ifdef __PGLITE_POSTMASTER__
-	if (segment != NULL)
-		pgl_scope_handle = dsm_segment_scope_handle(segment);
-#endif
 
 	area = create_internal(place, size, tranche_id,
 						   DSM_HANDLE_INVALID, NULL,
-						   pgl_scope_handle,
 						   init_segment_size, max_segment_size);
 
 	/*
@@ -1264,7 +1219,6 @@ create_internal(void *place, size_t size,
 				int tranche_id,
 				dsm_handle control_handle,
 				dsm_segment *control_segment,
-				uint64 pgl_scope_handle,
 				size_t init_segment_size, size_t max_segment_size)
 {
 	dsa_area_control *control;
@@ -1315,11 +1269,6 @@ create_internal(void *place, size_t size,
 	control->max_segment_size = max_segment_size;
 	control->max_total_segment_size = (size_t) -1;
 	control->total_segment_size = size;
-#ifdef __PGLITE_POSTMASTER__
-	control->pgl_scope_handle = pgl_scope_handle;
-#else
-	(void) pgl_scope_handle;
-#endif
 	control->segment_handles[0] = control_handle;
 	for (i = 0; i < DSA_NUM_SEGMENT_BINS; ++i)
 		control->segment_bins[i] = DSA_SEGMENT_INDEX_NONE;
@@ -2226,17 +2175,9 @@ make_new_segment(dsa_area *area, size_t requested_pages)
 	oldowner = CurrentResourceOwner;
 	CurrentResourceOwner = area->resowner;
 #ifdef __PGLITE_POSTMASTER__
-	/*
-	 * PGlite fence: follow the control segment's domain, never the allocating
-	 * backend's incidental current query.  An invalid scope handle denotes a
-	 * cluster-global control segment (not an instruction to inherit).
-	 */
-	if (area->control->pgl_scope_handle == PGL_SHARED_SCOPE_INVALID)
-		segment = dsm_create_in_scope(total_size, 0,
-									  PGL_SHARED_SCOPE_GLOBAL);
-	else
-		segment = dsm_create_in_scope_handle(total_size, 0,
-										 area->control->pgl_scope_handle);
+	/* Growing an area must preserve its control segment's memory domain. */
+	segment = dsm_create_in_domain(total_size, 0,
+								   pgl_shm_domain_for_pointer(area->control));
 #else
 	segment = dsm_create(total_size, 0);
 #endif

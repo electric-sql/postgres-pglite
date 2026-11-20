@@ -78,12 +78,12 @@ postgres: $(OBJS)
 	$(CC) $(CFLAGS) $(call expand_subsys,$^) $(LDFLAGS) $(LIBS) -o $@$(X)
 
 # Extensions use functions from the core PG. These need to be exported by the emscripten compiler.
-# The following target gathers all extension imports + the default ones
-# (included.pglite.exports), excludes library and invoke symbols, and adds a
-# leading _ to each.
+# The following target gathers all extension imports + the default ones (included.pglite.imports),
+# excludes the one in excluded.pglite.imports and adds a leading _ to each.
 pglite-exported-functions:
 	$(MKDIR_P) /install/pglite
-	cat $(top_builddir)/src/interfaces/libpq/exports.list \
+	cat $(top_builddir)/pglite/static/excluded.pglite.exports \
+	$(top_builddir)/src/interfaces/libpq/exports.list \
 	$(LIB_EXPORTS_DIR)/libossp-uuid.exports \
 	$(LIB_EXPORTS_DIR)/libssl.exports \
 	$(LIB_EXPORTS_DIR)/libcrypto.exports \
@@ -93,7 +93,6 @@ pglite-exported-functions:
 	$(LIB_EXPORTS_DIR)/libsqlite3.exports \
 	$(LIB_EXPORTS_DIR)/libproj.exports \
 	$(LIB_EXPORTS_DIR)/libgeos.exports \
-	$(LIB_EXPORTS_DIR)/libgdal.exports \
 	| sort -u > '/install/pglite/excluded.imports.gen'
 	cat $(DESTDIR)$(emscripten_extension_imports_dir)/*.imports '$(top_builddir)/pglite/static/included.pglite.exports' | \
 	sort -u | \
@@ -103,7 +102,7 @@ pglite-exported-functions:
 	sed 's/^/_/' \
 	> '/install/pglite/exported_functions.txt'
 
-pglite: $(OBJS) $(PGLITE_EXTRA_OBJS)
+pglite: $(OBJS)
 	$(CC) $(CFLAGS) $(call expand_subsys,$^) $(LDFLAGS) $(LIBS) $(POSTGRES_PGLITE_FLAGS) -o $@$(X)
 
 pglite-libc:

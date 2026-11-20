@@ -8,10 +8,14 @@
 #ifndef PGLITE_PROVENANCE_H
 #define PGLITE_PROVENANCE_H
 
+#ifdef __PGLITE_MULTI_MEMORY__
 extern void *pgl_private_pointer(void *pointer);
 
 #define PGLITE_PRIVATE_POINTER(pointer) \
 	((__typeof__(pointer)) pgl_private_pointer((void *) (pointer)))
+#else
+#define PGLITE_PRIVATE_POINTER(pointer) (pointer)
+#endif
 
 /* Keep tag interpretation out of PostgreSQL source fences. */
 #define PGLITE_POINTER_IS_PRIVATE(pointer) ((intptr_t) (pointer) > 0)

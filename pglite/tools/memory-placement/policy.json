@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "rules": [
+    {
+      "source": "src/backend/utils/fmgr/dfmgr.c",
+      "sha256": "adf7207f1d1c179e5e9f470716c367ae393612f5088d17880ae3feeb4b178514",
+      "functions": ["stat"],
+      "reason": "Only the dynamic loader may resolve stat through the static module registry."
+    },
+    {
+      "source": "src/backend/access/common/session.c",
+      "sha256": "b38919a471a90e0e6a9eda9da2ac6489159c43e6dc5b754809aee71da7ef60f9",
+      "functions": ["dsm_create"],
+      "reason": "Session DSM is attached only by the owning backend group."
+    },
+    {
+      "source": "src/backend/access/transam/parallel.c",
+      "sha256": "0b0c419c93545aa8abb99e4f36b2a42563c3dfa97ed48b1d6b34b0e53d89e5fe",
+      "functions": ["dsm_create"],
+      "reason": "Parallel-context DSM is attached only by the leader and its workers."
+    },
+    {
+      "source": "src/test/modules/test_dsa/test_dsa.c",
+      "sha256": "392bbaf3b6e53a20c59778265f52a4191d523b01bd1496c78e892781be4b9e67",
+      "functions": ["dsa_create_ext"],
+      "reason": "The test module keeps its areas local and never publishes their handles."
+    },
+    {
+      "source": "src/port/pqsignal.c",
+      "sha256": "1197998b828e7882eb3024a9d8131e3c06ca6083dfd60a1726762ccf42930787",
+      "functions": ["sigaction"],
+      "reason": "Only the backend signal registration path uses Worker-host handlers; frontend signals keep libc behavior."
+    },
+    {
+      "source": "src/backend/access/transam/xlog.c",
+      "sha256": "b261663e16b4413129413e35e5a39ab204e8762bdce096d06c75edb3d8db62db",
+      "functions": [],
+      "reason": "Postmaster WAL writes use upstream checkpoint requests; the classic-only PGlite suppression must not apply.",
+      "undefines": ["__PGLITE__"]
+    },
+    {
+      "source": "src/backend/postmaster/checkpointer.c",
+      "sha256": "ef74fb216b317a629ac1b5e6a76f9e5fabb1a3a8340090289005d9fdfbf423a0",
+      "functions": [],
+      "reason": "Postmaster checkpoint requests use the upstream process path; classic retains its standalone shortcut.",
+      "undefines": ["__PGLITE__"]
+    },
+    {
+      "source": "src/backend/utils/misc/guc.c",
+      "sha256": "9a5de7136aa8196102ad2d537b9e4bf0b34cdf991eda78245b43bff72811df41",
+      "functions": [],
+      "reason": "Postmaster protocol reporting uses upstream last_reported ownership; classic retains its existing behavior.",
+      "undefines": ["__PGLITE__"]
+    },
+    {
+      "source": "src/backend/postmaster/postmaster.c",
+      "sha256": "940a3c11e2826428ebb06af01ce70e633430a80663b5bebae48939a072ac2d78",
+      "functions": ["find_other_exec"],
+      "reason": "Worker executable discovery resolves the existing VFS entry instead of spawning a host subprocess."
+    }
+  ]
+}

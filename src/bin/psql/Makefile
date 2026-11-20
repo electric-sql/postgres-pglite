@@ -22,10 +22,6 @@ export with_readline
 REFDOCDIR= $(top_srcdir)/doc/src/sgml/ref
 
 override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) $(CPPFLAGS)
-ifeq ($(PORTNAME), emscripten)
-# Static libpq exposes the frontend encoding helper under its private name.
-override CPPFLAGS := -Dpg_encoding_to_char=pg_encoding_to_char_private $(CPPFLAGS)
-endif
 LDFLAGS_INTERNAL += -L$(top_builddir)/src/fe_utils -lpgfeutils $(libpq_pgport)
 
 OBJS = \
@@ -70,9 +66,6 @@ tab-complete.c: gen_tabcomplete.pl tab-complete.in.c
 
 install: all installdirs
 	$(INSTALL_PROGRAM) psql$(X) '$(DESTDIR)$(bindir)/psql$(X)'
-ifeq ($(PORTNAME), emscripten)
-	$(INSTALL_PROGRAM) psql.wasm '$(DESTDIR)$(bindir)/psql.wasm'
-endif
 	$(INSTALL_DATA) $(srcdir)/psqlrc.sample '$(DESTDIR)$(datadir)/psqlrc.sample'
 
 installdirs:
@@ -83,9 +76,6 @@ uninstall:
 
 clean distclean:
 	rm -f psql$(X) $(OBJS) lex.backup
-ifeq ($(PORTNAME), emscripten)
-	rm -f psql.wasm
-endif
 	rm -rf tmp_check
 	rm -f sql_help.h sql_help.c psqlscanslash.c tab-complete.c
 

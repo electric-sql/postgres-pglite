@@ -121,12 +121,6 @@ static void ReportNotNullViolationError(ResultRelInfo *resultRelInfo,
 void
 ExecutorStart(QueryDesc *queryDesc, int eflags)
 {
-#ifdef __PGLITE_POSTMASTER__
-	PglSharedScopeHandle previous_scope = PGL_SHARED_SCOPE_INVALID;
-
-	if (queryDesc->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
-		previous_scope = pgl_shm_scope_enter(queryDesc->pgl_scope_handle);
-#endif
 	/*
 	 * In some cases (e.g. an EXECUTE statement or an execute message with the
 	 * extended query protocol) the query_id won't be reported, so do it now.
@@ -141,10 +135,6 @@ ExecutorStart(QueryDesc *queryDesc, int eflags)
 		(*ExecutorStart_hook) (queryDesc, eflags);
 	else
 		standard_ExecutorStart(queryDesc, eflags);
-#ifdef __PGLITE_POSTMASTER__
-	if (queryDesc->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
-		pgl_shm_scope_leave(previous_scope);
-#endif
 }
 
 void
@@ -307,20 +297,10 @@ void
 ExecutorRun(QueryDesc *queryDesc,
 			ScanDirection direction, uint64 count)
 {
-#ifdef __PGLITE_POSTMASTER__
-	PglSharedScopeHandle previous_scope = PGL_SHARED_SCOPE_INVALID;
-
-	if (queryDesc->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
-		previous_scope = pgl_shm_scope_enter(queryDesc->pgl_scope_handle);
-#endif
 	if (ExecutorRun_hook)
 		(*ExecutorRun_hook) (queryDesc, direction, count);
 	else
 		standard_ExecutorRun(queryDesc, direction, count);
-#ifdef __PGLITE_POSTMASTER__
-	if (queryDesc->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
-		pgl_shm_scope_leave(previous_scope);
-#endif
 }
 
 void
@@ -425,20 +405,10 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 void
 ExecutorFinish(QueryDesc *queryDesc)
 {
-#ifdef __PGLITE_POSTMASTER__
-	PglSharedScopeHandle previous_scope = PGL_SHARED_SCOPE_INVALID;
-
-	if (queryDesc->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
-		previous_scope = pgl_shm_scope_enter(queryDesc->pgl_scope_handle);
-#endif
 	if (ExecutorFinish_hook)
 		(*ExecutorFinish_hook) (queryDesc);
 	else
 		standard_ExecutorFinish(queryDesc);
-#ifdef __PGLITE_POSTMASTER__
-	if (queryDesc->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
-		pgl_shm_scope_leave(previous_scope);
-#endif
 }
 
 void
@@ -495,20 +465,10 @@ standard_ExecutorFinish(QueryDesc *queryDesc)
 void
 ExecutorEnd(QueryDesc *queryDesc)
 {
-#ifdef __PGLITE_POSTMASTER__
-	PglSharedScopeHandle previous_scope = PGL_SHARED_SCOPE_INVALID;
-
-	if (queryDesc->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
-		previous_scope = pgl_shm_scope_enter(queryDesc->pgl_scope_handle);
-#endif
 	if (ExecutorEnd_hook)
 		(*ExecutorEnd_hook) (queryDesc);
 	else
 		standard_ExecutorEnd(queryDesc);
-#ifdef __PGLITE_POSTMASTER__
-	if (queryDesc->pgl_scope_handle != PGL_SHARED_SCOPE_INVALID)
-		pgl_shm_scope_leave(previous_scope);
-#endif
 }
 
 void

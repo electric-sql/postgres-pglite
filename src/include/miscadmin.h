@@ -109,11 +109,7 @@ extern PGDLLIMPORT volatile uint32 CritSectionCount;
 extern void ProcessInterrupts(void);
 
 /* Test whether an interrupt is pending */
-#if defined(__PGLITE_POSTMASTER__)
-extern void pgl_dispatch_pending_signals(void);
-#define INTERRUPTS_PENDING_CONDITION() \
-	(pgl_dispatch_pending_signals(), unlikely(InterruptPending))
-#elif !defined(WIN32)
+#ifndef WIN32
 #define INTERRUPTS_PENDING_CONDITION() \
 	(unlikely(InterruptPending))
 #else

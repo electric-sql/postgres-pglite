@@ -54,7 +54,7 @@
 #include "utils/memutils.h"
 
 #ifdef __PGLITE_POSTMASTER__
-#include "pglitec.h"
+#include "pglite_backend_launch.h"
 #endif
 
 #ifdef EXEC_BACKEND
@@ -392,26 +392,9 @@ internal_forkexec(const char *child_kind, int child_slot,
 
 	/* Fire off execv in child */
 #ifdef __PGLITE_POSTMASTER__
-	/*
-	 * PGlite fence: a dynamic background worker that reports to a registering
-	 * backend must import that backend's root-scoped memory.  This covers both
-	 * parallel workers and extension workers that receive DSM handles.  Static
-	 * and independently registered workers pass no leader and receive their
-	 * own scope policy in the host.
-	 */
-	pid_t		scope_leader_pid = 0;
-
-	if (strcmp(child_kind, "bgworker") == 0 &&
-		startup_data_len == sizeof(BackgroundWorker))
-	{
-		BackgroundWorker *worker = (BackgroundWorker *) startup_data;
-
-		if (worker->bgw_notify_pid > 0)
-			scope_leader_pid = worker->bgw_notify_pid;
-	}
-	pid = pgl_spawn_backend(child_kind, tmpfilename,
-						client_sock ? client_sock->sock : PGINVALID_SOCKET,
-						scope_leader_pid);
+	pid = pgl_launch_backend(child_kind, tmpfilename,
+						 client_sock ? client_sock->sock : PGINVALID_SOCKET,
+						 startup_data, startup_data_len);
 #else
 	if ((pid = fork_process()) == 0)
 	{
@@ -943,16 +926,8 @@ read_backend_variables(char *id, void **startup_data, size_t *startup_data_len)
 		exit(1);
 	}
 
-	/*
-	 * PGlite's wasm32 ABI rounds sizeof(BackendParameters) past the flexible
-	 * array offset.  The writer serializes SizeOfBackendParameters(), so read
-	 * that same fixed prefix rather than consuming nonexistent tail padding.
-	 */
-#ifdef __PGLITE_POSTMASTER__
+	/* Match the serialized prefix, excluding flexible-array tail padding. */
 	if (fread(&param, SizeOfBackendParameters(0), 1, fp) != 1)
-#else
-	if (fread(&param, sizeof(param), 1, fp) != 1)
-#endif
 	{
 		write_stderr("could not read from backend variables file \"%s\": %m\n", id);
 		exit(1);

@@ -47,16 +47,7 @@
 
 volatile int is_pglite_active = 0;
 
-/*
- * Emscripten's JS-backed filesystems expose directory children but omit the
- * POSIX synthetic `.` and `..` entries.  Keep that host-filesystem fact in
- * the PGlite libc boundary so PostgreSQL can preserve pg_ls_dir's contract.
- */
-int
-pgl_readdir_includes_dot_entries(void)
-{
-	return 0;
-}
+
 
 /*
  * Emscripten's DNS shim assigns synthetic 172.29.x.x addresses to hostnames,
@@ -1083,10 +1074,9 @@ pgl_freopen(const char *pathname, const char *mode, int streamid)
 #define PGL_SHM_APERTURE_BYTES UINT32_C(0x40000000)
 #define PGL_SHM_PAGE_BYTES UINT32_C(65536)
 #define PGL_SHM_MAX_SEGMENTS 256
-#define PGL_SHM_MAX_SCOPES 640
 #define PGL_SHM_MAGIC_INITIALIZING UINT32_C(0x50474c49)
 #define PGL_SHM_MAGIC_READY UINT32_C(0x50474c53)
-#define PGL_SHM_REGISTRY_VERSION UINT32_C(4)
+#define PGL_SHM_REGISTRY_VERSION UINT32_C(5)
 #define PGL_SHM_COMPACT_CONTROL_INITIALIZING UINT32_C(1)
 #define PGL_SHM_COMPACT_CONTROL_READY UINT32_C(2)
 
@@ -1107,29 +1097,11 @@ typedef struct PglSharedSegment
 	uint32_t	allocated_size;
 	uint32_t	offset;
 	uint32_t	attach_count;
-	uint32_t	scope_kind;
-	PglSharedScopeHandle scope_handle;
 	int32_t		shmflg;
 	int64_t		created_at;
 	int64_t		attached_at;
 	int64_t		detached_at;
 }			PglSharedSegment;
-
-typedef struct PglSharedScopeControl
-{
-	uint32_t	state;
-	uint32_t	kind;
-	uint32_t	scope_id;
-	uint32_t	generation;
-	PglSharedScopeHandle parent;
-	uint32_t	attachments;
-	uint32_t	active_workers;
-	uint32_t	segment_count;
-	uint32_t	reserved;
-	uint64_t	live_bytes;
-	int64_t		created_at;
-	int64_t		closed_at;
-}			PglSharedScopeControl;
 
 typedef struct PglSharedRegistry
 {
@@ -1142,7 +1114,6 @@ typedef struct PglSharedRegistry
 	uint32_t	pointer_tag;
 	uint32_t	shmid_base;
 	PglSharedSegment segments[PGL_SHM_MAX_SEGMENTS];
-	PglSharedScopeControl scopes[PGL_SHM_MAX_SCOPES];
 }			PglSharedRegistry;
 
 /*
@@ -1160,13 +1131,11 @@ typedef struct PglCompactShmemControl
 
 static PglCompactShmemControl pglite_compact_shmem_control;
 
-/* Keep the supervisor's lock-free diagnostic reader tied to this ABI. */
-_Static_assert(sizeof(PglSharedSegment) == 72,
+/* Keep the supervisor's segment diagnostics tied to this ABI. */
+_Static_assert(sizeof(PglSharedSegment) == 56,
 			   "unexpected PGlite shared segment layout");
-_Static_assert(sizeof(PglSharedScopeControl) == 64,
-			   "unexpected PGlite scope control layout");
-_Static_assert(offsetof(PglSharedRegistry, scopes) == 18464,
-			   "unexpected PGlite scope directory offset");
+_Static_assert(offsetof(PglSharedRegistry, segments) == 32,
+			   "unexpected PGlite segment directory offset");
 _Static_assert(PGL_SHM_REGISTRY_OFFSET + sizeof(PglSharedRegistry) <=
 			   PGL_SHM_DATA_OFFSET,
 			   "PGlite shared registry overlaps its allocation arena");
@@ -1174,36 +1143,10 @@ _Static_assert(PGL_SHM_REGISTRY_OFFSET + sizeof(PglSharedRegistry) <=
 typedef int (*pglite_shmem_ensure_capacity_t) (uint32_t required_bytes);
 static pglite_shmem_ensure_capacity_t pglite_shmem_ensure_capacity = NULL;
 static pglite_shmem_ensure_capacity_t pglite_scoped_shmem_ensure_capacity = NULL;
-static PglSharedScopeKind pglite_shmem_scope = PGL_SHARED_SCOPE_GLOBAL;
-static PglSharedScopeHandle pglite_shmem_scope_handle =
-	PGL_SHARED_SCOPE_INVALID;
+static PglSharedMemoryDomain pglite_shmem_domain = PGL_SHARED_MEMORY_GLOBAL;
 static PglScopedShmemMode pglite_scoped_shmem_mode =
 	PGL_SCOPED_SHMEM_DISABLED;
 static uint32_t pgl_shm_align(uint32_t value);
-
-static PglSharedScopeHandle
-pgl_shm_scope_make_handle(uint32_t scope_id, uint32_t generation)
-{
-	return ((uint64_t) generation << 32) | scope_id;
-}
-
-static uint32_t
-pgl_shm_scope_handle_id(PglSharedScopeHandle handle)
-{
-	return (uint32_t) handle;
-}
-
-static uint32_t
-pgl_shm_scope_handle_generation(PglSharedScopeHandle handle)
-{
-	return (uint32_t) (handle >> 32);
-}
-
-static PglSharedScopeHandle
-pgl_shm_scope_control_handle(const PglSharedScopeControl * scope)
-{
-	return pgl_shm_scope_make_handle(scope->scope_id, scope->generation);
-}
 
 void		EMSCRIPTEN_KEEPALIVE
 pgl_set_shmem_host(pglite_shmem_ensure_capacity_t ensure_capacity)
@@ -1328,22 +1271,25 @@ pgl_shm_compact_registry(void)
 		(PGL_SHM_SCOPED_POINTER_TAG | control->registry_offset);
 }
 
-PglSharedScopeKind
-pgl_shm_scope_push(PglSharedScopeKind scope)
+PglSharedMemoryDomain EMSCRIPTEN_KEEPALIVE
+pgl_shm_domain_current(void)
 {
-	PglSharedScopeKind previous = pglite_shmem_scope;
+	return pglite_shmem_domain;
+}
 
-	if (scope < PGL_SHARED_SCOPE_GLOBAL ||
-		scope > PGL_SHARED_SCOPE_PARALLEL_CONTEXT)
-		scope = PGL_SHARED_SCOPE_GLOBAL;
-	pglite_shmem_scope = scope;
+PglSharedMemoryDomain EMSCRIPTEN_KEEPALIVE
+pgl_shm_domain_push(PglSharedMemoryDomain domain)
+{
+	PglSharedMemoryDomain previous = pglite_shmem_domain;
+
+	pglite_shmem_domain = domain;
 	return previous;
 }
 
-void
-pgl_shm_scope_pop(PglSharedScopeKind previous_scope)
+void EMSCRIPTEN_KEEPALIVE
+pgl_shm_domain_pop(PglSharedMemoryDomain previous_domain)
 {
-	pglite_shmem_scope = previous_scope;
+	pglite_shmem_domain = previous_domain;
 }
 
 static PglSharedRegistry *
@@ -1387,18 +1333,6 @@ pgl_shm_registry(bool scoped)
 		registry->pointer_tag = pointer_tag;
 		registry->shmid_base = shmid_base;
 		memset(registry->segments, 0, sizeof(registry->segments));
-		memset(registry->scopes, 0, sizeof(registry->scopes));
-		if (scoped)
-		{
-			PglSharedScopeControl *root = &registry->scopes[0];
-
-			root->state = PGL_SHARED_SCOPE_ACTIVE;
-			root->kind = PGL_SHARED_SCOPE_ROOT;
-			root->scope_id = 1;
-			root->generation = 1;
-			root->parent = PGL_SHARED_SCOPE_INVALID;
-			root->created_at = time(NULL);
-		}
 		__atomic_store_n(&registry->magic, PGL_SHM_MAGIC_READY,
 						 __ATOMIC_RELEASE);
 		return registry;
@@ -1479,476 +1413,14 @@ pgl_shm_pointer(PglSharedRegistry * registry, uint32_t offset)
 static void pgl_shm_release_slot(PglSharedRegistry * registry,
 								 PglSharedSegment * segment);
 
-static PglSharedScopeControl *
-pgl_shm_scope_find_locked(PglSharedRegistry * registry,
-						  PglSharedScopeHandle handle)
-{
-	uint32_t	scope_id = pgl_shm_scope_handle_id(handle);
-	PglSharedScopeControl *scope;
-
-	if (registry->pointer_tag != PGL_SHM_SCOPED_POINTER_TAG ||
-		scope_id == 0 || scope_id > PGL_SHM_MAX_SCOPES)
-		return NULL;
-	scope = &registry->scopes[scope_id - 1];
-	if (scope->state == PGL_SHARED_SCOPE_UNUSED ||
-		scope->generation != pgl_shm_scope_handle_generation(handle))
-		return NULL;
-	return scope;
-}
-
-static bool
-pgl_shm_scope_has_children_locked(PglSharedRegistry * registry,
-								  PglSharedScopeHandle handle)
-{
-	unsigned int index;
-
-	for (index = 0; index < PGL_SHM_MAX_SCOPES; index++)
-	{
-		PglSharedScopeControl *child = &registry->scopes[index];
-
-		if ((child->state == PGL_SHARED_SCOPE_ACTIVE ||
-			 child->state == PGL_SHARED_SCOPE_CLOSING) &&
-			child->parent == handle)
-			return true;
-	}
-	return false;
-}
-
-static bool
-pgl_shm_scope_is_descendant_locked(PglSharedRegistry * registry,
-								   PglSharedScopeHandle candidate,
-								   PglSharedScopeHandle ancestor)
-{
-	unsigned int depth;
-
-	for (depth = 0;
-		 candidate != PGL_SHARED_SCOPE_INVALID && depth < PGL_SHM_MAX_SCOPES;
-		 depth++)
-	{
-		PglSharedScopeControl *scope;
-
-		if (candidate == ancestor)
-			return true;
-		scope = pgl_shm_scope_find_locked(registry, candidate);
-		if (scope == NULL)
-			return false;
-		candidate = scope->parent;
-	}
-	return false;
-}
-
-static void
-pgl_shm_scope_finalize_locked(PglSharedRegistry * registry)
-{
-	bool		changed;
-
-	do
-	{
-		unsigned int index;
-
-		changed = false;
-		for (index = 1; index < PGL_SHM_MAX_SCOPES; index++)
-		{
-			PglSharedScopeControl *scope = &registry->scopes[index];
-			PglSharedScopeHandle handle;
-
-			if (scope->state != PGL_SHARED_SCOPE_CLOSING ||
-				scope->attachments != 0 || scope->active_workers != 0 ||
-				scope->segment_count != 0)
-				continue;
-			handle = pgl_shm_scope_control_handle(scope);
-			if (pgl_shm_scope_has_children_locked(registry, handle))
-				continue;
-			scope->state = PGL_SHARED_SCOPE_DEAD;
-			scope->closed_at = time(NULL);
-			changed = true;
-		}
-	} while (changed);
-}
-
-PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_root(void)
-{
-	PglSharedRegistry *registry = pgl_shm_registry(true);
-	PglSharedScopeHandle result = PGL_SHARED_SCOPE_INVALID;
-
-	if (registry == NULL)
-		return result;
-	pgl_shm_lock(registry);
-	if (registry->scopes[0].state == PGL_SHARED_SCOPE_ACTIVE)
-		result = pgl_shm_scope_control_handle(&registry->scopes[0]);
-	pgl_shm_unlock(registry);
-	return result;
-}
-
-PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_create(PglSharedScopeKind kind, PglSharedScopeHandle parent)
-{
-	PglSharedRegistry *registry = pgl_shm_registry(true);
-	PglSharedScopeControl *parent_scope;
-	PglSharedScopeControl *slot = NULL;
-	PglSharedScopeHandle result = PGL_SHARED_SCOPE_INVALID;
-	unsigned int index;
-
-	if (registry == NULL)
-		return result;
-	if (kind == PGL_SHARED_SCOPE_ROOT)
-		return pgl_shm_scope_root();
-	if (kind <= PGL_SHARED_SCOPE_GLOBAL ||
-		kind > PGL_SHARED_SCOPE_PARALLEL_CONTEXT)
-	{
-		errno = EINVAL;
-		return result;
-	}
-
-	pgl_shm_lock(registry);
-	if (parent == PGL_SHARED_SCOPE_INVALID)
-	{
-		parent_scope = pgl_shm_scope_find_locked(registry,
-												pglite_shmem_scope_handle);
-		if (parent_scope == NULL ||
-			parent_scope->state != PGL_SHARED_SCOPE_ACTIVE)
-			parent = pgl_shm_scope_control_handle(&registry->scopes[0]);
-	}
-	parent_scope = pgl_shm_scope_find_locked(registry, parent);
-	if (parent_scope == NULL || parent_scope->state != PGL_SHARED_SCOPE_ACTIVE)
-	{
-		pgl_shm_unlock(registry);
-		errno = ESTALE;
-		return result;
-	}
-
-	for (index = 1; index < PGL_SHM_MAX_SCOPES; index++)
-	{
-		PglSharedScopeControl *candidate = &registry->scopes[index];
-
-		if (candidate->state == PGL_SHARED_SCOPE_UNUSED ||
-			candidate->state == PGL_SHARED_SCOPE_DEAD)
-		{
-			slot = candidate;
-			break;
-		}
-	}
-	if (slot == NULL)
-	{
-		pgl_shm_unlock(registry);
-		errno = ENOSPC;
-		return result;
-	}
-	{
-		uint32_t generation = slot->generation + 1;
-
-		if (generation == 0)
-			generation = 1;
-		memset(slot, 0, sizeof(*slot));
-		slot->state = PGL_SHARED_SCOPE_ACTIVE;
-		slot->kind = kind;
-		slot->scope_id = index + 1;
-		slot->generation = generation;
-		slot->parent = parent;
-		slot->created_at = time(NULL);
-		result = pgl_shm_scope_control_handle(slot);
-	}
-	pgl_shm_unlock(registry);
-	return result;
-}
-
-PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_enter(PglSharedScopeHandle scope)
-{
-	PglSharedScopeHandle previous = pglite_shmem_scope_handle;
-	PglSharedRegistry *registry = pgl_shm_registry(true);
-	PglSharedScopeControl *control;
-
-	if (registry == NULL)
-		return previous;
-	pgl_shm_lock(registry);
-	control = pgl_shm_scope_find_locked(registry, scope);
-	if (control == NULL || control->state != PGL_SHARED_SCOPE_ACTIVE)
-	{
-		pgl_shm_unlock(registry);
-		errno = ESTALE;
-		return previous;
-	}
-	pglite_shmem_scope_handle = scope;
-	pglite_shmem_scope = (PglSharedScopeKind) control->kind;
-	pgl_shm_unlock(registry);
-	return previous;
-}
-
-void EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_leave(PglSharedScopeHandle previous_scope)
-{
-	PglSharedRegistry *registry;
-	PglSharedScopeControl *control;
-
-	if (previous_scope == PGL_SHARED_SCOPE_INVALID)
-	{
-		pglite_shmem_scope_handle = PGL_SHARED_SCOPE_INVALID;
-		pglite_shmem_scope = PGL_SHARED_SCOPE_GLOBAL;
-		return;
-	}
-	registry = pgl_shm_registry(true);
-	if (registry == NULL)
-		return;
-	pgl_shm_lock(registry);
-	control = pgl_shm_scope_find_locked(registry, previous_scope);
-	if (control != NULL && control->state == PGL_SHARED_SCOPE_ACTIVE)
-	{
-		pglite_shmem_scope_handle = previous_scope;
-		pglite_shmem_scope = (PglSharedScopeKind) control->kind;
-	}
-	else
-	{
-		pglite_shmem_scope_handle =
-			pgl_shm_scope_control_handle(&registry->scopes[0]);
-		pglite_shmem_scope = PGL_SHARED_SCOPE_ROOT;
-	}
-	pgl_shm_unlock(registry);
-}
-
-int EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_close(PglSharedScopeHandle handle)
-{
-	PglSharedRegistry *registry = pgl_shm_registry(true);
-	PglSharedScopeControl *scope;
-	PglSharedScopeHandle parent;
-	unsigned int index;
-
-	if (registry == NULL)
-		return -1;
-	pgl_shm_lock(registry);
-	scope = pgl_shm_scope_find_locked(registry, handle);
-	if (scope == NULL || scope->kind == PGL_SHARED_SCOPE_ROOT)
-	{
-		pgl_shm_unlock(registry);
-		errno = scope == NULL ? ESTALE : EINVAL;
-		return -1;
-	}
-	if (scope->state == PGL_SHARED_SCOPE_DEAD)
-	{
-		pgl_shm_unlock(registry);
-		return 0;
-	}
-	parent = scope->parent;
-	for (index = 1; index < PGL_SHM_MAX_SCOPES; index++)
-	{
-		PglSharedScopeControl *candidate = &registry->scopes[index];
-		PglSharedScopeHandle candidate_handle;
-
-		if (candidate->state != PGL_SHARED_SCOPE_ACTIVE &&
-			candidate->state != PGL_SHARED_SCOPE_CLOSING)
-			continue;
-		candidate_handle = pgl_shm_scope_control_handle(candidate);
-		if (pgl_shm_scope_is_descendant_locked(registry, candidate_handle,
-											 handle))
-			candidate->state = PGL_SHARED_SCOPE_CLOSING;
-	}
-	/*
-	 * Leave segment destruction to DSM/ResourceOwner cleanup.  CLOSING makes
-	 * pgl_shmat() reject new attachments, while the existing owners retain a
-	 * valid SysV identity long enough to run detach callbacks and IPC_RMID in
-	 * PostgreSQL's required order.  A forgotten owner deliberately leaves the
-	 * scope visible as CLOSING instead of hiding a DSM-control inconsistency.
-	 */
-	if (pgl_shm_scope_is_descendant_locked(registry,
-										pglite_shmem_scope_handle, handle))
-	{
-		PglSharedScopeControl *parent_scope =
-			pgl_shm_scope_find_locked(registry, parent);
-
-		pglite_shmem_scope_handle = parent;
-		pglite_shmem_scope = parent_scope == NULL ? PGL_SHARED_SCOPE_ROOT :
-			(PglSharedScopeKind) parent_scope->kind;
-	}
-	pgl_shm_scope_finalize_locked(registry);
-	pgl_shm_unlock(registry);
-	return 0;
-}
-
-int EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_promote(PglSharedScopeHandle handle)
-{
-	PglSharedRegistry *registry = pgl_shm_registry(true);
-	PglSharedScopeControl *scope;
-	PglSharedScopeControl *parent;
-	PglSharedScopeHandle parent_handle;
-	unsigned int index;
-
-	if (registry == NULL)
-		return -1;
-	pgl_shm_lock(registry);
-	scope = pgl_shm_scope_find_locked(registry, handle);
-	if (scope == NULL || scope->state != PGL_SHARED_SCOPE_ACTIVE ||
-		scope->kind == PGL_SHARED_SCOPE_ROOT)
-	{
-		pgl_shm_unlock(registry);
-		errno = scope == NULL ? ESTALE : EINVAL;
-		return -1;
-	}
-	parent_handle = scope->parent;
-	parent = pgl_shm_scope_find_locked(registry, parent_handle);
-	if (parent == NULL || parent->state != PGL_SHARED_SCOPE_ACTIVE)
-	{
-		pgl_shm_unlock(registry);
-		errno = ESTALE;
-		return -1;
-	}
-	for (index = 1; index < PGL_SHM_MAX_SCOPES; index++)
-	{
-		PglSharedScopeControl *child = &registry->scopes[index];
-
-		if ((child->state == PGL_SHARED_SCOPE_ACTIVE ||
-			 child->state == PGL_SHARED_SCOPE_CLOSING) &&
-			child->parent == handle)
-			child->parent = parent_handle;
-	}
-	for (index = 0; index < PGL_SHM_MAX_SEGMENTS; index++)
-	{
-		PglSharedSegment *segment = &registry->segments[index];
-
-		if ((segment->state == PGL_SHM_SLOT_LIVE ||
-			 segment->state == PGL_SHM_SLOT_REMOVED) &&
-			segment->scope_handle == handle)
-		{
-			segment->scope_handle = parent_handle;
-			segment->scope_kind = parent->kind;
-		}
-	}
-	parent->attachments += scope->attachments;
-	parent->active_workers += scope->active_workers;
-	parent->segment_count += scope->segment_count;
-	parent->live_bytes += scope->live_bytes;
-	scope->attachments = 0;
-	scope->active_workers = 0;
-	scope->segment_count = 0;
-	scope->live_bytes = 0;
-	scope->state = PGL_SHARED_SCOPE_CLOSING;
-	if (pglite_shmem_scope_handle == handle)
-	{
-		pglite_shmem_scope_handle = parent_handle;
-		pglite_shmem_scope = (PglSharedScopeKind) parent->kind;
-	}
-	pgl_shm_scope_finalize_locked(registry);
-	pgl_shm_unlock(registry);
-	return 0;
-}
-
-int EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_worker_attach(PglSharedScopeHandle handle)
-{
-	PglSharedRegistry *registry = pgl_shm_registry(true);
-	PglSharedScopeControl *scope;
-
-	if (registry == NULL)
-		return -1;
-	pgl_shm_lock(registry);
-	scope = pgl_shm_scope_find_locked(registry, handle);
-	if (scope == NULL || scope->state != PGL_SHARED_SCOPE_ACTIVE)
-	{
-		pgl_shm_unlock(registry);
-		errno = ESTALE;
-		return -1;
-	}
-	scope->active_workers++;
-	pgl_shm_unlock(registry);
-	return 0;
-}
-
-int EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_worker_detach(PglSharedScopeHandle handle)
-{
-	PglSharedRegistry *registry = pgl_shm_registry(true);
-	PglSharedScopeControl *scope;
-
-	if (registry == NULL)
-		return -1;
-	pgl_shm_lock(registry);
-	scope = pgl_shm_scope_find_locked(registry, handle);
-	if (scope == NULL || scope->active_workers == 0)
-	{
-		pgl_shm_unlock(registry);
-		errno = scope == NULL ? ESTALE : EINVAL;
-		return -1;
-	}
-	scope->active_workers--;
-	pgl_shm_scope_finalize_locked(registry);
-	pgl_shm_unlock(registry);
-	return 0;
-}
-
-PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_current(void)
-{
-	return pglite_shmem_scope_handle;
-}
-
-uint32_t EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_count(PglSharedScopeKind kind, PglSharedScopeState state)
-{
-	PglSharedRegistry *registry = pgl_shm_registry(true);
-	uint32_t	count = 0;
-	unsigned int index;
-
-	if (registry == NULL)
-		return 0;
-	pgl_shm_lock(registry);
-	for (index = 0; index < PGL_SHM_MAX_SCOPES; index++)
-	{
-		PglSharedScopeControl *scope = &registry->scopes[index];
-
-		if (scope->kind == (uint32_t) kind && scope->state == (uint32_t) state)
-			count++;
-	}
-	pgl_shm_unlock(registry);
-	return count;
-}
-
-uint64_t EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_bytes(PglSharedScopeKind kind)
-{
-	PglSharedRegistry *registry = pgl_shm_registry(true);
-	uint64_t	bytes = 0;
-	unsigned int index;
-
-	if (registry == NULL)
-		return 0;
-	pgl_shm_lock(registry);
-	for (index = 0; index < PGL_SHM_MAX_SCOPES; index++)
-	{
-		PglSharedScopeControl *scope = &registry->scopes[index];
-
-		if (scope->kind == (uint32_t) kind &&
-			(scope->state == PGL_SHARED_SCOPE_ACTIVE ||
-			 scope->state == PGL_SHARED_SCOPE_CLOSING))
-			bytes += scope->live_bytes;
-	}
-	pgl_shm_unlock(registry);
-	return bytes;
-}
-
 static void
 pgl_shm_release_slot(PglSharedRegistry * registry, PglSharedSegment * segment)
 {
-	PglSharedScopeControl *scope =
-		pgl_shm_scope_find_locked(registry, segment->scope_handle);
-
-	if (scope != NULL)
-	{
-		if (scope->segment_count > 0)
-			scope->segment_count--;
-		if (scope->live_bytes >= segment->allocated_size)
-			scope->live_bytes -= segment->allocated_size;
-		else
-			scope->live_bytes = 0;
-	}
 	segment->state = PGL_SHM_SLOT_FREE_BLOCK;
 	segment->shmid = 0;
 	segment->key = 0;
 	segment->requested_size = 0;
 	segment->attach_count = 0;
-	segment->scope_kind = PGL_SHARED_SCOPE_GLOBAL;
-	segment->scope_handle = PGL_SHARED_SCOPE_INVALID;
 	segment->shmflg = 0;
 	segment->created_at = 0;
 	segment->attached_at = 0;
@@ -2104,7 +1576,7 @@ pgl_shmget(key_t key, size_t size, int shmflg)
 	}
 
 	/*
-	 * Creation follows the process-local placement selected by dsm.c.  Attach
+	 * Creation follows explicit process-local placement selected by dsm.c.  Attach
 	 * probes this root's scoped registry first and then the cluster-global
 	 * registry.  Another root has a different memory 2, so it cannot discover
 	 * or attach a scoped key even though the PostgreSQL DSM control table is
@@ -2112,7 +1584,7 @@ pgl_shmget(key_t key, size_t size, int shmflg)
 	 */
 	registry = pgl_shm_registry((!create &&
 								 pglite_scoped_shmem_mode != PGL_SCOPED_SHMEM_DISABLED) ||
-									 pglite_shmem_scope != PGL_SHARED_SCOPE_GLOBAL);
+									 pglite_shmem_domain != PGL_SHARED_MEMORY_GLOBAL);
 	if (registry == NULL)
 		return -1;
 	pgl_shm_lock(registry);
@@ -2169,20 +1641,6 @@ pgl_shmget(key_t key, size_t size, int shmflg)
 	segment->key = (int32_t) key;
 	segment->requested_size = (uint32_t) size;
 	segment->attach_count = 0;
-	segment->scope_kind = PGL_SHARED_SCOPE_GLOBAL;
-	segment->scope_handle = PGL_SHARED_SCOPE_INVALID;
-	if (registry->pointer_tag == PGL_SHM_SCOPED_POINTER_TAG)
-	{
-		PglSharedScopeControl *scope =
-			pgl_shm_scope_find_locked(registry, pglite_shmem_scope_handle);
-
-		if (scope == NULL || scope->state != PGL_SHARED_SCOPE_ACTIVE)
-			scope = &registry->scopes[0];
-		segment->scope_kind = scope->kind;
-		segment->scope_handle = pgl_shm_scope_control_handle(scope);
-		scope->segment_count++;
-		scope->live_bytes += segment->allocated_size;
-	}
 	segment->shmflg = shmflg;
 	segment->created_at = time(NULL);
 	segment->attached_at = 0;
@@ -2226,19 +1684,6 @@ pgl_shmat(int shmid, const void *shmaddr, int shmflg)
 		errno = EINVAL;
 		return (void *) -1;
 	}
-	if (registry->pointer_tag == PGL_SHM_SCOPED_POINTER_TAG)
-	{
-		PglSharedScopeControl *scope =
-			pgl_shm_scope_find_locked(registry, segment->scope_handle);
-
-		if (scope == NULL || scope->state != PGL_SHARED_SCOPE_ACTIVE)
-		{
-			pgl_shm_unlock(registry);
-			errno = ESTALE;
-			return (void *) -1;
-		}
-		scope->attachments++;
-	}
 	segment->attach_count++;
 	segment->attached_at = time(NULL);
 	pgl_shm_unlock(registry);
@@ -2269,20 +1714,10 @@ pgl_shmdt(const void *shmaddr)
 				return -1;
 			}
 			segment->attach_count--;
-			if (registry->pointer_tag == PGL_SHM_SCOPED_POINTER_TAG)
-			{
-				PglSharedScopeControl *scope =
-					pgl_shm_scope_find_locked(registry,
-											  segment->scope_handle);
-
-				if (scope != NULL && scope->attachments > 0)
-					scope->attachments--;
-			}
 			segment->detached_at = time(NULL);
 			if (segment->state == PGL_SHM_SLOT_REMOVED &&
 				segment->attach_count == 0)
 				pgl_shm_release_slot(registry, segment);
-			pgl_shm_scope_finalize_locked(registry);
 			pgl_shm_unlock(registry);
 			return 0;
 		}
@@ -2315,7 +1750,6 @@ pgl_shmctl(int shmid, int cmd, struct shmid_ds *buf)
 		segment->key = 0;
 		if (segment->attach_count == 0)
 			pgl_shm_release_slot(registry, segment);
-		pgl_shm_scope_finalize_locked(registry);
 		pgl_shm_unlock(registry);
 		return 0;
 	}
@@ -2342,59 +1776,12 @@ pgl_shmctl(int shmid, int cmd, struct shmid_ds *buf)
 	return -1;
 }
 
-PglSharedScopeKind
-pgl_shm_scope_for_pointer(const void *address)
+PglSharedMemoryDomain EMSCRIPTEN_KEEPALIVE
+pgl_shm_domain_for_pointer(const void *address)
 {
-	PglSharedRegistry *registry = pgl_shm_registry_for_pointer(address);
-	unsigned int index;
-
-	if (registry == NULL)
-		return PGL_SHARED_SCOPE_GLOBAL;
-	pgl_shm_lock(registry);
-	for (index = 0; index < PGL_SHM_MAX_SEGMENTS; index++)
-	{
-		PglSharedSegment *segment = &registry->segments[index];
-
-		if ((segment->state == PGL_SHM_SLOT_LIVE ||
-			 segment->state == PGL_SHM_SLOT_REMOVED) &&
-			pgl_shm_pointer(registry, segment->offset) == address)
-		{
-			PglSharedScopeKind scope =
-				(PglSharedScopeKind) segment->scope_kind;
-
-			pgl_shm_unlock(registry);
-			return scope;
-		}
-	}
-	pgl_shm_unlock(registry);
-	return PGL_SHARED_SCOPE_GLOBAL;
-}
-
-PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_handle_for_pointer(const void *address)
-{
-	PglSharedRegistry *registry = pgl_shm_registry_for_pointer(address);
-	unsigned int index;
-
-	if (registry == NULL)
-		return PGL_SHARED_SCOPE_INVALID;
-	pgl_shm_lock(registry);
-	for (index = 0; index < PGL_SHM_MAX_SEGMENTS; index++)
-	{
-		PglSharedSegment *segment = &registry->segments[index];
-
-		if ((segment->state == PGL_SHM_SLOT_LIVE ||
-			 segment->state == PGL_SHM_SLOT_REMOVED) &&
-			pgl_shm_pointer(registry, segment->offset) == address)
-		{
-			PglSharedScopeHandle result = segment->scope_handle;
-
-			pgl_shm_unlock(registry);
-			return result;
-		}
-	}
-	pgl_shm_unlock(registry);
-	return PGL_SHARED_SCOPE_INVALID;
+	return (((uint32_t) (uintptr_t) address) & PGL_SHM_SCOPED_POINTER_TAG) ==
+		PGL_SHM_SCOPED_POINTER_TAG ? PGL_SHARED_MEMORY_ROOT :
+		PGL_SHARED_MEMORY_GLOBAL;
 }
 
 #else
@@ -2584,107 +1971,30 @@ pgl_shm_compact_frontier(void)
 	return 0;
 }
 
-PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_root(void)
+PglSharedMemoryDomain EMSCRIPTEN_KEEPALIVE
+pgl_shm_domain_current(void)
 {
-	return PGL_SHARED_SCOPE_INVALID;
+	return PGL_SHARED_MEMORY_GLOBAL;
 }
 
-PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_create(PglSharedScopeKind kind, PglSharedScopeHandle parent)
+PglSharedMemoryDomain EMSCRIPTEN_KEEPALIVE
+pgl_shm_domain_push(PglSharedMemoryDomain domain)
 {
-	(void) kind;
-	(void) parent;
-	return PGL_SHARED_SCOPE_INVALID;
-}
-
-PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_enter(PglSharedScopeHandle scope)
-{
-	(void) scope;
-	return PGL_SHARED_SCOPE_INVALID;
+	(void) domain;
+	return PGL_SHARED_MEMORY_GLOBAL;
 }
 
 void EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_leave(PglSharedScopeHandle previous_scope)
+pgl_shm_domain_pop(PglSharedMemoryDomain previous_domain)
 {
-	(void) previous_scope;
+	(void) previous_domain;
 }
 
-int EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_close(PglSharedScopeHandle scope)
-{
-	(void) scope;
-	return 0;
-}
-
-int EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_promote(PglSharedScopeHandle scope)
-{
-	(void) scope;
-	return 0;
-}
-
-int EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_worker_attach(PglSharedScopeHandle scope)
-{
-	(void) scope;
-	return 0;
-}
-
-int EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_worker_detach(PglSharedScopeHandle scope)
-{
-	(void) scope;
-	return 0;
-}
-
-PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_current(void)
-{
-	return PGL_SHARED_SCOPE_INVALID;
-}
-
-PglSharedScopeHandle EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_handle_for_pointer(const void *address)
+PglSharedMemoryDomain EMSCRIPTEN_KEEPALIVE
+pgl_shm_domain_for_pointer(const void *address)
 {
 	(void) address;
-	return PGL_SHARED_SCOPE_INVALID;
-}
-
-uint32_t EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_count(PglSharedScopeKind kind, PglSharedScopeState state)
-{
-	(void) kind;
-	(void) state;
-	return 0;
-}
-
-uint64_t EMSCRIPTEN_KEEPALIVE
-pgl_shm_scope_bytes(PglSharedScopeKind kind)
-{
-	(void) kind;
-	return 0;
-}
-
-PglSharedScopeKind
-pgl_shm_scope_push(PglSharedScopeKind scope)
-{
-	(void) scope;
-	return PGL_SHARED_SCOPE_GLOBAL;
-}
-
-void
-pgl_shm_scope_pop(PglSharedScopeKind previous_scope)
-{
-	(void) previous_scope;
-}
-
-PglSharedScopeKind
-pgl_shm_scope_for_pointer(const void *address)
-{
-	(void) address;
-	return PGL_SHARED_SCOPE_GLOBAL;
+	return PGL_SHARED_MEMORY_GLOBAL;
 }
 
 #endif
