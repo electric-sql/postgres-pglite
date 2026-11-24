@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -166,6 +167,13 @@ int EMSCRIPTEN_KEEPALIVE pgl_accept(int socket, struct sockaddr *address, sockle
             memcpy(data, "accepted", strlen(data));
             node->data = data;
             node->accepted = true;
+        }
+        // the peer is a local (Unix-domain) client; Postgres matches it
+        // against the "local" entries of pg_hba.conf
+        if (address && address_len && *address_len >= sizeof(struct sockaddr_un)) {
+            memset(address, 0, sizeof(struct sockaddr_un));
+            address->sa_family = AF_UNIX;
+            *address_len = sizeof(struct sockaddr_un);
         }
         return p[0];
     }

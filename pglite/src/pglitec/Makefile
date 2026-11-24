@@ -1,4 +1,4 @@
-SRCS = pglitec.c pglitec_pipe.c
+SRCS = pglitec.c pglitec_pipe.c pglitec_launch.c pglitec_heap.c
 OBJS = $(SRCS:.c=.o)
 LIB  = libpglitec.a
 

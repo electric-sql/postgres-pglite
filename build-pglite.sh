@@ -30,8 +30,12 @@ fi
 emmake make CFLAGS="$PGLITE_CFLAGS" -C pglite/src/pglitec -j || { echo 'error: building libpglitec failed' ; exit 6; }
 
 # -Dread=pgl_read -Dwrite=pgl_write
+# EXEC_BACKEND: postmaster children are started as fresh processes
+# ("postgres --forkchild=<kind> <param file>", the model used on Windows)
+# instead of inheriting the postmaster's memory through fork().
 PGLITE_CFLAGS="$PGLITE_CFLAGS \
 -D__PGLITE__ \
+-DEXEC_BACKEND \
 -Dsystem=pgl_system -Dpopen=pgl_popen -Dpclose=pgl_pclose \
 -Dgeteuid=pgl_geteuid -Dgetuid=pgl_getuid -Dgetpwuid=pgl_getpwuid \
 -Dexit=pgl_exit \
@@ -178,6 +182,7 @@ POSTGRES_PGLITE_FLAGS="\
 -sEXPORTED_FUNCTIONS=@/install/pglite/exported_functions.txt \
 $PGPRELOAD \
 -lnodefs.js -lidbfs.js \
+-Wl,--wrap=postmaster_child_launch -Wl,--wrap=find_other_exec -Wl,--wrap=sbrk \
 --post-js $(pwd)/pglite/src/js/post-js-hacks.js"
 
 # Building pglite itself needs to be the last step because of the PRELOAD_FILES parameter (a list of files and folders) need to be available.

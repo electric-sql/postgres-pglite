@@ -670,8 +670,6 @@ WinGetPartitionRowCount
 wmemchr
 wmemcmp
 write
-after_fork_inchild
-after_fork_process_inchild
 BackendMain
 AutoVacLauncherMain
 AutoVacWorkerMain
@@ -687,3 +685,4 @@ WalWriterMain
 SysLoggerMain
 GetDatabaseTuple
 pq_endmsgread
+ShutdownXLOG

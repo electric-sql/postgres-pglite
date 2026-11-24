@@ -276,9 +276,82 @@ typedef struct ShmSegment {
 static ShmSegment *shm_list = NULL;
 static unsigned int next_shmid = 1;
 
+/*
+* System V segments are owned by the OS, not by a process: a segment created
+* by the postmaster must be found, by key, from every other process
+* (PGSharedMemoryReAttach in an EXEC_BACKEND child).
+* When the frontend installs the functions below, the segment table lives
+* there (see OS in processUtils.ts) and is common to all processes.
+* Without them we fall back to a table private to this process.
+*
+* The frontend functions return a negative PGL_SHM_E* code on failure.
+*/
+#define PGL_SHM_ENOENT (-1)
+#define PGL_SHM_EEXIST (-2)
+#define PGL_SHM_EINVAL (-3)
+#define PGL_SHM_ENOMEM (-4)
+
+/* what shmctl(IPC_STAT) needs to know about a segment */
+typedef struct {
+    unsigned int size;
+    int key;
+    unsigned int nattch;
+    int cpid;
+} PglShmStat;
+
+typedef int (*pglite_shmget_t)(key_t key, size_t size, int shmflg);
+typedef int (*pglite_shmat_t)(int shmid, const void *shmaddr, int shmflg);
+typedef int (*pglite_shmdt_t)(const void *shmaddr);
+typedef int (*pglite_shmctl_t)(int shmid, int cmd, PglShmStat *stat);
+
+pglite_shmget_t pglite_shmget = NULL;
+pglite_shmat_t pglite_shmat = NULL;
+pglite_shmdt_t pglite_shmdt = NULL;
+pglite_shmctl_t pglite_shmctl = NULL;
+
+pglite_shmget_t EMSCRIPTEN_KEEPALIVE pgl_set_shmget_fn(pglite_shmget_t shmget_fn) {
+    pglite_shmget_t prev = pglite_shmget;
+    pglite_shmget = shmget_fn;
+    return prev;
+}
+
+pglite_shmat_t EMSCRIPTEN_KEEPALIVE pgl_set_shmat_fn(pglite_shmat_t shmat_fn) {
+    pglite_shmat_t prev = pglite_shmat;
+    pglite_shmat = shmat_fn;
+    return prev;
+}
+
+pglite_shmdt_t EMSCRIPTEN_KEEPALIVE pgl_set_shmdt_fn(pglite_shmdt_t shmdt_fn) {
+    pglite_shmdt_t prev = pglite_shmdt;
+    pglite_shmdt = shmdt_fn;
+    return prev;
+}
+
+pglite_shmctl_t EMSCRIPTEN_KEEPALIVE pgl_set_shmctl_fn(pglite_shmctl_t shmctl_fn) {
+    pglite_shmctl_t prev = pglite_shmctl;
+    pglite_shmctl = shmctl_fn;
+    return prev;
+}
+
+/* translate a PGL_SHM_E* code into errno; always returns -1 */
+static int pgl_shm_error(int code) {
+    switch (code) {
+        case PGL_SHM_ENOENT: errno = ENOENT; break;
+        case PGL_SHM_EEXIST: errno = EEXIST; break;
+        case PGL_SHM_ENOMEM: errno = ENOMEM; break;
+        default: errno = EINVAL; break;
+    }
+    return -1;
+}
+
 // shmget replacement
 int EMSCRIPTEN_KEEPALIVE
 pgl_shmget(key_t key, size_t size, int shmflg) {
+    if (pglite_shmget) {
+        int shmid = pglite_shmget(key, size, shmflg);
+        return shmid < 0 ? pgl_shm_error(shmid) : shmid;
+    }
+
     ShmSegment *seg = shm_list;
 
     // Search for existing segment
@@ -332,6 +405,15 @@ pgl_shmget(key_t key, size_t size, int shmflg) {
 // shmat replacement
 void EMSCRIPTEN_KEEPALIVE
 *pgl_shmat(int shmid, const void *shmaddr, int shmflg) {
+    if (pglite_shmat) {
+        int addr = pglite_shmat(shmid, shmaddr, shmflg);
+        if (addr < 0) {
+            pgl_shm_error(addr);
+            return (void *)-1;
+        }
+        return (void *)addr;
+    }
+
     ShmSegment *seg = shm_list;
 
     while (seg) {
@@ -348,6 +430,11 @@ void EMSCRIPTEN_KEEPALIVE
 // shmdt replacement
 int EMSCRIPTEN_KEEPALIVE
 pgl_shmdt(const void *shmaddr) {
+    if (pglite_shmdt) {
+        int ret = pglite_shmdt(shmaddr);
+        return ret < 0 ? pgl_shm_error(ret) : 0;
+    }
+
     ShmSegment *seg = shm_list;
 
     while (seg) {
@@ -364,6 +451,22 @@ pgl_shmdt(const void *shmaddr) {
 // shmctl replacement
 int EMSCRIPTEN_KEEPALIVE
 pgl_shmctl(int shmid, int cmd, struct shmid_ds *buf) {
+    if (pglite_shmctl) {
+        PglShmStat st = {0, 0, 0, 0};
+        int ret = pglite_shmctl(shmid, cmd, &st);
+        if (ret < 0)
+            return pgl_shm_error(ret);
+        if (cmd == IPC_STAT && buf != NULL) {
+            memset(buf, 0, sizeof(struct shmid_ds));
+            buf->shm_segsz = st.size;
+            buf->shm_perm.__key = st.key;
+            buf->shm_nattch = st.nattch;
+            buf->shm_cpid = st.cpid;
+            buf->shm_atime = buf->shm_dtime = buf->shm_ctime = time(NULL);
+        }
+        return 0;
+    }
+
     ShmSegment *seg = shm_list;
     ShmSegment *prev = NULL;
 
@@ -435,9 +538,48 @@ hlp_shmem_t EMSCRIPTEN_KEEPALIVE set_hlp_shmem(hlp_shmem_t new) {
     return prev;
 }
 
+/*
+* A MAP_SHARED mapping of a file must show the same memory to every process
+* mapping that file (this is how Postgres' dynamic shared memory segments
+* work). The frontend keeps the table of such mappings, see OS in
+* processUtils.ts.
+*
+* pglite_mmap returns the address, 0 when it does not handle the request
+* (we then fall back to a private copy), or a negative PGL_SHM_E* code.
+* pglite_munmap returns 0 when it released a mapping, non-zero when the
+* address is not one of its mappings.
+*/
+typedef int (*pglite_mmap_t)(size_t length, int fd, int offset);
+typedef int (*pglite_munmap_t)(void *addr, size_t length);
+
+pglite_mmap_t pglite_mmap = NULL;
+pglite_munmap_t pglite_munmap = NULL;
+
+pglite_mmap_t EMSCRIPTEN_KEEPALIVE pgl_set_mmap_fn(pglite_mmap_t mmap_fn) {
+    pglite_mmap_t prev = pglite_mmap;
+    pglite_mmap = mmap_fn;
+    return prev;
+}
+
+pglite_munmap_t EMSCRIPTEN_KEEPALIVE pgl_set_munmap_fn(pglite_munmap_t munmap_fn) {
+    pglite_munmap_t prev = pglite_munmap;
+    pglite_munmap = munmap_fn;
+    return prev;
+}
+
 void * EMSCRIPTEN_KEEPALIVE
 pgl_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-    (void)addr; (void)prot; (void)flags;
+    (void)addr; (void)prot;
+
+    if (pglite_mmap && fd >= 0 && (flags & MAP_SHARED)) {
+        int shared = pglite_mmap(length, fd, (int) offset);
+        if (shared < 0) {
+            pgl_shm_error(shared);
+            return MAP_FAILED;
+        }
+        if (shared > 0)
+            return (void *) shared;
+    }
 
     void *mem = malloc(length);
     if (!mem) {
@@ -486,7 +628,8 @@ pgl_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
 
 int EMSCRIPTEN_KEEPALIVE
 pgl_munmap(void *addr, size_t length) {
-    (void)length;
+    if (pglite_munmap && pglite_munmap(addr, length) == 0)
+        return 0;
     MmapRegion *r = mmap_list, *prev = NULL;
     while (r) {
         if (r->addr == addr) {
@@ -764,15 +907,72 @@ int EMSCRIPTEN_KEEPALIVE pgl_poll(struct pollfd fds[], ssize_t nfds, int timeout
 }
 
 /*
-* Emulate fork for multi-process
+* Emulate process creation for multi-process
+*
+* Postgres is built with EXEC_BACKEND, so the postmaster starts a child by
+* writing its parameters to a file and then doing fork() + execv() of
+* "postgres --forkchild=<kind> <param file>".
+*
+* Our fork() never returns 0: it asks the frontend to create a new Postgres
+* instance that will run main() with the arguments above, and returns the
+* new pid to the postmaster. execv() is therefore never reached.
+*
+* fork() has no arguments, so the launch parameters are recorded by
+* __wrap_postmaster_child_launch (see pglitec_launch.c) right before
+* Postgres calls fork().
 */
 
-int pglite_child_type = 0; // BACKEND_TYPE
-char* pglite_startup_data = NULL;
-size_t pglite_startup_data_len = 0;
-void *pglite_client_sock = NULL;
+int pglite_child_type = 0; // BackendType
+const char *pglite_child_kind = NULL; // name used in --forkchild=<kind>
+char pglite_child_param_file[1024] = ""; // file holding the BackendParameters
+size_t pglite_child_startup_data_len = 0; // length of the startup data at the end of that file
 
-typedef pid_t (*pglite_fork_t)(int child_type, char* startup_data, size_t startup_data_len, void *client_sock);
+/*
+* The parameter file is a BackendParameters struct followed by the startup
+* data. The postmaster writes offsetof(BackendParameters, startup_data) bytes
+* of the struct, but the child reads sizeof(BackendParameters). The two are
+* equal on 64-bit platforms. On wasm32 the struct is 8-byte aligned and ends
+* with a 4-byte size_t, so sizeof can be 4 bytes larger: the child then gets
+* a short read, or startup data shifted by the padding.
+* Make the file match what the child reads by inserting the padding between
+* the struct and the startup data.
+*/
+#define PGL_BACKEND_PARAMETERS_ALIGN 8
+
+static void pgl_pad_param_file(void) {
+    struct stat st;
+    if (stat(pglite_child_param_file, &st) != 0)
+        return;
+    if ((size_t) st.st_size < pglite_child_startup_data_len)
+        return;
+    size_t struct_len = (size_t) st.st_size - pglite_child_startup_data_len;
+    size_t pad = (PGL_BACKEND_PARAMETERS_ALIGN - struct_len % PGL_BACKEND_PARAMETERS_ALIGN) % PGL_BACKEND_PARAMETERS_ALIGN;
+    if (pad == 0)
+        return;
+
+    char *buf = malloc(st.st_size + pad);
+    if (!buf)
+        return;
+    FILE *fp = fopen(pglite_child_param_file, "rb");
+    if (!fp || fread(buf, 1, struct_len, fp) != struct_len) {
+        if (fp) fclose(fp);
+        free(buf);
+        return;
+    }
+    memset(buf + struct_len, 0, pad);
+    size_t got = fread(buf + struct_len + pad, 1, pglite_child_startup_data_len, fp);
+    fclose(fp);
+    if (got == pglite_child_startup_data_len) {
+        fp = fopen(pglite_child_param_file, "wb");
+        if (fp) {
+            fwrite(buf, 1, st.st_size + pad, fp);
+            fclose(fp);
+        }
+    }
+    free(buf);
+}
+
+typedef pid_t (*pglite_fork_t)(int child_type, const char *child_kind, const char *param_file);
 pglite_fork_t pglite_fork = NULL;
 
 pglite_fork_t EMSCRIPTEN_KEEPALIVE pgl_set_fork_fn(pglite_fork_t fork_fn) {
@@ -783,7 +983,14 @@ pglite_fork_t EMSCRIPTEN_KEEPALIVE pgl_set_fork_fn(pglite_fork_t fork_fn) {
 
 pid_t EMSCRIPTEN_KEEPALIVE pgl_fork() {
     if (pglite_fork) {
-        return pglite_fork(pglite_child_type, pglite_startup_data, pglite_startup_data_len, pglite_client_sock);
+        if (!pglite_child_kind) {
+            // fork() called outside of postmaster_child_launch: we would not
+            // know what to start
+            errno = ENOSYS;
+            return -1;
+        }
+        pgl_pad_param_file();
+        return pglite_fork(pglite_child_type, pglite_child_kind, pglite_child_param_file);
     }
     return fork();
 }
@@ -803,7 +1010,13 @@ pglite_kill_t EMSCRIPTEN_KEEPALIVE pgl_set_kill_fn(pglite_kill_t kill_fn) {
 
 pid_t EMSCRIPTEN_KEEPALIVE pgl_kill(pid_t pid, int signal) {
     if (pglite_kill) {
-        return pglite_kill(pid, signal);
+        int ret = pglite_kill(pid, signal);
+        if (ret < 0) {
+            // the only failure is an unknown pid; Postgres relies on errno
+            // to tell a dead process from one it may not signal
+            errno = ESRCH;
+        }
+        return ret;
     }
     return kill(pid, signal);
 }
