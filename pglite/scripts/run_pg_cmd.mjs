@@ -24,15 +24,12 @@ if (typeof Module.main === "function") {
 }
 
 function ensureExePath(FS, fullPath) {
-  const exeInfo = pathExists(FS, fullPath);
-  if (!exeInfo.exists) {
+  const exists = pathExists(FS, fullPath);
+  if (!exists) {
     const exePathArray = fullPath.split('/');
     const exeName = exePathArray.pop();
     const dirPath = exePathArray.join('/');
-    const pathInfo = FS.analyzePath(dirPath);
-    if (!pathInfo.exists) {
-      FS.mkdirTree(dirPath);
-    }
+    FS.mkdirTree(dirPath);
     const view = new Int32Array(new ArrayBuffer(0));
     FS.createDataFile(dirPath, exeName, view, true, false, true);
     FS.chmod(fullPath, 0o0755);
