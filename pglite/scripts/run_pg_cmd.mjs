@@ -24,7 +24,7 @@ if (typeof Module.main === "function") {
 }
 
 function ensureExePath(FS, fullPath) {
-  const exeInfo = FS.analyzePath(fullPath);
+  const exeInfo = pathExists(FS, fullPath);
   if (!exeInfo.exists) {
     const exePathArray = fullPath.split('/');
     const exeName = exePathArray.pop();
@@ -36,5 +36,15 @@ function ensureExePath(FS, fullPath) {
     const view = new Int32Array(new ArrayBuffer(0));
     FS.createDataFile(dirPath, exeName, view, true, false, true);
     FS.chmod(fullPath, 0o0755);
+  }
+}
+
+function pathExists(fs, path) {
+  try {
+    fs.stat(path);
+    return true;
+  } catch (err) {
+    if (err.name === 'ErrnoError' && err.code === 'ENOENT') return false;
+    throw err; // Don’t hide other filesystem errors
   }
 }
