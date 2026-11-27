@@ -35,6 +35,16 @@
 
 volatile int is_pglite_active = 0;
 
+#if defined(PGLITE_STANDALONE)
+/*
+* The standalone build has no JS runtime to catch exit() and keep the instance
+* alive (noExitRuntime): instead, exit() returns its status to the host entry
+* point that is running (see pglitec_standalone.c).
+*/
+extern void pgl_exit_to_host(int status) __attribute__((noreturn));
+#define exit(status) pgl_exit_to_host(status)
+#endif
+
 void EMSCRIPTEN_KEEPALIVE clear_setitimer(void) {
     struct itimerval zero = {{0, 0}, {0, 0}};
     setitimer(ITIMER_REAL, &zero, NULL);
