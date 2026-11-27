@@ -115,3 +115,15 @@ As seen in `pglite/src/pglitec/pglitec.c` we override other `libc` functions for
 Overriding these functions allows us to limit the intervention on the original code and restrict them to a single file.
 
 There are a few changes needed to make PostgreSQL "single-user mode" to behave as a normal backend (see `pgl_startPGlite` inside `postgres-pglite/src/backend/tcop/postgres.c`) or to allow us to handle the faked socket.
+
+## Standalone build
+
+`build-pglite-standalone.sh` builds PGlite as a WASI module without the emscripten JS glue, so that it can be embedded from other languages (e.g. via Wasmtime):
+
+```
+BUILD_SCRIPT=./build-pglite-standalone.sh ./build-with-docker.sh
+```
+
+It builds out of tree (in `build/standalone`), so it needs a source tree not configured by `build-pglite.sh`: use a separate checkout, e.g. `git worktree add`. Its output, in `dist/standalone/bin/`, is `pglite-standalone.wasm`, `initdb-standalone.wasm`, and the runtime filesystem `pglite-standalone-fs.tar.gz`.
+
+It uses native wasm exceptions (exnref), an in-memory WASMFS, and extensions linked into the module rather than loaded dynamically. In place of the JS frontend, the host provides a few imports (`pglite.read`, `pglite.write`, `pglite.exec`). It does not affect the regular build: its code is in `pglite/src/pglitec/pglitec_standalone.[ch]` or guarded by `PGLITE_STANDALONE`. The host interface is documented in `packages/pglite-standalone` in the parent repository.

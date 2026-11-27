@@ -53,3 +53,5 @@ lib*.pc
 dist
 *.defs.txt
 *.undef.txt
+# out-of-tree builds (build-pglite-standalone.sh)
+/build/
